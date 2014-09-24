@@ -118,19 +118,13 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
   }
 
   @Test
-  public void testInstanceType() throws Exception {
-    UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
-    assertTrue(ulog instanceof CdcrUpdateLog);
-  }
-
-  @Test
-  public void testLogReaderScan() throws Exception {
+  public void testLogReaderNext() throws Exception {
     this.clearCore();
 
     int start = 0;
 
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
-    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader();
+    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader(); // test reader on empty updates log
 
     LinkedList<Long> versions = new LinkedList<>();
     addDocs(10, start, versions); start+=10;
@@ -181,7 +175,7 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     int start = 0;
 
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
-    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader();
+    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader(); // test reader on empty updates log
 
     LinkedList<Long> versions = new LinkedList<>();
     addDocs(10, start, versions); start+=10;
@@ -203,6 +197,40 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertEquals(expectedVersion, version);
 
     assertNotNull(reader.next());
+  }
+
+  @Test
+  public void testLogReaderNextOnNewTLog() throws Exception {
+    this.clearCore();
+
+    int start = 0;
+
+    UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
+    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader();
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(11, start, versions);  start+=11;
+
+    for (int i = 0; i < 22; i++) { // 21 adds + 1 commit
+      assertNotNull(reader.next());
+    }
+
+    // we should have reach the end of the new tlog
+    assertNull(reader.next());
+
+    addDocs(5, start, versions);  start+=5;
+
+    // the reader should now pick up the new updates
+
+    for (int i = 0; i < 5; i++) { // 5 adds
+      assertNotNull(reader.next());
+    }
+
+    assertNull(reader.next());
+
   }
 
   @Test
@@ -236,11 +264,10 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertU(commit());
     assertJQ(req("qt","/get", "getVersions",""+maxReq), "/versions==" + versions.subList(0,Math.min(maxReq,start)));
 
-    // the previous two logs should not be removed
+    // the previous two tlogs should not be removed
     assertEquals(3, ulog.getLogList(logDir).length);
 
-    reader.close();
-    reader = ((CdcrUpdateLog) ulog).newLogReader();
+    // move the pointer past the first tlog
     for (int i = 0; i <= 11; i++) { // 10 adds + 1 commit
       assertNotNull(reader.next());
     }
@@ -250,7 +277,7 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertU(commit());
     assertJQ(req("qt","/get", "getVersions",""+maxReq), "/versions==" + versions.subList(0,Math.min(maxReq,start)));
 
-    // the first log should be removed
+    // the first tlog should be removed
     assertEquals(3, ulog.getLogList(logDir).length);
 
     h.close();
@@ -261,8 +288,55 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertU(commit());
     assertJQ(req("qt","/get", "getVersions",""+maxReq), "/versions==" + versions.subList(0,Math.min(maxReq,start)));
 
-    // previous logs should be gone now
+    // previous tlogs should be gone now
     assertEquals(1, ulog.getLogList(logDir).length);
+  }
+
+  @Test
+  public void testRemoveOldLogsMultiplePointers() throws Exception {
+    this.clearCore();
+
+    UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader1 = ((CdcrUpdateLog) ulog).newLogReader();
+    CdcrUpdateLog.CdcrLogReader reader2 = ((CdcrUpdateLog) ulog).newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    addDocs(105, start, versions);  start+=105;
+    assertU(commit());
+
+    // the previous two tlogs should not be removed
+    assertEquals(3, ulog.getLogList(logDir).length);
+
+    // move the first pointer past the first tlog
+    for (int i = 0; i <= 11; i++) { // 10 adds + 1 commit
+      assertNotNull(reader1.next());
+    }
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    // the first tlog should not be removed
+    assertEquals(4, ulog.getLogList(logDir).length);
+
+    // move the second pointer past the first tlog
+    for (int i = 0; i <= 11; i++) { // 10 adds + 1 commit
+      assertNotNull(reader2.next());
+    }
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    // the first tlog should be removed
+    assertEquals(4, ulog.getLogList(logDir).length);
   }
 
 }
