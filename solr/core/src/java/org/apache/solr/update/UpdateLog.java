@@ -17,9 +17,6 @@
 
 package org.apache.solr.update;
 
-import static org.apache.solr.update.processor.DistributedUpdateProcessor.DistribPhase.FROMLEADER;
-import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
@@ -65,6 +62,9 @@ import org.apache.solr.util.RefCounted;
 import org.apache.solr.util.plugin.PluginInfoInitialized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.solr.update.processor.DistributedUpdateProcessor.DistribPhase.FROMLEADER;
+import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
 
 
 /** @lucene.experimental */
@@ -138,7 +138,7 @@ public class UpdateLog implements PluginInfoInitialized {
   protected Map<BytesRef,LogPtr> prevMap;  // used while committing/reopening is happening
   protected Map<BytesRef,LogPtr> prevMap2;  // used while committing/reopening is happening
   protected TransactionLog prevMapLog;  // the transaction log used to look up entries found in prevMap
-  protected TransactionLog prevMapLog2;  // the transaction log used to look up entries found in prevMap
+  protected TransactionLog prevMapLog2;  // the transaction log used to look up entries found in prevMap2
 
   protected final int numDeletesToKeep = 1000;
   protected final int numDeletesByQueryToKeep = 100;
@@ -249,7 +249,7 @@ public class UpdateLog implements PluginInfoInitialized {
     if (debug) {
       log.debug("UpdateHandler init: tlogDir=" + tlogDir + ", existing tlogs=" + Arrays.asList(tlogFiles) + ", next id=" + id);
     }
-    
+
     TransactionLog oldLog = null;
     for (String oldLogName : tlogFiles) {
       File f = new File(tlogDir, oldLogName);
@@ -303,11 +303,11 @@ public class UpdateLog implements PluginInfoInitialized {
     }
 
   }
-  
+
   public String getLogDir() {
     return tlogDir.getAbsolutePath();
   }
-  
+
   public List<Long> getStartingVersions() {
     return startingVersions;
   }
@@ -589,7 +589,7 @@ public class UpdateLog implements PluginInfoInitialized {
   public boolean hasUncommittedChanges() {
     return tlog != null;
   }
-  
+
   public void preCommit(CommitUpdateCommand cmd) {
     synchronized (this) {
       if (debug) {
@@ -685,13 +685,13 @@ public class UpdateLog implements PluginInfoInitialized {
       // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in map",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       if (entry == null && prevMap != null) {
         entry = prevMap.get(indexedId);
-        // something found in prevMap will always be found in preMapLog (which could be tlog or prevTlog)
+        // something found in prevMap will always be found in prevMapLog (which could be tlog or prevTlog)
         lookupLog = prevMapLog;
         // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in prevMap",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
       if (entry == null && prevMap2 != null) {
         entry = prevMap2.get(indexedId);
-        // something found in prevMap2 will always be found in preMapLog2 (which could be tlog or prevTlog)
+        // something found in prevMap2 will always be found in prevMapLog2 (which could be tlog or prevTlog)
         lookupLog = prevMapLog2;
         // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in prevMap2",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
@@ -725,13 +725,13 @@ public class UpdateLog implements PluginInfoInitialized {
       // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in map",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       if (entry == null && prevMap != null) {
         entry = prevMap.get(indexedId);
-        // something found in prevMap will always be found in preMapLog (which could be tlog or prevTlog)
+        // something found in prevMap will always be found in prevMapLog (which could be tlog or prevTlog)
         lookupLog = prevMapLog;
         // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in prevMap",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
       if (entry == null && prevMap2 != null) {
         entry = prevMap2.get(indexedId);
-        // something found in prevMap2 will always be found in preMapLog2 (which could be tlog or prevTlog)
+        // something found in prevMap2 will always be found in prevMapLog2 (which could be tlog or prevTlog)
         lookupLog = prevMapLog2;
         // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in prevMap2",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
@@ -846,11 +846,11 @@ public class UpdateLog implements PluginInfoInitialized {
       theLog.forceClose();
     }
   }
-  
+
   public void close(boolean committed) {
     close(committed, false);
   }
-  
+
   public void close(boolean committed, boolean deleteOnClose) {
     synchronized (this) {
       try {
@@ -890,7 +890,7 @@ public class UpdateLog implements PluginInfoInitialized {
       this.id = id;
     }
   }
-  
+
   public class RecentUpdates {
     Deque<TransactionLog> logList;    // newest first
     List<List<Update>> updateList;
@@ -901,17 +901,17 @@ public class UpdateLog implements PluginInfoInitialized {
 
     public List<Long> getVersions(int n) {
       List<Long> ret = new ArrayList(n);
-      
+
       for (List<Update> singleList : updateList) {
         for (Update ptr : singleList) {
           ret.add(ptr.version);
           if (--n <= 0) return ret;
         }
       }
-      
+
       return ret;
     }
-    
+
     public Object lookup(long version) {
       Update update = updates.get(version);
       if (update == null) return null;
@@ -955,7 +955,7 @@ public class UpdateLog implements PluginInfoInitialized {
             try {
               o = reader.next();
               if (o==null) break;
-              
+
               // should currently be a List<Oper,Ver,Doc/Id>
               List entry = (List)o;
 
@@ -978,13 +978,13 @@ public class UpdateLog implements PluginInfoInitialized {
 
                   updatesForLog.add(update);
                   updates.put(version, update);
-                  
+
                   if (oper == UpdateLog.DELETE_BY_QUERY) {
                     deleteByQueryList.add(update);
                   } else if (oper == UpdateLog.DELETE) {
                     deleteList.add(new DeleteUpdate(version, (byte[])entry.get(2)));
                   }
-                  
+
                   break;
 
                 case UpdateLog.COMMIT:
@@ -1014,7 +1014,7 @@ public class UpdateLog implements PluginInfoInitialized {
       }
 
     }
-    
+
     public void close() {
       for (TransactionLog log : logList) {
         log.decref();
@@ -1275,10 +1275,10 @@ public class UpdateLog implements PluginInfoInitialized {
                         "log replay status {} active={} starting pos={} current pos={} current size={} % read={}",
                         translog, activeLog, recoveryInfo.positionOfStart, cpos, csize,
                         Math.round(cpos / (double) csize * 100.));
-                
+
               }
             }
-            
+
             o = null;
             o = tlogReader.next();
             if (o == null && activeLog) {
@@ -1461,25 +1461,25 @@ public class UpdateLog implements PluginInfoInitialized {
       }
     }
   }
-  
+
   protected String getTlogDir(SolrCore core, PluginInfo info) {
     String dataDir = (String) info.initArgs.get("dir");
-    
+
     String ulogDir = core.getCoreDescriptor().getUlogDir();
     if (ulogDir != null) {
       dataDir = ulogDir;
     }
-    
+
     if (dataDir == null || dataDir.length() == 0) {
       dataDir = core.getDataDir();
     }
 
     return dataDir + "/" + TLOG_NAME;
   }
-  
+
   /**
    * Clears the logs on the file system. Only call before init.
-   * 
+   *
    * @param core the SolrCore
    * @param ulogPluginInfo the init info for the UpdateHandler
    */
@@ -1499,6 +1499,6 @@ public class UpdateLog implements PluginInfoInitialized {
       }
     }
   }
-  
+
 }
 
