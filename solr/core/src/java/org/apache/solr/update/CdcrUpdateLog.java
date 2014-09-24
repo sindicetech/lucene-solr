@@ -65,18 +65,13 @@ public class CdcrUpdateLog extends UpdateLog {
 
       // don't incref... we are taking ownership from the caller.
       logs.addFirst(oldLog);
-
-      // push the tlog to the opened reader
-      for (CdcrLogReader reader : logPointers.keySet()) {
-        reader.push(oldLog);
-      }
     }
   }
 
   private boolean hasLogPointer(TransactionLog tlog) {
     for (CdcrLogPointer pointer : logPointers.values()) {
-      // if we have a pointer not initialised, then do not remove old log as we have a log reader that has not yet
-      // picked it up.
+      // if we have a pointer not initialised, then do not remove old tlogs as we have a log reader that has not yet
+      // picked them up.
       if (!pointer.isInitialised()) {
         return true;
       }
@@ -93,8 +88,20 @@ public class CdcrUpdateLog extends UpdateLog {
   }
 
   @Override
+  protected void ensureLog() {
+    if (tlog == null) {
+      super.ensureLog();
+
+      // push the new tlog to the opened readers
+      for (CdcrLogReader reader : logPointers.keySet()) {
+        reader.push(tlog);
+      }
+    }
+  }
+
+  @Override
   public void close(boolean committed, boolean deleteOnClose) {
-    for (CdcrLogReader reader : logPointers.keySet()) {
+    for (CdcrLogReader reader : new ArrayList<>(logPointers.keySet())) {
       reader.close();
     }
     super.close(committed, deleteOnClose);
@@ -131,7 +138,7 @@ public class CdcrUpdateLog extends UpdateLog {
     private final Deque<TransactionLog> tlogs;
     private final CdcrLogPointer pointer;
 
-    public CdcrLogReader(List<TransactionLog> tlogs) {
+    private CdcrLogReader(List<TransactionLog> tlogs) {
       this.tlogs = new LinkedList<>();
       this.tlogs.addAll(tlogs);
 
@@ -173,10 +180,17 @@ public class CdcrUpdateLog extends UpdateLog {
           return o;
         }
 
-        tlogReader.close();
-        tlogs.removeLast();
-        if ((currentTlog = tlogs.peekLast()) != null) {
-          tlogReader = currentTlog.getReader(0);
+        if (tlogs.size() > 1) { // current tlog is not the newest one, we can advance to the next one
+          tlogReader.close();
+          tlogs.removeLast();
+          if ((currentTlog = tlogs.peekLast()) != null) {
+            tlogReader = currentTlog.getReader(0);
+          }
+        }
+        else {
+          // the only tlog left is the new tlog which is currently being written,
+          // we should try to read it again later.
+          return null;
         }
       }
 
