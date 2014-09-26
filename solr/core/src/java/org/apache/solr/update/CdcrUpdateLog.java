@@ -16,6 +16,7 @@
  */
 package org.apache.solr.update;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -24,28 +25,44 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
 
 public class CdcrUpdateLog extends UpdateLog {
 
   protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new HashMap<>();
 
+  private CdcrUpdateLogIndex index;
+
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
-    for (CdcrLogReader reader : logPointers.keySet()) { // remove dangling reader in case of a core change
+    // remove dangling reader in case of a core change
+    for (CdcrLogReader reader : logPointers.keySet()) {
       reader.close();
     }
+
+    // init
     super.init(uhandler, core);
+
+    // load index
+    index = new CdcrUpdateLogIndex(new File(this.getLogDir()));
+    try {
+      index.load();
+    }
+    catch (IOException e) {
+      // failure to load the index isn't fatal, it will be generated
+      log.error("Unable to load the updateLog index: " + e.getMessage(), e);
+    }
   }
 
   @Override
   protected void addOldLog(TransactionLog oldLog, boolean removeOld) {
+    if (oldLog == null) return;
+
     if (logPointers.isEmpty()) { // if no pointers defined, fallback to original behaviour
       super.addOldLog(oldLog, removeOld);
     }
     else {
-      if (oldLog == null) return;
-
       numOldRecords += oldLog.numRecords();
 
       while (removeOld && logs.size() > 0) {
@@ -65,6 +82,20 @@ public class CdcrUpdateLog extends UpdateLog {
 
       // don't incref... we are taking ownership from the caller.
       logs.addFirst(oldLog);
+    }
+
+    // add entry to the index
+    if (!index.has(oldLog.id)) {
+      try {
+        TransactionLog.LogReader reader = oldLog.getReader(0);
+        long version = (Long) ((List) reader.next()).get(1);
+        reader.close();
+        index.put(oldLog.id, version);
+      } catch (Exception e) {
+        log.error("Unable to update the updateLog index: " + e.getMessage(), e);
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+            "Unable to update the updateLog index: " + e.getMessage(), e);
+      }
     }
   }
 
@@ -180,16 +211,15 @@ public class CdcrUpdateLog extends UpdateLog {
           return o;
         }
 
-        if (tlogs.size() > 1) { // current tlog is not the newest one, we can advance to the next one
+        if (tlogs.size() > 1) { // the current tlog is not the newest one, we can advance to the next one
           tlogReader.close();
           tlogs.removeLast();
-          if ((currentTlog = tlogs.peekLast()) != null) {
-            tlogReader = currentTlog.getReader(0);
-          }
+          currentTlog = tlogs.peekLast();
+          tlogReader = currentTlog.getReader(0);
         }
         else {
           // the only tlog left is the new tlog which is currently being written,
-          // we should try to read it again later.
+          // we should not remove it as we have to try to read it again later.
           return null;
         }
       }
@@ -205,6 +235,21 @@ public class CdcrUpdateLog extends UpdateLog {
     public Object seek(long targetVersion) throws IOException, InterruptedException {
       Object o;
 
+      // Seek corresponding tlog based on index
+      // Iterates over the queue, and removes the last tlog if it does not match
+      // If the index returns an unknown logID (probably removed), we will end up with an empty list which is fine. We
+      // don't want to initialise a reader if there is a gap.
+      long logId = index.seek(targetVersion);
+      while (tlogs.size() > 1) { // do not remove the first entry (new tlog)
+        if (tlogs.peekLast().id != logId) {
+          tlogReader.close();
+          tlogs.removeLast();
+        }
+      }
+      currentTlog = tlogs.peekLast();
+      tlogReader = currentTlog.getReader(0);
+
+      // now that we might be on the right tlog, iterates over the entries to find the one we are looking for
       while ((o = this.next()) != null) {
         if (this.getVersion(o) >= targetVersion) {
           return o;

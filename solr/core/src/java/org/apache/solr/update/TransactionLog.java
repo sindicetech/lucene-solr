@@ -73,7 +73,7 @@ public class TransactionLog {
   OutputStream os;
   FastOutputStream fos;    // all accesses to this stream should be synchronized on "this" (The TransactionLog)
   int numRecords;
-  
+
   protected volatile boolean deleteOnClose = true;  // we can delete old tlogs since they are currently only used for real-time-get (and in the future, recovery)
 
   AtomicInteger refcount = new AtomicInteger(1);
@@ -82,7 +82,7 @@ public class TransactionLog {
 
   long snapshot_size;
   int snapshot_numRecords;
-  
+
   // write a BytesRef as a byte array
   JavaBinCodec.ObjectResolver resolver = new JavaBinCodec.ObjectResolver() {
     @Override
@@ -145,6 +145,8 @@ public class TransactionLog {
       if (debug) {
         log.debug("New TransactionLog file=" + tlogFile + ", exists=" + tlogFile.exists() + ", size=" + tlogFile.length() + ", openExisting=" + openExisting);
       }
+
+      id = Long.parseLong(tlogFile.getName().substring(UpdateLog.TLOG_NAME.length() + 1));
 
       this.tlogFile = tlogFile;
       raf = new RandomAccessFile(this.tlogFile, "rw");
@@ -209,7 +211,7 @@ public class TransactionLog {
       size = fos.size();
     }
 
-    
+
     // the end of the file should have the end message (added during a commit) plus a 4 byte size
     byte[] buf = new byte[ END_MESSAGE.length() ];
     long pos = size - END_MESSAGE.length() - 4;
@@ -229,9 +231,9 @@ public class TransactionLog {
       snapshot_size = fos.size();
       snapshot_numRecords = numRecords;
       return snapshot_size;
-    }    
+    }
   }
-  
+
   // This could mess with any readers or reverse readers that are open, or anything that might try to do a log lookup.
   // This should only be used to roll back buffered updates, not actually applied updates.
   public void rollback(long pos) throws IOException {
@@ -449,7 +451,7 @@ public class TransactionLog {
         codec.writeStr(END_MESSAGE);  // ensure these bytes are (almost) last in the file
 
         endRecord(pos);
-        
+
         fos.flush();  // flush since this will be the last record in a log fill
         assert fos.size() == channel.size();
 
@@ -549,7 +551,7 @@ public class TransactionLog {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
     }
   }
-  
+
   public void forceClose() {
     if (refcount.get() > 0) {
       log.error("Error: Forcing close of " + this);
@@ -652,7 +654,7 @@ public class TransactionLog {
     public long currentPos() {
       return fis.position();
     }
-    
+
     // returns best effort current size
     // for info purposes
     public long currentSize() throws IOException {
@@ -681,7 +683,7 @@ public class TransactionLog {
 
 
   }
-  
+
   public class FSReverseReader extends ReverseReader {
     ChannelFastInputStream fis;
     private LogCodec codec = new LogCodec(resolver) {
@@ -823,7 +825,7 @@ class ChannelFastInputStream extends FastInputStream {
   public void close() throws IOException {
     ch.close();
   }
-  
+
   @Override
   public String toString() {
     return "readFromStream="+readFromStream +" pos="+pos +" end="+end + " bufferPos="+getBufferPos() + " position="+position() ;
