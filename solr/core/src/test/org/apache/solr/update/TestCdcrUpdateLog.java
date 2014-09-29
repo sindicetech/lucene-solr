@@ -175,28 +175,50 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     int start = 0;
 
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
-    CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader(); // test reader on empty updates log
+    CdcrUpdateLog.CdcrLogReader reader1 = ((CdcrUpdateLog) ulog).newLogReader();
+    CdcrUpdateLog.CdcrLogReader reader2 = ((CdcrUpdateLog) ulog).newLogReader();
+    CdcrUpdateLog.CdcrLogReader reader3 = ((CdcrUpdateLog) ulog).newLogReader();
 
     LinkedList<Long> versions = new LinkedList<>();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
-    addDocs(11, start, versions);  start+=10;
+    addDocs(11, start, versions); start+=11;
     assertU(commit());
 
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
-    long expectedVersion = getVer(req("q","id:22"));
+    // Test case where target version is equal to startVersion of tlog file
+    long targetVersion = getVer(req("q","id:10"));
 
-    Object o = reader.seek(expectedVersion);
+    assertTrue(reader1.seek(targetVersion));
+    Object o = reader1.next();
     assertNotNull(o);
     List entry = (List) o;
     long version = (Long) entry.get(1);
 
-    assertEquals(expectedVersion, version);
+    assertEquals(targetVersion, version);
 
-    assertNotNull(reader.next());
+    assertNotNull(reader1.next());
+
+    // test case where target version is superior to startVersion of tlog file
+    targetVersion = getVer(req("q","id:26"));
+
+    assertTrue(reader2.seek(targetVersion));
+    o = reader2.next();
+    assertNotNull(o);
+    entry = (List) o;
+    version = (Long) entry.get(1);
+
+    assertEquals(targetVersion, version);
+
+    assertNotNull(reader2.next());
+
+    // test case where target version is inferior to startVersion of oldest tlog file
+    targetVersion = getVer(req("q","id:0")) - 1;
+
+    assertFalse(reader3.seek(targetVersion));
   }
 
   @Test

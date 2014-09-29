@@ -16,7 +16,6 @@
  */
 package org.apache.solr.update;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -25,14 +24,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
 
 public class CdcrUpdateLog extends UpdateLog {
 
   protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new HashMap<>();
-
-  private CdcrUpdateLogIndex index;
 
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
@@ -43,16 +39,6 @@ public class CdcrUpdateLog extends UpdateLog {
 
     // init
     super.init(uhandler, core);
-
-    // load index
-    index = new CdcrUpdateLogIndex(new File(this.getLogDir()));
-    try {
-      index.load();
-    }
-    catch (IOException e) {
-      // failure to load the index isn't fatal, it will be generated
-      log.error("Unable to load the updateLog index: " + e.getMessage(), e);
-    }
   }
 
   @Override
@@ -69,7 +55,7 @@ public class CdcrUpdateLog extends UpdateLog {
         TransactionLog log = logs.peekLast();
         int nrec = log.numRecords();
 
-        // remove oldest log if nobody points to it
+        // remove the oldest log if nobody points to it
         // TODO: linear search for each log - should we care ?
         if (!this.hasLogPointer(log)) {
           numOldRecords -= nrec;
@@ -83,26 +69,12 @@ public class CdcrUpdateLog extends UpdateLog {
       // don't incref... we are taking ownership from the caller.
       logs.addFirst(oldLog);
     }
-
-    // add entry to the index
-    if (!index.has(oldLog.id)) {
-      try {
-        TransactionLog.LogReader reader = oldLog.getReader(0);
-        long version = (Long) ((List) reader.next()).get(1);
-        reader.close();
-        index.put(oldLog.id, version);
-      } catch (Exception e) {
-        log.error("Unable to update the updateLog index: " + e.getMessage(), e);
-        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
-            "Unable to update the updateLog index: " + e.getMessage(), e);
-      }
-    }
   }
 
   private boolean hasLogPointer(TransactionLog tlog) {
     for (CdcrLogPointer pointer : logPointers.values()) {
-      // if we have a pointer not initialised, then do not remove old tlogs as we have a log reader that has not yet
-      // picked them up.
+      // if we have a pointer that is not initialised, then do not remove the old tlogs
+      // as we have a log reader that didn't pick them up yet.
       if (!pointer.isInitialised()) {
         return true;
       }
@@ -119,9 +91,9 @@ public class CdcrUpdateLog extends UpdateLog {
   }
 
   @Override
-  protected void ensureLog() {
+  protected void ensureLog(long startVersion) {
     if (tlog == null) {
-      super.ensureLog();
+      super.ensureLog(startVersion);
 
       // push the new tlog to the opened readers
       for (CdcrLogReader reader : logPointers.keySet()) {
@@ -141,13 +113,11 @@ public class CdcrUpdateLog extends UpdateLog {
   private static class CdcrLogPointer {
 
     TransactionLog tlog = null;
-    long pointer = 0;
 
     private CdcrLogPointer() {}
 
-    private void set(TransactionLog tlog, long pointer) {
+    private void set(TransactionLog tlog) {
       this.tlog = tlog;
-      this.pointer = pointer;
     }
 
     private boolean isInitialised() {
@@ -156,7 +126,7 @@ public class CdcrUpdateLog extends UpdateLog {
 
     @Override
     public String toString() {
-      return "CdcrLogPointer(" + tlog + ", " + pointer + ")";
+      return "CdcrLogPointer(" + tlog + ")";
     }
 
   }
@@ -169,6 +139,11 @@ public class CdcrUpdateLog extends UpdateLog {
     private final Deque<TransactionLog> tlogs;
     private final CdcrLogPointer pointer;
 
+    /**
+     * Used by {@link #seek(long)} to keep track of the latest log entry read.
+     */
+    private Object lookahead = null;
+
     private CdcrLogReader(List<TransactionLog> tlogs) {
       this.tlogs = new LinkedList<>();
       this.tlogs.addAll(tlogs);
@@ -177,21 +152,22 @@ public class CdcrUpdateLog extends UpdateLog {
       pointer = new CdcrLogPointer();
       logPointers.put(this, pointer);
 
-      // Reader is initialised while the updates log is empty
+      // If the reader is initialised while the updates log is empty, do nothing
       if ((currentTlog = this.tlogs.peekLast()) != null) {
         tlogReader = currentTlog.getReader(0);
-        pointer.set(currentTlog, tlogReader.currentPos());
+        pointer.set(currentTlog);
       }
     }
 
     private void push(TransactionLog tlog) {
       this.tlogs.push(tlog);
 
-      // Reader was initialised while the update logs was empty, or reader was exhausted previously
+      // The reader was initialised while the update logs was empty, or reader was exhausted previously,
+      // we have to update the current tlog and the associated tlog reader.
       if (currentTlog == null && !tlogs.isEmpty()) {
         currentTlog = tlogs.peekLast();
         tlogReader = currentTlog.getReader(0);
-        pointer.set(currentTlog, tlogReader.currentPos());
+        pointer.set(currentTlog);
       }
     }
 
@@ -199,19 +175,25 @@ public class CdcrUpdateLog extends UpdateLog {
      * Advances to the next log entry in the updates log and returns the log entry itself.
      * Returns null if there are no more log entries in the updates log.<br>
      *
-     * <b>NOTE:</b> after the reader has exhausted you can call again this method, as the updates
+     * <b>NOTE:</b> after the reader has exhausted, you can call again this method since the updates
      * log might have been updated with new entries.
      */
     public Object next() throws IOException, InterruptedException {
+      if (lookahead != null) {
+        Object o = lookahead;
+        lookahead = null;
+        return o;
+      }
+
       while (!tlogs.isEmpty()) {
         Object o = tlogReader.next();
 
         if (o != null) {
-          pointer.set(currentTlog, tlogReader.currentPos());
+          pointer.set(currentTlog);
           return o;
         }
 
-        if (tlogs.size() > 1) { // the current tlog is not the newest one, we can advance to the next one
+        if (tlogs.size() > 1) { // if the current tlog is not the newest one, we can advance to the next one
           tlogReader.close();
           tlogs.removeLast();
           currentTlog = tlogs.peekLast();
@@ -229,44 +211,78 @@ public class CdcrUpdateLog extends UpdateLog {
 
     /**
      * Advances to the first beyond the current whose version number is greater
-     * than or equal to <i>targetVersion</i>, and returns the log entry itself.
-     * Returns null if <i>targetVersion</i> is greater than the highest version number in the updates log.
+     * than or equal to <i>targetVersion</i>.<br>
+     * Returns true if the reader has been advanced. If <i>targetVersion</i> is
+     * greater than the highest version number in the updates log, the reader
+     * has been advanced to the end of the current tlog, and a call to
+     * {@link #next()} will probably return null.<br>
+     * Returns false if <i>targetVersion</i> is lower than the oldest known entry.
+     * In this scenario, it probably means that there is a gap in the updates log.<br>
+     *
+     * <b>NOTE:</b> This method must be called before the first call to {@link #next()}.
      */
-    public Object seek(long targetVersion) throws IOException, InterruptedException {
+    public boolean seek(long targetVersion) throws IOException, InterruptedException {
       Object o;
 
-      // Seek corresponding tlog based on index
-      // Iterates over the queue, and removes the last tlog if it does not match
-      // If the index returns an unknown logID (probably removed), we will end up with an empty list which is fine. We
-      // don't want to initialise a reader if there is a gap.
-      long logId = index.seek(targetVersion);
-      while (tlogs.size() > 1) { // do not remove the first entry (new tlog)
-        if (tlogs.peekLast().id != logId) {
-          tlogReader.close();
-          tlogs.removeLast();
-        }
+      if (!this.seekTLog(targetVersion)) {
+        return false;
       }
-      currentTlog = tlogs.peekLast();
-      tlogReader = currentTlog.getReader(0);
 
       // now that we might be on the right tlog, iterates over the entries to find the one we are looking for
       while ((o = this.next()) != null) {
         if (this.getVersion(o) >= targetVersion) {
-          return o;
+          lookahead = o;
+          return true;
         }
       }
 
-      return null;
+      lookahead = null;
+      return true;
+    }
+
+    /**
+     * Seeks the tlog associated to the target version by using the updates log index,
+     * and initialises the log reader to the start of the tlog. Returns true if it was able
+     * to seek the corresponding tlog, false if the <i>targetVersion</i> is lower than the
+     * oldest known entry (which probably indicates a gap).<br>
+     *
+     * <b>NOTE:</b> This method might modify the tlog queue by removing tlogs that are older
+     * than the target version.
+     */
+    private boolean seekTLog(long targetVersion) {
+      // if the target version is lower than the oldest known entry, we have probably a gap.
+      if (targetVersion < tlogs.peekLast().startVersion) {
+        return false;
+      }
+
+      // closes existing reader before performing seek and possibly modifying the queue;
+      tlogReader.close();
+
+      // iterates over the queue and removes old tlogs
+      TransactionLog last = null;
+      while (tlogs.size() > 1) {
+        if (tlogs.peekLast().startVersion >= targetVersion) {
+          break;
+        }
+        last = tlogs.pollLast();
+      }
+
+      // the last tlog removed is the one we look for, add it back to the queue
+      if (last != null) tlogs.addLast(last);
+
+      currentTlog = tlogs.peekLast();
+      tlogReader = currentTlog.getReader(0);
+
+      return true;
     }
 
     private long getVersion(Object o) {
-      // should currently be a List<Oper,Ver,Doc/Id>
       List entry = (List)o;
       return (Long) entry.get(1);
     }
 
     /**
-     * Close streams and remove the associated {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogPointer} from the
+     * Closes streams and remove the associated {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogPointer} from the
      * parent {@link org.apache.solr.update.CdcrUpdateLog}.
      */
     public void close() {

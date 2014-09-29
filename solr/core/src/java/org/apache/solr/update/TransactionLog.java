@@ -67,6 +67,7 @@ public class TransactionLog {
   public final static String END_MESSAGE="SOLR_TLOG_END";
 
   long id;
+  long startVersion; // version of the first element of this transaction log
   File tlogFile;
   RandomAccessFile raf;
   FileChannel channel;
@@ -146,7 +147,11 @@ public class TransactionLog {
         log.debug("New TransactionLog file=" + tlogFile + ", exists=" + tlogFile.exists() + ", size=" + tlogFile.length() + ", openExisting=" + openExisting);
       }
 
-      id = Long.parseLong(tlogFile.getName().substring(UpdateLog.TLOG_NAME.length() + 1));
+      // Parse tlog id and start version from the filename
+      String filename = tlogFile.getName();
+      id = Long.parseLong(filename.substring(filename.indexOf('.') + 1, filename.lastIndexOf('.')));
+      // This will be used to seek more efficiently tlogs
+      startVersion = Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1));
 
       this.tlogFile = tlogFile;
       raf = new RandomAccessFile(this.tlogFile, "rw");
