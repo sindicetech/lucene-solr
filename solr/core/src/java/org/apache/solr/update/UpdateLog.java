@@ -70,7 +70,7 @@ import static org.apache.solr.update.processor.DistributingUpdateProcessorFactor
 /** @lucene.experimental */
 public class UpdateLog implements PluginInfoInitialized {
   private static final long STATUS_TIME = TimeUnit.NANOSECONDS.convert(60, TimeUnit.SECONDS);
-  public static String LOG_FILENAME_PATTERN = "%s.%019d";
+  public static String LOG_FILENAME_PATTERN = "%s.%019d.%1d";
   public static String TLOG_NAME="tlog";
 
   public static Logger log = LoggerFactory.getLogger(UpdateLog.class);
@@ -350,7 +350,7 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  public String[] getLogList(File directory) {
+  public static String[] getLogList(File directory) {
     final String prefix = TLOG_NAME+'.';
     String[] names = directory.list(new FilenameFilter() {
       @Override
@@ -370,7 +370,7 @@ public class UpdateLog implements PluginInfoInitialized {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
     String last = tlogFiles[tlogFiles.length-1];
-    return Long.parseLong(last.substring(TLOG_NAME.length()+1));
+    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
   }
 
 
@@ -389,7 +389,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.write(cmd, operationFlags);
       }
 
@@ -440,7 +440,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.writeDelete(cmd, operationFlags);
       }
 
@@ -464,7 +464,7 @@ public class UpdateLog implements PluginInfoInitialized {
       long pos = -1;
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.writeDeleteByQuery(cmd, operationFlags);
       }
 
@@ -824,9 +824,9 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  protected void ensureLog() {
+  protected void ensureLog(long startVersion) {
     if (tlog == null) {
-      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id);
+      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, startVersion);
       tlog = new TransactionLog(new File(tlogDir, newLogName), globalStrings);
     }
   }
