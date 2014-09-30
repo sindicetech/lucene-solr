@@ -254,7 +254,7 @@ public class UpdateLog implements PluginInfoInitialized {
     for (String oldLogName : tlogFiles) {
       File f = new File(tlogDir, oldLogName);
       try {
-        oldLog = new TransactionLog( f, null, true );
+        oldLog = new CdcrTransactionLog( f, null, true );
         addOldLog(oldLog, false);  // don't remove old logs on startup since more than one may be uncapped.
       } catch (Exception e) {
         SolrException.log(log, "Failure to open existing log file (non fatal) " + f, e);
@@ -349,8 +349,7 @@ public class UpdateLog implements PluginInfoInitialized {
     logs.addFirst(oldLog);
   }
 
-
-  public static String[] getLogList(File directory) {
+  public String[] getLogList(File directory) {
     final String prefix = TLOG_NAME+'.';
     String[] names = directory.list(new FilenameFilter() {
       @Override
@@ -365,7 +364,6 @@ public class UpdateLog implements PluginInfoInitialized {
     return names;
   }
 
-
   public long getLastLogId() {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
@@ -373,11 +371,9 @@ public class UpdateLog implements PluginInfoInitialized {
     return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
   }
 
-
   public void add(AddUpdateCommand cmd) {
     add(cmd, false);
   }
-
 
   public void add(AddUpdateCommand cmd, boolean clearCaches) {
     // don't log if we are replaying from another log
@@ -790,7 +786,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
     List<TransactionLog> recoverLogs = new ArrayList<>(1);
     for (TransactionLog ll : newestLogsOnStartup) {
-      if (!ll.try_incref()) continue;
+      ll.incref();
 
       try {
         if (ll.endsWithCommit()) {
@@ -827,7 +823,7 @@ public class UpdateLog implements PluginInfoInitialized {
   protected void ensureLog(long startVersion) {
     if (tlog == null) {
       String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, startVersion);
-      tlog = new TransactionLog(new File(tlogDir, newLogName), globalStrings);
+      tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
     }
   }
 
