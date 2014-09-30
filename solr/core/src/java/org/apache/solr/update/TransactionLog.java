@@ -132,9 +132,7 @@ public class TransactionLog {
       }
     }
 
-
   }
-
 
   TransactionLog(File tlogFile, Collection<String> globalStrings) {
     this(tlogFile, globalStrings, false);
@@ -325,7 +323,7 @@ public class TransactionLog {
 
   private void checkWriteHeader(LogCodec codec, SolrInputDocument optional) throws IOException {
 
-    // Unsynchronized access.  We can get away with an unsynchronized access here
+    // Unsynchronized access. We can get away with an unsynchronized access here
     // since we will never get a false non-zero when the position is in fact 0.
     // rollback() is the only function that can reset to zero, and it blocks updates.
     if (fos.size() != 0) return;
@@ -581,20 +579,22 @@ public class TransactionLog {
    * Currently only *one* LogReader may be outstanding, and that log may only
    * be used from a single thread. */
   public LogReader getReader(long startingPos) {
-    return new LogReader(startingPos);
+    return new LogReader(true, startingPos);
   }
 
   /** Returns a single threaded reverse reader */
   public ReverseReader getReverseReader() throws IOException {
-    return new FSReverseReader();
+    return new FSReverseReader(true);
   }
 
   public class LogReader {
-    private ChannelFastInputStream fis;
-    private LogCodec codec = new LogCodec(resolver);
+    protected ChannelFastInputStream fis;
+    protected LogCodec codec = new LogCodec(resolver);
 
-    public LogReader(long startingPos) {
-      incref();
+    public LogReader(boolean incref, long startingPos) {
+      if (incref) {
+        incref();
+      }
       fis = new ChannelFastInputStream(channel, startingPos);
     }
 
@@ -608,7 +608,6 @@ public class TransactionLog {
      */
     public Object next() throws IOException, InterruptedException {
       long pos = fis.position();
-
 
       synchronized (TransactionLog.this) {
         if (trace) {
@@ -670,8 +669,6 @@ public class TransactionLog {
 
   public abstract class ReverseReader {
 
-
-
     /** Returns the next object from the log, or null if none available.
      *
      * @return The log record, or null if EOF
@@ -685,7 +682,6 @@ public class TransactionLog {
 
     @Override
     public abstract String toString() ;
-
 
   }
 
@@ -703,8 +699,10 @@ public class TransactionLog {
     int nextLength;  // length of the next record (the next one closer to the start of the log file)
     long prevPos;    // where we started reading from last time (so prevPos - nextLength == start of next record)
 
-    public FSReverseReader() throws IOException {
-      incref();
+    public FSReverseReader(boolean incref) throws IOException {
+      if (incref) {
+        incref();
+      }
 
       long sz;
       synchronized (TransactionLog.this) {
@@ -721,7 +719,6 @@ public class TransactionLog {
         nextLength = fis.readInt();
       }
     }
-
 
     /** Returns the next object from the log, or null if none available.
      *

@@ -16,6 +16,7 @@
  */
 package org.apache.solr.update;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -24,6 +25,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
 
 public class CdcrUpdateLog extends UpdateLog {
@@ -45,30 +47,62 @@ public class CdcrUpdateLog extends UpdateLog {
   protected void addOldLog(TransactionLog oldLog, boolean removeOld) {
     if (oldLog == null) return;
 
+    numOldRecords += oldLog.numRecords();
+
     if (logPointers.isEmpty()) { // if no pointers defined, fallback to original behaviour
-      super.addOldLog(oldLog, removeOld);
-    }
-    else {
-      numOldRecords += oldLog.numRecords();
+      int currRecords = numOldRecords;
+
+      if (oldLog != tlog &&  tlog != null) {
+        currRecords += tlog.numRecords();
+      }
 
       while (removeOld && logs.size() > 0) {
         TransactionLog log = logs.peekLast();
         int nrec = log.numRecords();
-
-        // remove the oldest log if nobody points to it
-        // TODO: linear search for each log - should we care ?
-        if (!this.hasLogPointer(log)) {
+        // remove oldest log if we don't need it to keep at least numRecordsToKeep, or if
+        // we already have the limit of 10 log files.
+        if (currRecords - nrec >= numRecordsToKeep || logs.size() >= 10) {
+          currRecords -= nrec;
           numOldRecords -= nrec;
-          logs.removeLast().decref();  // dereference so it will be deleted when no longer in use
+          TransactionLog last = logs.removeLast();
+          last.deleteOnClose = true;
+          last.close();  // it will be deleted if no longer in use
           continue;
         }
 
         break;
       }
-
-      // don't incref... we are taking ownership from the caller.
-      logs.addFirst(oldLog);
     }
+    else {
+      while (removeOld && logs.size() > 0) {
+        TransactionLog log = logs.peekLast();
+        int nrec = log.numRecords();
+
+        // remove the oldest log if nobody points to it
+        if (!this.hasLogPointer(log)) {
+          numOldRecords -= nrec;
+          TransactionLog last = logs.removeLast();
+          last.deleteOnClose = true;
+          last.close();  // it will be deleted if no longer in use
+          continue;
+        }
+
+        break;
+      }
+    }
+
+    // decref old log as we do not write to it anymore
+    try {
+      if (oldLog.endsWithCommit()) {
+        oldLog.deleteOnClose = false;
+        oldLog.decref();
+      }
+    } catch (IOException e) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    }
+
+    // don't incref... we are taking ownership from the caller.
+    logs.addFirst(oldLog);
   }
 
   private boolean hasLogPointer(TransactionLog tlog) {
@@ -79,7 +113,7 @@ public class CdcrUpdateLog extends UpdateLog {
         return true;
       }
 
-      if (pointer.tlog == tlog) {
+      if (pointer.tlogFile == tlog.tlogFile) {
         return true;
       }
     }
@@ -112,21 +146,21 @@ public class CdcrUpdateLog extends UpdateLog {
 
   private static class CdcrLogPointer {
 
-    TransactionLog tlog = null;
+    File tlogFile = null;
 
     private CdcrLogPointer() {}
 
-    private void set(TransactionLog tlog) {
-      this.tlog = tlog;
+    private void set(File tlogFile) {
+      this.tlogFile = tlogFile;
     }
 
     private boolean isInitialised() {
-      return tlog == null ? false : true;
+      return tlogFile == null ? false : true;
     }
 
     @Override
     public String toString() {
-      return "CdcrLogPointer(" + tlog + ")";
+      return "CdcrLogPointer(" + tlogFile + ")";
     }
 
   }
@@ -155,7 +189,7 @@ public class CdcrUpdateLog extends UpdateLog {
       // If the reader is initialised while the updates log is empty, do nothing
       if ((currentTlog = this.tlogs.peekLast()) != null) {
         tlogReader = currentTlog.getReader(0);
-        pointer.set(currentTlog);
+        pointer.set(currentTlog.tlogFile);
       }
     }
 
@@ -167,7 +201,7 @@ public class CdcrUpdateLog extends UpdateLog {
       if (currentTlog == null && !tlogs.isEmpty()) {
         currentTlog = tlogs.peekLast();
         tlogReader = currentTlog.getReader(0);
-        pointer.set(currentTlog);
+        pointer.set(currentTlog.tlogFile);
       }
     }
 
@@ -189,7 +223,7 @@ public class CdcrUpdateLog extends UpdateLog {
         Object o = tlogReader.next();
 
         if (o != null) {
-          pointer.set(currentTlog);
+          pointer.set(currentTlog.tlogFile);
           return o;
         }
 

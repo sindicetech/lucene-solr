@@ -305,6 +305,8 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     h.close();
     createCore();
 
+    ulog = h.getCore().getUpdateHandler().getUpdateLog();
+
     addDocs(105, start, versions);  start+=105;
     assertJQ(req("qt","/get", "getVersions",""+maxReq), "/versions==" + versions.subList(0,Math.min(maxReq,start)));
     assertU(commit());
