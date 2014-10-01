@@ -17,9 +17,13 @@
 package org.apache.solr.update;
 
 import java.io.File;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.request.SolrQueryRequest;
@@ -168,6 +172,9 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertNull(reader.next());
   }
 
+  /**
+   * Check the seek method of the log reader.
+   */
   @Test
   public void testLogReaderSeek() throws Exception {
     this.clearCore();
@@ -221,6 +228,10 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertFalse(reader3.seek(targetVersion));
   }
 
+  /**
+   * Check that the log reader is able to read the new tlog
+   * and pick up new entries as they appear.
+   */
   @Test
   public void testLogReaderNextOnNewTLog() throws Exception {
     this.clearCore();
@@ -316,6 +327,10 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     assertEquals(1, ulog.getLogList(logDir).length);
   }
 
+  /**
+   * Check that the removal of old logs is taking into consideration
+   * multiple log pointers.
+   */
   @Test
   public void testRemoveOldLogsMultiplePointers() throws Exception {
     this.clearCore();
@@ -361,6 +376,72 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
 
     // the first tlog should be removed
     assertEquals(4, ulog.getLogList(logDir).length);
+  }
+
+  /**
+   * Check that the output stream of an uncapped tlog is correctly reopen
+   * and that the commit is written during recovery.
+   */
+  @Test
+  public void testClosingOutputStreamAfterLogReplay() throws Exception {
+    this.clearCore();
+
+    DirectUpdateHandler2.commitOnClose = false;
+    final Semaphore logReplay = new Semaphore(0);
+    final Semaphore logReplayFinish = new Semaphore(0);
+
+    UpdateLog.testing_logReplayHook = new Runnable() {
+      @Override
+      public void run() {
+        try {
+          assertTrue(logReplay.tryAcquire(timeout, TimeUnit.SECONDS));
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      }
+    };
+
+    UpdateLog.testing_logReplayFinishHook = new Runnable() {
+      @Override
+      public void run() {
+        logReplayFinish.release();
+      }
+    };
+
+    Deque<Long> versions = new ArrayDeque<>();
+    versions.addFirst(addAndGetVersion(sdoc("id", "A11"), null));
+    versions.addFirst(addAndGetVersion(sdoc("id", "A12"), null));
+    versions.addFirst(addAndGetVersion(sdoc("id", "A13"), null));
+
+    assertJQ(req("q","*:*"),"/response/numFound==0");
+
+    assertJQ(req("qt","/get", "getVersions",""+versions.size()) ,"/versions==" + versions);
+
+    h.close();
+    createCore();
+    // Solr should kick this off now
+    // h.getCore().getUpdateHandler().getUpdateLog().recoverFromLog();
+
+    // verify that previous close didn't do a commit
+    // recovery should be blocked by our hook
+    assertJQ(req("q","*:*") ,"/response/numFound==0");
+
+    // unblock recovery
+    logReplay.release(1000);
+
+    // wait until recovery has finished
+    assertTrue(logReplayFinish.tryAcquire(240, TimeUnit.SECONDS));
+
+    assertJQ(req("q","*:*") ,"/response/numFound==3");
+
+    // The transaction log should have written a commit and close its output stream
+    UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
+    assertEquals(0, ulog.logs.peekLast().refcount.get());
+    assertFalse(ulog.logs.peekLast().channel.isOpen());
+
+    ulog.logs.peekLast().incref(); // reopen the output stream to check if its ends with a commit
+    assertTrue(ulog.logs.peekLast().endsWithCommit());
+    ulog.logs.peekLast().decref();
   }
 
 }
