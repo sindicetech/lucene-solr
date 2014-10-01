@@ -25,7 +25,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
 
 public class CdcrUpdateLog extends UpdateLog {
@@ -34,10 +33,11 @@ public class CdcrUpdateLog extends UpdateLog {
 
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
-    // remove dangling reader in case of a core change
+    // remove dangling readers
     for (CdcrLogReader reader : logPointers.keySet()) {
       reader.close();
     }
+    logPointers.clear();
 
     // init
     super.init(uhandler, core);
@@ -91,20 +91,20 @@ public class CdcrUpdateLog extends UpdateLog {
       }
     }
 
-    // decref old log as we do not write to it anymore
-    try {
-      if (oldLog.endsWithCommit()) {
-        oldLog.deleteOnClose = false;
-        oldLog.decref();
-      }
-    } catch (IOException e) {
-      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
-    }
+    // Decref old log as we do not write to it anymore
+    // If the oldlog is uncapped, i.e., a write commit has to be performed
+    // during recovery, the output stream will be automatically re-open when
+    // TransaactionLog#incref will be called.
+    oldLog.deleteOnClose = false;
+    oldLog.decref();
 
     // don't incref... we are taking ownership from the caller.
     logs.addFirst(oldLog);
   }
 
+  /**
+   * Checks if one of the log pointer is pointing to the given tlog.
+   */
   private boolean hasLogPointer(TransactionLog tlog) {
     for (CdcrLogPointer pointer : logPointers.values()) {
       // if we have a pointer that is not initialised, then do not remove the old tlogs
@@ -120,6 +120,10 @@ public class CdcrUpdateLog extends UpdateLog {
     return false;
   }
 
+  /**
+   * Creates a new {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}
+   * initialised with the current list of tlogs.
+   */
   public CdcrLogReader newLogReader() {
     return new CdcrLogReader(new ArrayList(logs));
   }

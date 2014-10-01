@@ -1239,7 +1239,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
     public void doReplay(TransactionLog translog) {
       try {
-        loglog.warn("Starting log replay " + translog + " active="+activeLog + " starting pos=" + recoveryInfo.positionOfStart);
+        loglog.warn("Starting log replay " + translog + " active=" + activeLog + " starting pos=" + recoveryInfo.positionOfStart);
         long lastStatusTime = System.nanoTime();
         tlogReader = translog.getReader(recoveryInfo.positionOfStart);
 
@@ -1253,7 +1253,7 @@ public class UpdateLog implements PluginInfoInitialized {
         int operationAndFlags = 0;
         long nextCount = 0;
 
-        for(;;) {
+        for (; ; ) {
           Object o = null;
           if (cancelApplyBufferUpdate) break;
           try {
@@ -1265,9 +1265,9 @@ public class UpdateLog implements PluginInfoInitialized {
                 long cpos = tlogReader.currentPos();
                 long csize = tlogReader.currentSize();
                 loglog.info(
-                        "log replay status {} active={} starting pos={} current pos={} current size={} % read={}",
-                        translog, activeLog, recoveryInfo.positionOfStart, cpos, csize,
-                        Math.round(cpos / (double) csize * 100.));
+                    "log replay status {} active={} starting pos={} current pos={} current size={} % read={}",
+                    translog, activeLog, recoveryInfo.positionOfStart, cpos, csize,
+                    Math.round(cpos / (double) csize * 100.));
 
               }
             }
@@ -1296,11 +1296,11 @@ public class UpdateLog implements PluginInfoInitialized {
               }
             }
           } catch (InterruptedException e) {
-            SolrException.log(log,e);
+            SolrException.log(log, e);
           } catch (IOException e) {
-            SolrException.log(log,e);
+            SolrException.log(log, e);
           } catch (Exception e) {
-            SolrException.log(log,e);
+            SolrException.log(log, e);
           }
 
           if (o == null) break;
@@ -1308,62 +1308,58 @@ public class UpdateLog implements PluginInfoInitialized {
           try {
 
             // should currently be a List<Oper,Ver,Doc/Id>
-            List entry = (List)o;
+            List entry = (List) o;
 
-            operationAndFlags = (Integer)entry.get(0);
+            operationAndFlags = (Integer) entry.get(0);
             int oper = operationAndFlags & OPERATION_MASK;
             long version = (Long) entry.get(1);
 
             switch (oper) {
-              case UpdateLog.ADD:
-              {
+              case UpdateLog.ADD: {
                 recoveryInfo.adds++;
                 // byte[] idBytes = (byte[]) entry.get(2);
-                SolrInputDocument sdoc = (SolrInputDocument)entry.get(entry.size()-1);
+                SolrInputDocument sdoc = (SolrInputDocument) entry.get(entry.size() - 1);
                 AddUpdateCommand cmd = new AddUpdateCommand(req);
                 // cmd.setIndexedId(new BytesRef(idBytes));
                 cmd.solrDoc = sdoc;
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("add " +  cmd);
+                if (debug) log.debug("add " + cmd);
 
                 proc.processAdd(cmd);
                 break;
               }
-              case UpdateLog.DELETE:
-              {
+              case UpdateLog.DELETE: {
                 recoveryInfo.deletes++;
                 byte[] idBytes = (byte[]) entry.get(2);
                 DeleteUpdateCommand cmd = new DeleteUpdateCommand(req);
                 cmd.setIndexedId(new BytesRef(idBytes));
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("delete " +  cmd);
+                if (debug) log.debug("delete " + cmd);
                 proc.processDelete(cmd);
                 break;
               }
 
-              case UpdateLog.DELETE_BY_QUERY:
-              {
+              case UpdateLog.DELETE_BY_QUERY: {
                 recoveryInfo.deleteByQuery++;
-                String query = (String)entry.get(2);
+                String query = (String) entry.get(2);
                 DeleteUpdateCommand cmd = new DeleteUpdateCommand(req);
                 cmd.query = query;
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("deleteByQuery " +  cmd);
+                if (debug) log.debug("deleteByQuery " + cmd);
                 proc.processDelete(cmd);
                 break;
               }
 
-              case UpdateLog.COMMIT:
-              {
+              case UpdateLog.COMMIT: {
                 commitVersion = version;
                 break;
               }
 
               default:
-                throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,  "Unknown Operation! " + oper);
+                throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Unknown Operation! " + oper);
             }
 
             if (rsp.getException() != null) {
@@ -1378,7 +1374,7 @@ public class UpdateLog implements PluginInfoInitialized {
             recoveryInfo.errors++;
             loglog.warn("REPLAY_ERR: Unexpected log entry or corrupt log.  Entry=" + o, cl);
             // would be caused by a corrupt transaction log
-          }  catch (SolrException ex) {
+          } catch (SolrException ex) {
             if (ex.code() == ErrorCode.SERVICE_UNAVAILABLE.code) {
               throw ex;
             }
@@ -1398,7 +1394,7 @@ public class UpdateLog implements PluginInfoInitialized {
         cmd.waitSearcher = true;
         cmd.setFlags(UpdateCommand.REPLAY);
         try {
-          if (debug) log.debug("commit " +  cmd);
+          if (debug) log.debug("commit " + cmd);
           uhandler.commit(cmd);          // this should cause a commit to be added to the incomplete log and avoid it being replayed again after a restart.
         } catch (IOException ex) {
           recoveryInfo.errors++;

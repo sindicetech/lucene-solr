@@ -214,7 +214,6 @@ public class TransactionLog {
       size = fos.size();
     }
 
-
     // the end of the file should have the end message (added during a commit) plus a 4 byte size
     byte[] buf = new byte[ END_MESSAGE.length() ];
     long pos = size - END_MESSAGE.length() - 4;
@@ -249,7 +248,6 @@ public class TransactionLog {
       numRecords = snapshot_numRecords;
     }
   }
-
 
   public long writeData(Object o) {
     LogCodec codec = new LogCodec(resolver);
@@ -500,7 +498,7 @@ public class TransactionLog {
     }
   }
 
-  public boolean try_incref() {
+  public boolean try_incref() { // nocommit: not used anymore
     return refcount.incrementAndGet() > 1;
   }
 
@@ -579,22 +577,20 @@ public class TransactionLog {
    * Currently only *one* LogReader may be outstanding, and that log may only
    * be used from a single thread. */
   public LogReader getReader(long startingPos) {
-    return new LogReader(true, startingPos);
+    return new LogReader(startingPos);
   }
 
   /** Returns a single threaded reverse reader */
   public ReverseReader getReverseReader() throws IOException {
-    return new FSReverseReader(true);
+    return new FSReverseReader();
   }
 
   public class LogReader {
     protected ChannelFastInputStream fis;
     protected LogCodec codec = new LogCodec(resolver);
 
-    public LogReader(boolean incref, long startingPos) {
-      if (incref) {
-        incref();
-      }
+    public LogReader(long startingPos) {
+      incref();
       fis = new ChannelFastInputStream(channel, startingPos);
     }
 
@@ -699,10 +695,8 @@ public class TransactionLog {
     int nextLength;  // length of the next record (the next one closer to the start of the log file)
     long prevPos;    // where we started reading from last time (so prevPos - nextLength == start of next record)
 
-    public FSReverseReader(boolean incref) throws IOException {
-      if (incref) {
-        incref();
-      }
+    public FSReverseReader() throws IOException {
+      incref();
 
       long sz;
       synchronized (TransactionLog.this) {
