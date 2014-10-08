@@ -47,6 +47,34 @@ public class CdcrTransactionLog extends TransactionLog {
     }
   }
 
+  @Override
+  protected void close() {
+    try {
+      if (debug) {
+        log.debug("Closing tlog" + this);
+      }
+
+      synchronized (this) {
+        if (fos != null) {
+          fos.flush();
+          fos.close();
+
+          // dereference these variables for GC
+          fos = null;
+          os = null;
+          channel = null;
+          raf = null;
+        }
+      }
+
+      if (deleteOnClose) {
+        tlogFile.delete();
+      }
+    } catch (IOException e) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    }
+  }
+
   /**
    * Re-open the output stream of the tlog and position
    * the file pointer at the end of the file. It assumes
