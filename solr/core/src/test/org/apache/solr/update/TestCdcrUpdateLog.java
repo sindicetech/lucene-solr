@@ -430,14 +430,14 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     logReplay.release(1000);
 
     // wait until recovery has finished
-    assertTrue(logReplayFinish.tryAcquire(240, TimeUnit.SECONDS));
+    assertTrue(logReplayFinish.tryAcquire(timeout, TimeUnit.SECONDS));
 
     assertJQ(req("q","*:*") ,"/response/numFound==3");
 
     // The transaction log should have written a commit and close its output stream
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
     assertEquals(0, ulog.logs.peekLast().refcount.get());
-    assertFalse(ulog.logs.peekLast().channel.isOpen());
+    assertNull(ulog.logs.peekLast().channel);
 
     ulog.logs.peekLast().incref(); // reopen the output stream to check if its ends with a commit
     assertTrue(ulog.logs.peekLast().endsWithCommit());
