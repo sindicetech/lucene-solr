@@ -28,6 +28,7 @@ import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
+import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZooKeeperException;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.SolrParams;
@@ -35,6 +36,10 @@ import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.util.plugin.SolrCoreAware;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,7 +50,7 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
   private SolrCore core;
   private String collection;
 
-  private CdcrState state = CdcrState.STOPPED;
+  private CdcrLifecycleManager lifecycle;
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
@@ -91,24 +96,33 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
   public void inform(SolrCore core) {
     this.core = core;
     collection = this.core.getName();
+
+    // Create lifecycle manager after having a reference to the core and knowing our collection
+    if (lifecycle == null) {
+      lifecycle = new CdcrLifecycleManager();
+    }
   }
 
   private void handleStartAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (state == CdcrState.STOPPED) {
-      state = CdcrState.STARTED;
+    if (lifecycle.getState() == CdcrState.STOPPED) {
+      lifecycle.setState(CdcrState.STARTED);
+      lifecycle.synchronize();
     }
-    rsp.add(CdcrAction.STATUS.toLower(), state.toLower());
+
+    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
   }
 
   private void handleStopAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (state == CdcrState.STARTED) {
-      state = CdcrState.STOPPED;
+    if (lifecycle.getState() == CdcrState.STARTED) {
+      lifecycle.setState(CdcrState.STOPPED);
+      lifecycle.synchronize();
     }
-    rsp.add(CdcrAction.STATUS.toLower(), state.toLower());
+
+    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
   }
 
   private void handleStatusAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    rsp.add(CdcrAction.STATUS.toLower(), state.toLower());
+    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
   }
 
   private boolean amILeader() {
@@ -156,8 +170,108 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
     STARTED,
     STOPPED;
 
+    public static CdcrState get(byte[] state) {
+      if (state != null) {
+        try {
+          return CdcrState.valueOf(new String(state).toUpperCase(Locale.ROOT));
+        }
+        catch (Exception e) {}
+      }
+      return null;
+    }
+
     public String toLower(){
       return toString().toLowerCase(Locale.ROOT);
+    }
+
+    public byte[] getBytes() {
+      return toLower().getBytes();
+    }
+
+  }
+
+  private class CdcrLifecycleManager {
+
+    private CdcrState state;
+
+    private CdcrStatusWatcher watcher;
+
+    CdcrLifecycleManager() {
+      // Ensure that the status znode exists
+      this.createStatusNode();
+
+      // Instantiate the initial watcher
+      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+      try {
+        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
+      }
+      catch (KeeperException | InterruptedException e) {
+        log.warn("Failed fetching initial status", e);
+      }
+    }
+
+    CdcrState getState() {
+      return state;
+    }
+
+    private String getZnodeBase() {
+      return "/collections/" + collection + "/cdcr";
+    }
+
+    private String getZnodePath() {
+      return getZnodeBase() + "/status";
+    }
+
+    void setState(CdcrState state) {
+      this.state = state;
+    }
+
+    void synchronize() {
+      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+      try {
+        zkClient.setData(this.getZnodePath(), state.getBytes(), true);
+        // check if nobody changed it in the meantime, and set a new watcher
+        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
+      }
+      catch (KeeperException | InterruptedException e) {
+        log.warn("Failed synchronising new status", e);
+      }
+    }
+
+    private void createStatusNode() {
+      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+      try {
+        if (!zkClient.exists(this.getZnodePath(), true)) {
+          if (!zkClient.exists(this.getZnodeBase(), true)) {
+            zkClient.makePath(this.getZnodeBase(), CreateMode.PERSISTENT, true);
+          }
+          zkClient.create(this.getZnodePath(), CdcrState.STOPPED.getBytes(), CreateMode.PERSISTENT, true);
+          log.info("Created znode {}", this.getZnodePath());
+        }
+      }
+      catch (KeeperException | InterruptedException e) {
+        log.warn("Failed to create CDCR status node", e);
+      }
+    }
+
+    private class CdcrStatusWatcher implements Watcher {
+
+      @Override
+      public void process(WatchedEvent event) {
+        log.info("Event: {}", event);
+        if (Event.EventType.None.equals(event.getType())) {
+          return;
+        }
+        SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+        try {
+          state = CdcrState.get(zkClient.getData(CdcrLifecycleManager.this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
+          log.info("Received new state from watcher: {}", state);
+        }
+        catch (KeeperException | InterruptedException e) {
+          log.warn("Failed synchronising new status", e);
+        }
+      }
+
     }
 
   }
