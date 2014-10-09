@@ -21,7 +21,7 @@
   <jmx />
 
   <luceneMatchVersion>${tests.luceneMatchVersion:LATEST}</luceneMatchVersion>
-  
+
   <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.RAMDirectoryFactory}">
     <!-- used to keep RAM reqs down for HdfsDirectoryFactory -->
     <bool name="solr.hdfs.blockcache.enabled">${solr.hdfs.blockcache.enabled:true}</bool>
@@ -30,7 +30,7 @@
     <str name="solr.hdfs.confdir">${solr.hdfs.confdir:}</str>
     <str name="solr.hdfs.blockcache.global">${solr.hdfs.blockcache.global:false}</str>
   </directoryFactory>
-  
+
   <dataDir>${solr.data.dir:}</dataDir>
 
   <xi:include href="solrconfig.snippet.randomindexconfig.xml" xmlns:xi="http://www.w3.org/2001/XInclude"/>
@@ -45,6 +45,8 @@
 
   <requestHandler name="standard" class="solr.StandardRequestHandler">
   </requestHandler>
+  
+  <requestHandler name="/cdcr" class="solr.CdcrRequestHandler"  />
 
   <updateHandler class="solr.DirectUpdateHandler2">
     <updateLog>
@@ -102,7 +104,7 @@
       <str name="replacement">x_x</str>
     </processor>
     <processor class="solr.RunUpdateProcessorFactory" />
-  </updateRequestProcessorChain>  
+  </updateRequestProcessorChain>
 
   <updateRequestProcessorChain name="distrib-dup-test-chain-implicit">
     <!-- implicit test w/o distrib declared-->
@@ -117,6 +119,6 @@
       <str name="replacement">x_x</str>
     </processor>
     <processor class="solr.RunUpdateProcessorFactory" />
-  </updateRequestProcessorChain>  
+  </updateRequestProcessorChain>
 
 </config>
