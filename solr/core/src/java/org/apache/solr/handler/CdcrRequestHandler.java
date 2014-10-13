@@ -170,7 +170,7 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
   }
 
   /**
-   * The possible state of the CDCR
+   * The possible states of the CDCR
    */
   public enum CdcrState {
     STARTED,
