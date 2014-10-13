@@ -50,7 +50,7 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
   private SolrCore core;
   private String collection;
 
-  private CdcrLifecycleManager lifecycle;
+  private CdcrStateManager stateManager;
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
@@ -97,32 +97,32 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
     this.core = core;
     collection = this.core.getName();
 
-    // Create lifecycle manager after having a reference to the core and knowing our collection
-    if (lifecycle == null) {
-      lifecycle = new CdcrLifecycleManager();
+    // Create the state manager after having a reference to the core and knowing our collection
+    if (stateManager == null) {
+      stateManager = new CdcrStateManager();
     }
   }
 
   private void handleStartAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (lifecycle.getState() == CdcrState.STOPPED) {
-      lifecycle.setState(CdcrState.STARTED);
-      lifecycle.synchronize();
+    if (stateManager.getState() == CdcrState.STOPPED) {
+      stateManager.setState(CdcrState.STARTED);
+      stateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
+    rsp.add(CdcrAction.STATUS.toLower(), stateManager.getState().toLower());
   }
 
   private void handleStopAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (lifecycle.getState() == CdcrState.STARTED) {
-      lifecycle.setState(CdcrState.STOPPED);
-      lifecycle.synchronize();
+    if (stateManager.getState() == CdcrState.STARTED) {
+      stateManager.setState(CdcrState.STOPPED);
+      stateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
+    rsp.add(CdcrAction.STATUS.toLower(), stateManager.getState().toLower());
   }
 
   private void handleStatusAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    rsp.add(CdcrAction.STATUS.toLower(), lifecycle.getState().toLower());
+    rsp.add(CdcrAction.STATUS.toLower(), stateManager.getState().toLower());
   }
 
   private boolean amILeader() {
@@ -145,6 +145,9 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
     return "Manage Cross Data Center Replication";
   }
 
+  /**
+   * The actions supported by the CDCR API
+   */
   public enum CdcrAction {
     START,
     STOP,
@@ -166,6 +169,9 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
 
   }
 
+  /**
+   * The possible state of the CDCR
+   */
   public enum CdcrState {
     STARTED,
     STOPPED;
@@ -190,20 +196,24 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
 
   }
 
-  private class CdcrLifecycleManager {
+  /**
+   * Manage the life-cycle state of the CDCR. It is responsible of synchronising the state
+   * through Zookeeper. The state of the CDCR is stored in the zk node defined by {@link #getZnodePath()}.
+   */
+  private class CdcrStateManager {
 
     private CdcrState state;
 
-    private CdcrStatusWatcher watcher;
+    private CdcrStatusWatcher watcher = new CdcrStatusWatcher();
 
-    CdcrLifecycleManager() {
+    CdcrStateManager() {
       // Ensure that the status znode exists
       this.createStatusNode();
 
-      // Instantiate the initial watcher
+      // Register the watcher
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       try {
-        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
+        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher, null, true));
       }
       catch (KeeperException | InterruptedException e) {
         log.warn("Failed fetching initial status", e);
@@ -226,12 +236,16 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
       this.state = state;
     }
 
+    /**
+     * Synchronise the state to Zookeeper. This method must be called only by the handler receiving the
+     * action.
+     */
     void synchronize() {
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       try {
         zkClient.setData(this.getZnodePath(), state.getBytes(), true);
         // check if nobody changed it in the meantime, and set a new watcher
-        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
+        state = CdcrState.get(zkClient.getData(this.getZnodePath(), watcher, null, true));
       }
       catch (KeeperException | InterruptedException e) {
         log.warn("Failed synchronising new status", e);
@@ -254,18 +268,21 @@ public class CdcrRequestHandler extends RequestHandlerBase  implements SolrCoreA
       }
     }
 
+    /**
+     * TODO: Should we handle disconnection and expired sessions ?
+     */
     private class CdcrStatusWatcher implements Watcher {
 
       @Override
       public void process(WatchedEvent event) {
-        log.info("Event: {}", event);
+        log.debug("A CDCR status change: {}", event);
         if (Event.EventType.None.equals(event.getType())) {
           return;
         }
         SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
         try {
-          state = CdcrState.get(zkClient.getData(CdcrLifecycleManager.this.getZnodePath(), watcher = new CdcrStatusWatcher(), null, true));
-          log.info("Received new state from watcher: {}", state);
+          state = CdcrState.get(zkClient.getData(CdcrStateManager.this.getZnodePath(), watcher, null, true));
+          log.info("Received new CDCR state from watcher: {}", state);
         }
         catch (KeeperException | InterruptedException e) {
           log.warn("Failed synchronising new status", e);
