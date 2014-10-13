@@ -40,11 +40,6 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
     super.setUp();
   }
 
-  /**
-   * Perform the actual tests here
-   *
-   * @throws Exception on error
-   */
   @Override
   public void doTest() throws Exception {
     this.doTestLifeCycleActions();
@@ -52,15 +47,11 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
 
   public void doTestLifeCycleActions(){
     try {
-
       // check initial status
       this.assertState(CdcrRequestHandler.CdcrState.STOPPED);
 
       // send start action
-      ModifiableSolrParams params = new ModifiableSolrParams();
-      params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.START.toString());
-
-      NamedList rsp = sendRequest(SHARD1, params);
+      NamedList rsp = sendRequest(SHARD1, CdcrRequestHandler.CdcrAction.START);
       String status = (String) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
       assertEquals(CdcrRequestHandler.CdcrState.STARTED.toLower(), status);
 
@@ -68,10 +59,7 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
       this.assertState(CdcrRequestHandler.CdcrState.STARTED);
 
       // send stop action
-      params = new ModifiableSolrParams();
-      params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.STOP.toString());
-
-      rsp = sendRequest(SHARD1, params);
+      rsp = sendRequest(SHARD1, CdcrRequestHandler.CdcrAction.STOP);
       status = (String) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
       assertEquals(CdcrRequestHandler.CdcrState.STOPPED.toLower(), status);
 
@@ -87,19 +75,20 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
   }
 
   private void assertState(CdcrRequestHandler.CdcrState state) throws IOException, SolrServerException {
-    ModifiableSolrParams params = new ModifiableSolrParams();
-    params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.STATUS.toString());
-
-    NamedList rsp = sendRequest(SHARD1, params);
+    NamedList rsp = sendRequest(SHARD1, CdcrRequestHandler.CdcrAction.STATUS);
     String status = (String) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(state.toLower(), status);
 
-    rsp = sendRequest(SHARD2, params);
+    rsp = sendRequest(SHARD2, CdcrRequestHandler.CdcrAction.STATUS);
     status = (String) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(state.toLower(), status);
   }
 
-  protected NamedList sendRequest(String shardId, ModifiableSolrParams params) throws SolrServerException, IOException {
+  protected NamedList sendRequest(String shardId, CdcrRequestHandler.CdcrAction action)
+  throws SolrServerException, IOException {
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.set(CommonParams.ACTION, action.toString());
+
     SolrRequest request = new QueryRequest(params);
     request.setPath("/cdcr");
 
