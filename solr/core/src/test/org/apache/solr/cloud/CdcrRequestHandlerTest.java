@@ -45,6 +45,7 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
     this.doTestLifeCycleActions();
   }
 
+  // check that the life-cycle state is properly synchronised across nodes
   public void doTestLifeCycleActions(){
     try {
       // check initial status
