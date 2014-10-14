@@ -329,7 +329,8 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
 
   /**
    * Check that the removal of old logs is taking into consideration
-   * multiple log pointers.
+   * multiple log pointers. Check also that the removal takes into consideration the
+   * numRecordsToKeep limit, even if the log pointers are ahead.
    */
   @Test
   public void testRemoveOldLogsMultiplePointers() throws Exception {
@@ -376,6 +377,19 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
 
     // the first tlog should be removed
     assertEquals(4, ulog.getLogList(logDir).length);
+
+    // exhaust the readers
+    while (reader1.next() != null) {}
+    while (reader2.next() != null) {}
+
+    // the readers should point to the new tlog
+    // now add enough documents to trigger the numRecordsToKeep limit
+
+    addDocs(80, start, versions);  start+=80;
+    assertU(commit());
+
+    // the update log should kept the last 3 tlogs, which sum up to 100 records
+    assertEquals(3, ulog.getLogList(logDir).length);
   }
 
   /**
@@ -442,6 +456,56 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     ulog.logs.peekLast().incref(); // reopen the output stream to check if its ends with a commit
     assertTrue(ulog.logs.peekLast().endsWithCommit());
     ulog.logs.peekLast().decref();
+  }
+
+  /**
+   * Check the buffering of the old tlogs
+   */
+  @Test
+  public void testBuffering() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    addDocs(105, start, versions);  start+=105;
+    assertU(commit());
+
+    // the first two tlogs should have been removed
+    assertEquals(1, ulog.getLogList(logDir).length);
+
+    // enable buffer
+    ulog.enableBuffer();
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    addDocs(105, start, versions);  start+=105;
+    assertU(commit());
+
+    // no tlog should have been removed
+    assertEquals(4, ulog.getLogList(logDir).length);
+
+    // disable buffer
+    ulog.disableBuffer();
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    // old tlogs should have been removed
+    assertEquals(2, ulog.getLogList(logDir).length);
   }
 
 }
