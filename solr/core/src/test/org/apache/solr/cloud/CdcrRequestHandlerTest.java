@@ -43,7 +43,7 @@ public class CdcrRequestHandlerTest extends BasicDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-//    this.doTestLifeCycleActions();
+    this.doTestLifeCycleActions();
     this.doTestCheckpointActions();
   }
 
