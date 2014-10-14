@@ -42,6 +42,11 @@ public class CdcrUpdateLog extends UpdateLog {
 
   protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new HashMap<>();
 
+  /**
+   * A reader that will be used as toggle to turn on/off the buffering of tlogs
+   */
+  private CdcrLogReader bufferToggle;
+
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
     // remove dangling readers
@@ -60,19 +65,21 @@ public class CdcrUpdateLog extends UpdateLog {
 
     numOldRecords += oldLog.numRecords();
 
-    if (logPointers.isEmpty()) { // if no pointers defined, fallback to original behaviour
-      int currRecords = numOldRecords;
+    int currRecords = numOldRecords;
 
-      if (oldLog != tlog &&  tlog != null) {
-        currRecords += tlog.numRecords();
-      }
+    if (oldLog != tlog &&  tlog != null) {
+      currRecords += tlog.numRecords();
+    }
 
-      while (removeOld && logs.size() > 0) {
-        TransactionLog log = logs.peekLast();
-        int nrec = log.numRecords();
-        // remove oldest log if we don't need it to keep at least numRecordsToKeep, or if
-        // we already have the limit of 10 log files.
-        if (currRecords - nrec >= numRecordsToKeep || logs.size() >= 10) {
+    while (removeOld && logs.size() > 0) {
+      TransactionLog log = logs.peekLast();
+      int nrec = log.numRecords();
+
+      // remove oldest log if we don't need it to keep at least numRecordsToKeep, or if
+      // we already have the limit of 10 log files.
+      if (currRecords - nrec >= numRecordsToKeep || logs.size() >= 10) {
+        // remove the oldest log if nobody points to it
+        if (!this.hasLogPointer(log)) {
           currRecords -= nrec;
           numOldRecords -= nrec;
           TransactionLog last = logs.removeLast();
@@ -80,26 +87,11 @@ public class CdcrUpdateLog extends UpdateLog {
           last.close();  // it will be deleted if no longer in use
           continue;
         }
-
+        // we have one log with one pointer, we should stop removing logs
         break;
       }
-    }
-    else {
-      while (removeOld && logs.size() > 0) {
-        TransactionLog log = logs.peekLast();
-        int nrec = log.numRecords();
 
-        // remove the oldest log if nobody points to it
-        if (!this.hasLogPointer(log)) {
-          numOldRecords -= nrec;
-          TransactionLog last = logs.removeLast();
-          last.deleteOnClose = true;
-          last.close();  // it will be deleted if no longer in use
-          continue;
-        }
-
-        break;
-      }
+      break;
     }
 
     // Decref old log as we do not write to it anymore
@@ -137,6 +129,33 @@ public class CdcrUpdateLog extends UpdateLog {
    */
   public CdcrLogReader newLogReader() {
     return new CdcrLogReader(new ArrayList(logs));
+  }
+
+  /**
+   * Enable the buffering of the tlogs. When buffering is activated, the update logs will not remove any
+   * old transaction log files.
+   */
+  public void enableBuffer() {
+    if (bufferToggle == null) {
+      bufferToggle = this.newLogReader();
+    }
+  }
+
+  /**
+   * Disable the buffering of the tlogs.
+   */
+  public void disableBuffer() {
+    if (bufferToggle != null) {
+      bufferToggle.close();
+      bufferToggle = null;
+    }
+  }
+
+  /**
+   * Is the update log buffering the tlogs ?
+   */
+  public boolean isBuffering() {
+    return bufferToggle == null ? false : true;
   }
 
   @Override
@@ -180,7 +199,7 @@ public class CdcrUpdateLog extends UpdateLog {
 
   }
 
-  class CdcrLogReader {
+  public class CdcrLogReader {
 
     private TransactionLog currentTlog;
     private TransactionLog.LogReader tlogReader;
