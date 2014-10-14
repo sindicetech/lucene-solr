@@ -152,6 +152,18 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrAction.STATUS.toLower(), stateManager.getState().toLower());
   }
 
+  /**
+   * This action is generally executed on the target cluster in order to retrieve the latest update checkpoint.
+   * This checkpoint is used on the source cluster to setup the
+   * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader} of a slice leader. <br/>
+   * This method will execute in parallel one
+   * {@link org.apache.solr.handler.CdcrRequestHandler.CdcrAction#SLICECHECKPOINT} request per slice leader. It will
+   * then pick the lowest version number as checkpoint. Picking the lowest amongst all slices will ensure that we do not
+   * pick a checkpoint that is ahead of the source cluster. This can occur when other slice leaders are sending new
+   * updates to the target cluster while we are currently instantiating the
+   * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}.
+   * This solution only works in scenarios where the topology of the source and target clusters are identical.
+   */
   private void handleCollectionCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp)
   throws IOException, SolrServerException {
     ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
@@ -188,6 +200,9 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add("checkpoint", checkpoint);
   }
 
+  /**
+   * Retrieve the version number of the latest entry of the {@link org.apache.solr.update.UpdateLog}.
+   */
   private void handleSliceCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp) {
     if (!amILeader()) {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrAction.SLICECHECKPOINT +
