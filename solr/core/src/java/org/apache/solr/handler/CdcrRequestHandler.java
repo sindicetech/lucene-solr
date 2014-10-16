@@ -1,6 +1,3 @@
-/**
- * Copyright (c) 2014 Renaud Delbru. All Rights Reserved.
- */
 package org.apache.solr.handler;
 
 /*
