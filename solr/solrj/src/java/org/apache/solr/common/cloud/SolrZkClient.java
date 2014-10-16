@@ -252,10 +252,15 @@ public class SolrZkClient implements Closeable {
     }
   }
 
+  /**
+   * Wraps the watcher so that it doesn't fire off ZK's event queue. In order to guarantee that a watch object will
+   * only be triggered once for a given notification, users need to wrap their watcher using this method before
+   * calling {@link #exists(String, org.apache.zookeeper.Watcher, boolean)} or
+   * {@link #getData(String, org.apache.zookeeper.Watcher, org.apache.zookeeper.data.Stat, boolean)}.
+   */
   public Watcher wrapWatcher (final Watcher watcher) {
     if (watcher == null || watcher instanceof SolrZkWatcher) return watcher;
 
-    // wrap the watcher so that it doesn't fire off ZK's event queue
     return new SolrZkWatcher() {
       @Override
       public void process(final WatchedEvent event) {
