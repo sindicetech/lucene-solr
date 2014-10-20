@@ -62,7 +62,10 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  *  a source and target collection that will be used as a source and target cluster respectively. The source collection
  *  is the default collection {@link #SOURCE_COLLECTION} and the target collection is {@link #TARGET_COLLECTION}.
  * </p>
- *
+ * <p>
+ *  Each collection is configured with 2 slices and 4 replicas. These collection will be distributed across 4 jetty
+ *  servers. Therefore, each jetty server will host two cores, one core for each collection.
+ * </p>
  */
 public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZkTestBase {
 
