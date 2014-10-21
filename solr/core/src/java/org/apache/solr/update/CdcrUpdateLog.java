@@ -239,6 +239,32 @@ public class CdcrUpdateLog extends UpdateLog {
       }
     }
 
+    @Override
+    public CdcrLogReader clone() {
+      CdcrLogReader clone = new CdcrLogReader((List<TransactionLog>) tlogs);
+      clone.lookahead = this.lookahead;
+      if (tlogReader != null) { // if the update log is emtpy, the tlogReader is equal to null
+        clone.tlogReader.close();
+        clone.tlogReader = currentTlog.getReader(this.tlogReader.currentPos());
+      }
+      return clone;
+    }
+
+    /**
+     * Expert: Fast forward this log reader with the other log reader. In order to avoid unexpected results, the other
+     * log reader must be a clone of this reader.
+     */
+    public void proceed(CdcrLogReader other) {
+      tlogReader.close(); // close the existing reader, a new one will be created
+      while (this.tlogs.peekLast().id < other.tlogs.peekLast().id) {
+        tlogs.removeLast();
+        currentTlog = tlogs.peekLast();
+      }
+      assert this.tlogs.peekLast().id == other.tlogs.peekLast().id;
+      this.lookahead = other.lookahead;
+      this.tlogReader = currentTlog.getReader(other.tlogReader.currentPos());
+    }
+
     /**
      * Advances to the next log entry in the updates log and returns the log entry itself.
      * Returns null if there are no more log entries in the updates log.<br>
