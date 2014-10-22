@@ -1347,7 +1347,7 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
     }
   }
 
-  private ModifiableSolrParams filterParams(SolrParams params) {
+  protected ModifiableSolrParams filterParams(SolrParams params) {
     ModifiableSolrParams fparams = new ModifiableSolrParams();
     passParam(params, fparams, UpdateParams.UPDATE_CHAIN);
     passParam(params, fparams, TEST_DISTRIB_SKIP_SERVERS);
@@ -1604,7 +1604,7 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
     throw new SolrException(ErrorCode.SERVICE_UNAVAILABLE, "Cannot talk to ZooKeeper - Updates are disabled.");
   }
 
-  private boolean versionDelete(DeleteUpdateCommand cmd) throws IOException {
+  protected boolean versionDelete(DeleteUpdateCommand cmd) throws IOException {
 
     BytesRef idBytes = cmd.getIndexedId();
 

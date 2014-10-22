@@ -19,9 +19,13 @@ package org.apache.solr.update.processor;
 
 import java.io.IOException;
 
+import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.params.UpdateParams;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.AddUpdateCommand;
+import org.apache.solr.update.DeleteUpdateCommand;
 import org.apache.solr.update.UpdateCommand;
 
 /**
@@ -49,6 +53,36 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
     // unset the flag to avoid unintended consequences down the chain
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
       cmd.setFlags(cmd.getFlags() & ~UpdateCommand.PEER_SYNC);
+    }
+
+    return result;
+  }
+
+  @Override
+  protected boolean versionDelete(DeleteUpdateCommand cmd) throws IOException {
+    /*
+    temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.deleteAdd doesn't execute leader logic
+    but the else part of that if. That way version remains preserved.
+     */
+    if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
+      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC);
+    }
+
+    boolean result = super.versionDelete(cmd);
+
+    // unset the flag to avoid unintended consequences down the chain
+    if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
+      cmd.setFlags(cmd.getFlags() & ~UpdateCommand.PEER_SYNC);
+    }
+
+    return result;
+  }
+
+  protected ModifiableSolrParams filterParams(SolrParams params) {
+    ModifiableSolrParams result = super.filterParams(params);
+    if (params.get(CDCR_UPDATE) != null) {
+      result.set(CDCR_UPDATE, "");
+      result.set(DistributedUpdateProcessor.VERSION_FIELD, params.get(DistributedUpdateProcessor.VERSION_FIELD));
     }
 
     return result;
