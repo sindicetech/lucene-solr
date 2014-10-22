@@ -36,7 +36,14 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 
 
 public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
-  private static String vfield = DistributedUpdateProcessor.VERSION_FIELD;//"asdf";//DistributedUpdateProcessor.VERSION_FIELD;
+  private static String vfield = DistributedUpdateProcessor.VERSION_FIELD;
+  SolrServer solrServer;
+
+  /*
+  TODO: verify that:
+    shard1: doc1, doc2, doc3
+    shard2: doc4
+   */
 
   @Override
   protected String getCloudSolrConfig() {
@@ -61,7 +68,16 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
       // todo: do I have to do this here?
       waitForRecoveriesToFinish(false);
 
-      doTestCdcrDocVersions();
+      // doTestCdcrDocVersions(cloudClient);
+
+      //
+      // now test with a non-smart client
+      //
+      // use a leader so we test both forwarding and non-forwarding logic
+      doTestCdcrDocVersions(shardToLeaderJetty.get("shard1").client.solrClient);
+
+      // now test forwarding of the other half of commands
+      // doTestCdcrDocVersions(shardToLeaderJetty.get("shard2").client.solrClient);
 
       commit(); // work arround SOLR-5628
 
@@ -73,8 +89,10 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     }
   }
 
-  private void doTestCdcrDocVersions() throws Exception {
-    log.info("### STARTING doCdcrTestDocVersions");
+  private void doTestCdcrDocVersions(SolrServer solrServer) throws Exception {
+    this.solrServer = solrServer;
+
+    log.info("### STARTING doCdcrTestDocVersions - Add commands, client: " + solrServer);
     assertEquals(2, cloudClient.getZkStateReader().getClusterState().getCollection(DEFAULT_COLLECTION).getSlices().size());
 
     vadd("doc1", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
@@ -84,7 +102,7 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     commit();
 
     // versions are preserved and verifiable both by query and by real-time get
-    doQuery("doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
+    doQuery(solrServer, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
     doRealTimeGet("doc1,doc2,doc3,doc4", "10,11,10,11");
 
     vadd("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "");
@@ -111,54 +129,102 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     commit();
 
     // versions are still as they were
-    doQuery("doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+    doQuery(solrServer, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+
+    // query all shard replicas individually
+    doQueryShard("shard1", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+    doQueryShard("shard2", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // optimistic locking update
     vadd("doc4", 12);
     commit();
 
-    QueryResponse rsp = cloudClient.query(params("qt","/get", "ids", "doc4"));
+    QueryResponse rsp = solrServer.query(params("qt","/get", "ids", "doc4"));
     long version = (long) rsp.getResults().get(0).get(vfield);
 
     // update accepted and a new version number was generated
     assertTrue(version > 1_000_000_000_000l);
+
+    log.info("### STARTING doCdcrTestDocVersions - Delete commands");
+
+    // send a delete update with an older version number
+    vdelete("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    // must ignore the delete
+    doRealTimeGet("doc1", "12");
+
+    // send a delete update with a higher version number
+    vdelete("doc1", 13, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    // must be deleted
+    doRealTimeGet("doc1", "");
+
+    // send a delete update with a higher version number
+    vdelete("doc4", version + 1, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    // must be deleted
+    doRealTimeGet("doc4", "");
+
+    commit();
+
+    // query each shard replica individually
+    doQueryShard("shard1", "doc2,12,doc3,12", "q","*:*");
+    doQueryShard("shard2", "doc2,12,doc3,12", "q","*:*");
+
+    // version conflict thanks to optimistic locking
+    if (solrServer.equals(cloudClient)) // TODO: it seems that optimistic locking doesn't work with forwarding, test with shard2 client
+      vdeleteFail("doc2", 50, 409);
+
+    // cleanup after ourselves for the next run
+    vdelete("doc2", 50, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vdelete("doc3", 50, CdcrUpdateProcessor.CDCR_UPDATE, "");
+
+    commit();
   }
+
+
+  // ------------------ auxiliary methods ------------------
+
 
   public void doQueryShard(String shard, String expectedDocs, String... queryParams) throws Exception {
     List<String> replicas = getReplicaUrls(DEFAULT_COLLECTION, shard);
-    //replicas.remove(getLeaderUrl(DEFAULT_COLLECTION, shard));
 
     for (String replica : replicas) {
       HttpSolrServer replicaServer = new HttpSolrServer(replica);
       replicaServer.setConnectionTimeout(15000);
-      //doQuery(replicaServer, expectedDocs, queryParams);
+      doQuery(replicaServer, expectedDocs, queryParams);
 
       QueryResponse rsp = replicaServer.query(params(queryParams));
       log.info("---- RESPONSE "+ replica + " "+shard+": " + rsp.getResults());
-
-      assertEquals(4, rsp.getResults().getNumFound());
     }
   }
 
   void vdelete(String id, long version, String... params) throws Exception {
     UpdateRequest req = new UpdateRequest();
     req.deleteById(id);
-    req.setParam("del_version", Long.toString(version));
+    req.setParam(vfield, Long.toString(version));
+
     for (int i=0; i<params.length; i+=2) {
       req.setParam( params[i], params[i+1]);
     }
-    cloudClient.request(req);
-    // req.process(cloudClient);
+    solrServer.request(req);
   }
 
-  String vaddFailMessage(String id, long version, String... params) {
-    String msg = null;
+  void vdeleteFail(String id, long version, int errCode, String... params) throws Exception {
+    boolean failed = false;
     try {
-      vadd(id, version, params);
-    } catch (Exception ex) {
-      msg = ex.getMessage();
+      vdelete(id, version, params);
+    } catch (SolrException e) {
+      failed = true;
+      assertEquals(errCode, e.code());
+    } catch (SolrServerException ex) {
+      Throwable t = ex.getCause();
+      if (t instanceof SolrException) {
+        failed = true;
+        SolrException exception = (SolrException) t;
+        assertEquals(errCode, exception.code());
+      }
+    } catch (Exception e) {
+      log.error("ERROR", e);
     }
-    return msg;
+    assertTrue(failed);
   }
 
   void vadd(String id, long version, String... params) throws Exception {
@@ -167,7 +233,7 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     for (int i=0; i<params.length; i+=2) {
       req.setParam( params[i], params[i+1]);
     }
-    cloudClient.request(req);
+    solrServer.request(req);
   }
 
   void vaddFail(String id, long version, int errCode, String... params) throws Exception {
@@ -190,20 +256,17 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     assertTrue(failed);
   }
 
-  void vdeleteFail(String id, long version, int errCode, String... params) throws Exception {
-    boolean failed = false;
+  String vaddFailMessage(String id, long version, String... params) {
+    String msg = null;
     try {
-      vdelete(id, version, params);
-    } catch (SolrException e) {
-      failed = true;
-      assertEquals(errCode, e.code());
-    } catch (Exception e) {
-      log.error("ERROR", e);
+      vadd(id, version, params);
+    } catch (Exception ex) {
+      msg = ex.getMessage();
     }
-    assertTrue(failed);
+    return msg;
   }
 
-  void doQuery(String expectedDocs, String... queryParams) throws Exception {
+  void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
 
     List<String> strs = StrUtils.splitSmart(expectedDocs, ",", true);
     Map<String, Object> expectedIds = new HashMap<>();
@@ -214,7 +277,7 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
       expectedIds.put(id,v);
     }
 
-    QueryResponse rsp = cloudClient.query(params(queryParams));
+    QueryResponse rsp = ss.query(params(queryParams));
     Map<String, Object> obtainedIds = new HashMap<>();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.put((String) doc.get("id"), doc.get(vfield));
@@ -229,10 +292,12 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
     List<String> strs = StrUtils.splitSmart(ids, ",", true);
     List<String> verS = StrUtils.splitSmart(versions, ",", true);
     for (int i=0; i<strs.size(); i++) {
-      expectedIds.put(strs.get(i), Long.valueOf(verS.get(i)));
+      if (! verS.isEmpty()) {
+        expectedIds.put(strs.get(i), Long.valueOf(verS.get(i)));
+      }
     }
 
-    QueryResponse rsp = cloudClient.query(params("qt","/get", "ids",ids));
+    QueryResponse rsp = solrServer.query(params("qt","/get", "ids",ids));
     Map<String, Object> obtainedIds = new HashMap<>();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.put((String) doc.get("id"), doc.get(vfield));
@@ -244,7 +309,7 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
   void doRealTimeGet(SolrServer ss, String ids) throws Exception {
     Set<String> expectedIds = new HashSet<>( StrUtils.splitSmart(ids, ",", true) );
 
-    QueryResponse rsp = cloudClient.query(params("qt","/get", "ids",ids));
+    QueryResponse rsp = solrServer.query(params("qt","/get", "ids",ids));
     Set<String> obtainedIds = new HashSet<>();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.add((String) doc.get("id"));
@@ -254,12 +319,11 @@ public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
   }
 
 
-  // TODO: refactor some of this stuff into the SolrJ client... it should be easier to use
   void doDBQ(String q, String... reqParams) throws Exception {
     UpdateRequest req = new UpdateRequest();
     req.deleteByQuery(q);
     req.setParams(params(reqParams));
-    req.process(cloudClient);
+    req.process(solrServer);
   }
 
   @Override
