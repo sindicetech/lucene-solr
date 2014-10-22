@@ -17,7 +17,17 @@ package org.apache.solr.cloud;
  * limitations under the License.
  */
 
+import org.apache.solr.handler.CdcrRequestHandler;
+import org.junit.Before;
+
 public class CdcrAPIDistributedZkTest extends AbstractCdcrDistributedZkTest {
+
+  @Override
+  @Before
+  public void setUp() throws Exception {
+    schemaString = "schema15.xml";      // we need a string id
+    super.setUp();
+  }
 
   @Override
   public void doTest() throws Exception {
@@ -25,11 +35,18 @@ public class CdcrAPIDistributedZkTest extends AbstractCdcrDistributedZkTest {
     this.printLayout(); // debug
 
     // placeholder for future tests
-    indexDoc(getDoc(id, "10000000"));
+    indexDoc(getDoc(id, "a"));
+    indexDoc(getDoc(id, "b"));
+    indexDoc(getDoc(id, "c"));
+    indexDoc(getDoc(id, "d"));
+    indexDoc(getDoc(id, "e"));
+    indexDoc(getDoc(id, "f"));
     commit();
 
-    assertEquals(1, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(6, getNumDocs(SOURCE_COLLECTION));
     assertEquals(0, getNumDocs(TARGET_COLLECTION));
+
+    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.TRIGGER);
   }
 
 }

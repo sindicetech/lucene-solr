@@ -17,6 +17,9 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.update.CdcrUpdateLog;
 
@@ -24,10 +27,16 @@ public class CdcReplicatorState {
 
   private final CloudSolrServer targetClient;
 
-  private final CdcrUpdateLog.CdcrLogReader logReader;
+  private CdcrUpdateLog.CdcrLogReader logReader;
 
-  public CdcReplicatorState(final CloudSolrServer targetClient, final CdcrUpdateLog.CdcrLogReader logReader) {
+  private long consecutiveErrors = 0;
+  private final Map<ErrorType, Long> errorCounters = new HashMap<>();
+
+  public CdcReplicatorState(final CloudSolrServer targetClient) {
     this.targetClient = targetClient;
+  }
+
+  public void setLogReader(final CdcrUpdateLog.CdcrLogReader logReader) {
     this.logReader = logReader;
   }
 
@@ -35,9 +44,35 @@ public class CdcReplicatorState {
     return logReader;
   }
 
+  public CloudSolrServer getClient() {
+    return targetClient;
+  }
+
   public void close() {
     targetClient.shutdown();
     logReader.close();
+  }
+
+  public void reportError(ErrorType error) {
+    if (!errorCounters.containsKey(error)) {
+      errorCounters.put(error, 0l);
+    }
+    errorCounters.put(error, errorCounters.get(error) + 1);
+    consecutiveErrors++;
+  }
+
+  public void resetConsecutiveErrors() {
+    consecutiveErrors = 0;
+  }
+
+  public long getConsecutiveErrors() {
+    return consecutiveErrors;
+  }
+
+  public enum ErrorType {
+    INTERNAL,
+    SERVER,
+    BAD_REQUEST
   }
 
 }
