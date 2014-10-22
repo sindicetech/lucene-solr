@@ -36,10 +36,19 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
 
   @Override
   public void processAdd(AddUpdateCommand cmd) throws IOException {
+    /*
+    temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.versionAdd doesn't execute leader logic
+    but the else part of that if. That way version remains preserved.
+     */
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
       cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC);
     }
 
     super.processAdd(cmd);
+
+    // unset the flag to avoid unintended consequences down the chain
+    if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
+      cmd.setFlags(cmd.getFlags() & ~UpdateCommand.PEER_SYNC);
+    }
   }
 }
