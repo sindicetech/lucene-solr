@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.solr.client.solrj.SolrServer;
+import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
@@ -35,17 +36,12 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.junit.BeforeClass;
 
 
-public class CdcrVersionPreservationTest extends AbstractFullDistribZkTestBase {
-  private static String vfield = DistributedUpdateProcessor.VERSION_FIELD;
+public class CdcrVersionPreservationTest extends AbstractCdcrDistributedZkTest {
+  private static String vfield = DistributedUpdateProcessor.VERSION_FIELD;//"asdf";//DistributedUpdateProcessor.VERSION_FIELD;
 
   @Override
   protected String getCloudSolrConfig() {
     return "solrconfig-tlog-cdcr.xml";
-  }
-
-  @BeforeClass
-  public static void beforeShardHashingTest() throws Exception {
-    useFactory(null);
   }
 
   public CdcrVersionPreservationTest() {
@@ -57,6 +53,7 @@ public class CdcrVersionPreservationTest extends AbstractFullDistribZkTestBase {
 
   @Override
   public void doTest() throws Exception {
+    this.printLayout();
     boolean testFinished = false;
     try {
       handle.clear();
@@ -88,8 +85,72 @@ public class CdcrVersionPreservationTest extends AbstractFullDistribZkTestBase {
     vadd("doc2", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
     vadd("doc3", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
     vadd("doc4", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    commit();
 
-    doRTG("doc1,doc2,doc3,doc4", "10,11,10,11");
+//    doQuery(cloudClient, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
+
+
+//    List<String> replicas = getReplicaUrls(DEFAULT_COLLECTION, "shard1");
+//    replicas.remove(getLeaderUrl(DEFAULT_COLLECTION, "shard1"));
+//
+//    for (String replica : replicas) {
+//      HttpSolrServer replicaServer = new HttpSolrServer(replica);
+//      replicaServer.setConnectionTimeout(15000);
+//      doQuery(replicaServer, "doc4,11", "q", "*:*");
+//    }
+
+    doQueryShard("shard1",  "doc4,11", "q", "*:*");
+    doQueryShard("shard2",  "doc4,11", "q", "*:*");
+
+    //doc1,10,doc2,11,doc3,10,
+    //doRTG("doc1,doc2,doc3,doc4", "10,11,10,11");
+  }
+
+  private void doTestCdcr() throws Exception {
+    log.info("### STARTING doCdcrTestDocVersions");
+    assertEquals(2, cloudClient.getZkStateReader().getClusterState().getCollection(DEFAULT_COLLECTION).getSlices().size());
+
+    ss = cloudClient;
+
+    vadd("doc1", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc2", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc3", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc4", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    commit();
+
+//    doQuery(cloudClient, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
+
+
+//    List<String> replicas = getReplicaUrls(DEFAULT_COLLECTION, "shard1");
+//    replicas.remove(getLeaderUrl(DEFAULT_COLLECTION, "shard1"));
+//
+//    for (String replica : replicas) {
+//      HttpSolrServer replicaServer = new HttpSolrServer(replica);
+//      replicaServer.setConnectionTimeout(15000);
+//      doQuery(replicaServer, "doc4,11", "q", "*:*");
+//    }
+
+    doQueryShard("shard1",  "doc4,11", "q", "*:*");
+    doQueryShard("shard2",  "doc4,11", "q", "*:*");
+
+    //doc1,10,doc2,11,doc3,10,
+    //doRTG("doc1,doc2,doc3,doc4", "10,11,10,11");
+  }
+
+  public void doQueryShard(String shard, String expectedDocs, String... queryParams) throws Exception {
+    List<String> replicas = getReplicaUrls(DEFAULT_COLLECTION, shard);
+    //replicas.remove(getLeaderUrl(DEFAULT_COLLECTION, shard));
+
+    for (String replica : replicas) {
+      HttpSolrServer replicaServer = new HttpSolrServer(replica);
+      replicaServer.setConnectionTimeout(15000);
+      //doQuery(replicaServer, expectedDocs, queryParams);
+
+      QueryResponse rsp = replicaServer.query(params(queryParams));
+      log.info("---- RESPONSE "+ replica + " "+shard+": " + rsp.getResults());
+
+      assertEquals(4, rsp.getResults().getNumFound());
+    }
   }
 
   SolrServer ss;
@@ -140,8 +201,7 @@ public class CdcrVersionPreservationTest extends AbstractFullDistribZkTestBase {
     assertTrue(failed);
   }
 
-
-  void doQuery(String expectedDocs, String... queryParams) throws Exception {
+  void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
 
     List<String> strs = StrUtils.splitSmart(expectedDocs, ",", true);
     Map<String, Object> expectedIds = new HashMap<>();
@@ -152,7 +212,7 @@ public class CdcrVersionPreservationTest extends AbstractFullDistribZkTestBase {
       expectedIds.put(id,v);
     }
 
-    QueryResponse rsp = cloudClient.query(params(queryParams));
+    QueryResponse rsp = ss.query(params(queryParams));
     Map<String, Object> obtainedIds = new HashMap<>();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.put((String) doc.get("id"), doc.get(vfield));
