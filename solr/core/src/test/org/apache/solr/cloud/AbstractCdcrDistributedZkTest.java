@@ -79,6 +79,11 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     sliceCount = 2;
   }
 
+  @Override
+  protected String getCloudSolrConfig() {
+    return "solrconfig-cdcr.xml";
+  }
+
   protected void createTargetCollection() throws Exception {
     CloudSolrServer client = createCloudClient(null);
 
