@@ -30,6 +30,7 @@ import java.util.concurrent.Future;
 
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.cloud.ZkController;
@@ -68,6 +69,20 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private ProcessStateManager serviceStateManager;
   private BufferStateManager bufferStateManager;
+
+  private ReplicatorStatesManager replicatorStatesManager;
+
+  @Override
+  public void init(NamedList args) {
+    super.init(args);
+
+    // Initialise targets
+    replicatorStatesManager = new ReplicatorStatesManager();
+
+    // nocommit - hardcoded for testing purpose
+    String zkHost = System.getProperty("zkHost");
+    replicatorStatesManager.addTarget(zkHost, "target_collection");
+  }
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
@@ -111,6 +126,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleDisableBufferAction(req, rsp);
         break;
       }
+      case TRIGGER: {
+        this.handleTriggerAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -126,13 +145,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     // Make sure that the core is ZKAware
     if(!core.getCoreDescriptor().getCoreContainer().isZooKeeperAware()) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Solr instance is not running in SolrCloud mode.");
     }
 
     // Make sure that the core is using the CdcrUpdateLog implementation
     if(!(core.getUpdateHandler().getUpdateLog() instanceof CdcrUpdateLog)) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Solr instance is not configured with the cdcr update log.");
     }
 
@@ -146,6 +165,9 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     if (bufferStateManager == null) {
       bufferStateManager = new BufferStateManager();
     }
+
+    // Initialise the log reader for each target
+    replicatorStatesManager.initLogReaders(((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()));
   }
 
   private void handleStartAction(SolrQueryRequest req, SolrQueryResponse rsp) {
@@ -272,6 +294,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
+  private void handleTriggerAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    CdcReplicator replicator = new CdcReplicator(replicatorStatesManager.peek());
+    replicator.run();
+  }
+
   @Override
   public String getDescription() {
     return "Manage Cross Data Center Replication";
@@ -287,7 +314,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     COLLECTIONCHECKPOINT,
     SLICECHECKPOINT,
     ENABLEBUFFER,
-    DISABLEBUFFER;
+    DISABLEBUFFER,
+    TRIGGER;
 
     public static CdcrAction get(String p) {
       if (p != null) {
@@ -608,5 +636,35 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
   }
+
+  private class ReplicatorStatesManager {
+
+    private final List<CdcReplicatorState> replicatorStates = new ArrayList<>();
+
+    void addTarget(String zkHost, String collection) {
+      CloudSolrServer client = new CloudSolrServer(zkHost, true);
+      client.setDefaultCollection(collection);
+      replicatorStates.add(new CdcReplicatorState(client));
+    }
+
+    void initLogReaders(CdcrUpdateLog ulog) {
+      for (CdcReplicatorState state : replicatorStates) {
+        state.setLogReader(ulog.newLogReader());
+      }
+    }
+
+    void shutdown() {
+      for (CdcReplicatorState state : replicatorStates) {
+        state.getClient().shutdown();
+        state.getLogReader().close();
+      }
+    }
+
+    CdcReplicatorState peek() {
+      return replicatorStates.get(0);
+    }
+
+  }
+
 
 }

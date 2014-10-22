@@ -239,8 +239,7 @@ public class CdcrUpdateLog extends UpdateLog {
       }
     }
 
-    @Override
-    public CdcrLogReader clone() {
+    public CdcrLogReader getSubReader() {
       CdcrLogReader clone = new CdcrLogReader((List<TransactionLog>) tlogs);
       clone.lookahead = this.lookahead;
       if (tlogReader != null) { // if the update log is emtpy, the tlogReader is equal to null
@@ -251,18 +250,18 @@ public class CdcrUpdateLog extends UpdateLog {
     }
 
     /**
-     * Expert: Fast forward this log reader with the other log reader. In order to avoid unexpected results, the other
-     * log reader must be a clone of this reader.
+     * Expert: Fast forward this log reader with a log subreader. In order to avoid unexpected results, the log
+     * subreader must be created from this reader.
      */
-    public void proceed(CdcrLogReader other) {
+    public void forwardSeek(CdcrLogReader subReader) {
       tlogReader.close(); // close the existing reader, a new one will be created
-      while (this.tlogs.peekLast().id < other.tlogs.peekLast().id) {
+      while (this.tlogs.peekLast().id < subReader.tlogs.peekLast().id) {
         tlogs.removeLast();
         currentTlog = tlogs.peekLast();
       }
-      assert this.tlogs.peekLast().id == other.tlogs.peekLast().id;
-      this.lookahead = other.lookahead;
-      this.tlogReader = currentTlog.getReader(other.tlogReader.currentPos());
+      assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
+      this.lookahead = subReader.lookahead;
+      this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
     }
 
     /**

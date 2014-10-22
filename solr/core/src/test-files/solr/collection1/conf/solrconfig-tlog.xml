@@ -45,8 +45,6 @@
 
   <requestHandler name="standard" class="solr.StandardRequestHandler">
   </requestHandler>
-  
-  <requestHandler name="/cdcr" class="solr.CdcrRequestHandler"  />
 
   <updateHandler class="solr.DirectUpdateHandler2">
     <updateLog>
