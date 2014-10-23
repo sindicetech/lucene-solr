@@ -43,9 +43,12 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
     /*
     temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.versionAdd doesn't execute leader logic
     but the else part of that if. That way version remains preserved.
+
+    we cannot set the flag for the whole processAdd method because DistributedUpdateProcessor.setupRequest() would set
+    isLeader to false which wouldn't work
      */
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
-      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC);
+      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC); // we need super.versionAdd() to set leaderLogic to false
     }
 
     boolean result = super.versionAdd(cmd);
@@ -63,9 +66,12 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
     /*
     temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.deleteAdd doesn't execute leader logic
     but the else part of that if. That way version remains preserved.
+
+    we cannot set the flag for the whole processDelete method because DistributedUpdateProcessor.setupRequest() would set
+    isLeader to false which wouldn't work
      */
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
-      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC);
+      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC); // we need super.versionAdd() to set leaderLogic to false
     }
 
     boolean result = super.versionDelete(cmd);
@@ -86,5 +92,24 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
     }
 
     return result;
+  }
+
+  @Override
+  public void doDeleteByQuery(DeleteUpdateCommand cmd) throws IOException {
+    /*
+    temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.doDeleteByQuery doesn't execute leader logic
+    That way version remains preserved.
+
+     */
+    if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
+      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC); // we need super.doDeleteByQuery() to set leaderLogic to false
+    }
+
+    super.doDeleteByQuery(cmd);
+
+    // unset the flag to avoid unintended consequences down the chain
+    if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
+      cmd.setFlags(cmd.getFlags() & ~UpdateCommand.PEER_SYNC);
+    }
   }
 }
