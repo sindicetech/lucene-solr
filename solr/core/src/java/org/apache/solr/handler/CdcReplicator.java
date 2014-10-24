@@ -17,11 +17,9 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
-import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.List;
 
-import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
@@ -47,49 +45,46 @@ public class CdcReplicator implements Runnable {
 
   @Override
   public void run() {
-    CdcrUpdateLog.CdcrLogReader logReader = this.state.getLogReader();
-
-    // Make a clone to be able to reset the original position of the reader in case of errors
-    CdcrUpdateLog.CdcrLogReader subReader = logReader.getSubReader();
+    CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
 
     try {
-      // create batch update request
+      // create update request
       UpdateRequest req = new UpdateRequest();
 
-      Object o = subReader.next();
-      for (int i = 0; i < BATCH_SIZE && o != null; i++, o = subReader.next()) {
+      Object o = logReader.next();
+      for (int i = 0; i < BATCH_SIZE && o != null; i++, o = logReader.next()) {
         if (this.processUpdate(o, req) != null) {
           UpdateResponse rsp = req.process(state.getClient());
           if (rsp.getStatus() != 0) {
             throw new CdcReplicatorException(req, rsp);
           }
-          // reset the number of consecutive errors
+          // we successfully forwarded the update, reset the number of consecutive errors
           state.resetConsecutiveErrors();
         }
-
-        // the update has been forwarded successfully, update log reader position
-        // TODO: not very efficient as we create a new log reader for each update ...
-        logReader.forwardSeek(subReader);
       }
     }
-    catch (InterruptedException | IOException e) {
+    catch (Exception e) {
+      // there were an error while forwarding the update, reset the log reader to its previous position
+      logReader.resetToLastPosition();
+      // report error and update error stats
+      this.handleException(e);
+    }
+  }
+
+  private void handleException(Exception e) {
+    if (e instanceof CdcReplicatorException) {
+      UpdateRequest req = ((CdcReplicatorException) e).req;
+      UpdateResponse rsp = ((CdcReplicatorException) e).rsp;
+      log.warn("Failed to forward update request {}. Got response {}", req, rsp);
+      state.reportError(CdcReplicatorState.ErrorType.BAD_REQUEST);
+    }
+    else if (e instanceof CloudSolrServer.RouteException) {
+      log.warn("Failed to forward update request", e);
+      state.reportError(CdcReplicatorState.ErrorType.BAD_REQUEST);
+    }
+    else {
       log.warn("Failed to forward update request", e);
       state.reportError(CdcReplicatorState.ErrorType.INTERNAL);
-    }
-    catch (SolrServerException e) {
-      log.warn("Failed to forward update request", e);
-      state.reportError(CdcReplicatorState.ErrorType.SERVER);
-    }
-    catch (CloudSolrServer.RouteException e) {
-      log.warn("Failed to forward update request", e);
-      state.reportError(CdcReplicatorState.ErrorType.BAD_REQUEST);
-    }
-    catch (CdcReplicatorException e) {
-      log.warn("Failed to forward update request {}. Got response {}", e.req, e.rsp);
-      state.reportError(CdcReplicatorState.ErrorType.BAD_REQUEST);
-    }
-    finally {
-      subReader.close();
     }
   }
 

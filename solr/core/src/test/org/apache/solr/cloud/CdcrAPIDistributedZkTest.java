@@ -31,7 +31,7 @@ public class CdcrAPIDistributedZkTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    this.createTargetCollection();
+    // this.createTargetCollection();
     this.printLayout(); // debug
 
     // placeholder for future tests
@@ -44,9 +44,24 @@ public class CdcrAPIDistributedZkTest extends AbstractCdcrDistributedZkTest {
     commit();
 
     assertEquals(6, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    // assertEquals(0, getNumDocs(TARGET_COLLECTION));
 
-    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.TRIGGER);
+    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
+
+    log.info("Sleeping 1s");
+    Thread.currentThread().sleep(1000);
+    log.info("Finished sleeping");
+
+    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
+    log.info("Stopping leader of shard1 - {}", runner.coreNodeName);
+    ChaosMonkey.stop(runner.jetty);
+
+    log.info("Sleeping 2s");
+    Thread.currentThread().sleep(2000);
+    log.info("Finished sleeping");
+
+    log.info("Bringing back up the node");
+    ChaosMonkey.start(runner.jetty);
   }
 
 }

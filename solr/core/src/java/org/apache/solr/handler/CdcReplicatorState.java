@@ -23,7 +23,7 @@ import java.util.Map;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.update.CdcrUpdateLog;
 
-public class CdcReplicatorState {
+class CdcReplicatorState {
 
   private final CloudSolrServer targetClient;
 
@@ -32,28 +32,48 @@ public class CdcReplicatorState {
   private long consecutiveErrors = 0;
   private final Map<ErrorType, Long> errorCounters = new HashMap<>();
 
-  public CdcReplicatorState(final CloudSolrServer targetClient) {
+  CdcReplicatorState(final CloudSolrServer targetClient) {
     this.targetClient = targetClient;
   }
 
-  public void setLogReader(final CdcrUpdateLog.CdcrLogReader logReader) {
+  void reset() {
+    // close reader
+    this.closeLogReader();
+
+    // reset error stats
+    consecutiveErrors = 0;
+    errorCounters.clear();
+  }
+
+  /**
+   * Initialise the replicator state with a {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}
+   * that is positioned at the last target cluster checkpoint.
+   */
+  void init(final CdcrUpdateLog.CdcrLogReader logReader) {
     this.logReader = logReader;
   }
 
-  public CdcrUpdateLog.CdcrLogReader getLogReader() {
+  void closeLogReader() {
+    if (logReader != null) {
+      logReader.close();
+      logReader = null;
+    }
+  }
+
+  CdcrUpdateLog.CdcrLogReader getLogReader() {
     return logReader;
   }
 
-  public CloudSolrServer getClient() {
+  CloudSolrServer getClient() {
     return targetClient;
   }
 
-  public void close() {
+  void shutdown() {
     targetClient.shutdown();
-    logReader.close();
+    this.reset();
   }
 
-  public void reportError(ErrorType error) {
+  void reportError(ErrorType error) {
     if (!errorCounters.containsKey(error)) {
       errorCounters.put(error, 0l);
     }
@@ -61,17 +81,16 @@ public class CdcReplicatorState {
     consecutiveErrors++;
   }
 
-  public void resetConsecutiveErrors() {
+  void resetConsecutiveErrors() {
     consecutiveErrors = 0;
   }
 
-  public long getConsecutiveErrors() {
+  long getConsecutiveErrors() {
     return consecutiveErrors;
   }
 
-  public enum ErrorType {
+  enum ErrorType {
     INTERNAL,
-    SERVER,
     BAD_REQUEST
   }
 

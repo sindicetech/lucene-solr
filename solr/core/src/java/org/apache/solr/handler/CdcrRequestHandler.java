@@ -20,8 +20,10 @@ package org.apache.solr.handler;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -30,18 +32,14 @@ import java.util.concurrent.Future;
 
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.ClusterState;
-import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
-import org.apache.solr.common.cloud.ZooKeeperException;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
@@ -53,10 +51,6 @@ import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.plugin.SolrCoreAware;
-import org.apache.zookeeper.CreateMode;
-import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,21 +61,57 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private SolrCore core;
   private String collection;
 
-  private ProcessStateManager serviceStateManager;
-  private BufferStateManager bufferStateManager;
+  private CdcrProcessStateManager processStateManager;
+  private CdcrBufferStateManager bufferStateManager;
+  private CdcReplicatorStatesManager replicatorStatesManager;
+  private CdcrLeaderStateManager leaderStateManager;
 
-  private ReplicatorStatesManager replicatorStatesManager;
+  private CdcReplicatorScheduler replicatorScheduler;
+
+  public static final String REPLICAS_PARAM = "replicas";
+  public static final String SOURCE_COLLECTION_PARAM = "source";
+  public static final String TARGET_COLLECTION_PARAM = "target";
+  public static final String ZK_HOST_PARAM = "zkHost";
+
+  public CdcrRequestHandler() {
+    // Initialise the replicator scheduler
+    replicatorScheduler = new CdcReplicatorScheduler(replicatorStatesManager);
+    // Initialise the replicator states manager
+    replicatorStatesManager = new CdcReplicatorStatesManager();
+    // Initialise the leader state manager, and register the replicator states manager for notification
+    leaderStateManager = new CdcrLeaderStateManager();
+    leaderStateManager.register(replicatorStatesManager);
+    leaderStateManager.register(replicatorScheduler);
+    // Initialise the process state manager, and register the replicator states manager for notification
+    processStateManager = new CdcrProcessStateManager();
+    processStateManager.register(leaderStateManager);
+    processStateManager.register(replicatorStatesManager);
+    processStateManager.register(replicatorScheduler);
+    // Initialise the buffer state manager
+    bufferStateManager = new CdcrBufferStateManager();
+  }
 
   @Override
   public void init(NamedList args) {
     super.init(args);
 
-    // Initialise targets
-    replicatorStatesManager = new ReplicatorStatesManager();
+    Map<String,List<SolrParams>> replicasConfiguration = new HashMap<>();
 
-    // nocommit - hardcoded for testing purpose
-    String zkHost = System.getProperty("zkHost");
-    replicatorStatesManager.addTarget(zkHost, "target_collection");
+    if (args != null) {
+      List replicas = args.getAll(REPLICAS_PARAM);
+      for (Object replica : replicas) {
+        if (replicas != null && replica instanceof NamedList) {
+          SolrParams params = SolrParams.toSolrParams((NamedList) replica);
+          if (!replicasConfiguration.containsKey(params.get(SOURCE_COLLECTION_PARAM))) {
+            replicasConfiguration.put(params.get(SOURCE_COLLECTION_PARAM), new ArrayList<SolrParams>());
+          }
+          replicasConfiguration.get(params.get(SOURCE_COLLECTION_PARAM)).add(params);
+        }
+      }
+    }
+
+    // set the replicas configuration
+    this.replicatorStatesManager.setReplicasConfiguration(replicasConfiguration);
   }
 
   @Override
@@ -126,10 +156,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleDisableBufferAction(req, rsp);
         break;
       }
-      case TRIGGER: {
-        this.handleTriggerAction(req, rsp);
-        break;
-      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -141,7 +167,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   @Override
   public void inform(SolrCore core) {
     this.core = core;
-    collection = this.core.getName();
+    collection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
 
     // Make sure that the core is ZKAware
     if(!core.getCoreDescriptor().getCoreContainer().isZooKeeperAware()) {
@@ -155,34 +181,39 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
           "Solr instance is not configured with the cdcr update log.");
     }
 
-    // Switch the update log to buffering mode by default
-    ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).enableBuffer();
-
-    // Create the state managers after having a reference to the core and knowing our collection
-    if (serviceStateManager == null) {
-      serviceStateManager = new ProcessStateManager();
-    }
-    if (bufferStateManager == null) {
-      bufferStateManager = new BufferStateManager();
-    }
-
-    // Initialise the log reader for each target
-    replicatorStatesManager.initLogReaders(((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()));
+    // inform the state managers
+    replicatorStatesManager.inform(core);
+    leaderStateManager.inform(core);
+    processStateManager.inform(core);
+    bufferStateManager.inform(core);
+    // initialise the state managers, apart from the leader state manager that will be initialised later
+    // when a change of process state occurs
+    replicatorStatesManager.init();
+    processStateManager.init();
+    bufferStateManager.init();
   }
 
+  /**
+   * <p>
+   *   Update and synchronize the process state.
+   * </p>
+   * <p>
+   *   The process state manager must notify the replicator states manager of the change of state.
+   * </p>
+   */
   private void handleStartAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (serviceStateManager.getState() == ProcessState.STOPPED) {
-      serviceStateManager.setState(ProcessState.STARTED);
-      serviceStateManager.synchronize();
+    if (processStateManager.getState() == ProcessState.STOPPED) {
+      processStateManager.setState(ProcessState.STARTED);
+      processStateManager.synchronize();
     }
 
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   private void handleStopAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (serviceStateManager.getState() == ProcessState.STARTED) {
-      serviceStateManager.setState(ProcessState.STOPPED);
-      serviceStateManager.synchronize();
+    if (processStateManager.getState() == ProcessState.STARTED) {
+      processStateManager.setState(ProcessState.STOPPED);
+      processStateManager.synchronize();
     }
 
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
@@ -194,7 +225,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private NamedList getStatus() {
     NamedList status = new NamedList();
-    status.add(ProcessState.getParam(), serviceStateManager.getState().toLower());
+    status.add(ProcessState.getParam(), processStateManager.getState().toLower());
     status.add(BufferState.getParam(), bufferStateManager.getState().toLower());
     return status;
   }
@@ -251,7 +282,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    * Retrieve the version number of the latest entry of the {@link org.apache.solr.update.UpdateLog}.
    */
   private void handleSliceCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (!amILeader()) {
+    if (!leaderStateManager.amILeader()) {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrAction.SLICECHECKPOINT +
           "' sent to non-leader replica");
     }
@@ -262,18 +293,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     long lastVersion = versions.isEmpty() ? -1 : versions.get(0);
     rsp.add("checkpoint", lastVersion);
     recentUpdates.close();
-  }
-
-  private boolean amILeader() {
-    try {
-      ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
-      String myShardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
-      Replica myLeader = zkController.getZkStateReader().getLeaderRetry(collection, myShardId);
-      return myLeader.getName().equals(core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName());
-    }
-    catch (InterruptedException e) {
-      throw new ZooKeeperException(SolrException.ErrorCode.SERVER_ERROR, "", e);
-    }
   }
 
   private void handleEnableBufferAction(SolrQueryRequest req, SolrQueryResponse rsp) {
@@ -292,11 +311,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
-  }
-
-  private void handleTriggerAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    CdcReplicator replicator = new CdcReplicator(replicatorStatesManager.peek());
-    replicator.run();
   }
 
   @Override
@@ -365,99 +379,32 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   }
 
   /**
-   * Manage the life-cycle state of the CDCR. It is responsible of synchronising the state
-   * through Zookeeper. The state of the CDCR is stored in the zk node defined by {@link #getZnodePath()}.
+   * The possible states of the CDCR buffer
    */
-  private class ProcessStateManager {
+  public enum BufferState {
+    ENABLED,
+    DISABLED;
 
-    private ProcessState state;
-
-    private ProcessStateWatcher watcher = new ProcessStateWatcher();
-
-    ProcessStateManager() {
-      // Ensure that the status znode exists
-      this.createStateNode();
-
-      // Synchronise at startup and register the watcher
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        this.setState(ProcessState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed fetching initial state", e);
-      }
-    }
-
-    private String getZnodeBase() {
-      return "/collections/" + collection + "/cdcr/state";
-    }
-
-    private String getZnodePath() {
-      return getZnodeBase() + "/process";
-    }
-
-    void setState(ProcessState state) {
-      this.state = state;
-    }
-
-    ProcessState getState() {
-      return state;
-    }
-
-    /**
-     * Synchronise the state to Zookeeper. This method must be called only by the handler receiving the
-     * action.
-     */
-    void synchronize() {
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        zkClient.setData(this.getZnodePath(), this.getState().getBytes(), true);
-        // check if nobody changed it in the meantime, and set a new watcher
-        this.setState(ProcessState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed synchronising new state", e);
-      }
-    }
-
-    private void createStateNode() {
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        if (!zkClient.exists(this.getZnodePath(), true)) {
-          if (!zkClient.exists(this.getZnodeBase(), true)) {
-            zkClient.makePath(this.getZnodeBase(), CreateMode.PERSISTENT, true);
-          }
-          zkClient.create(this.getZnodePath(), ProcessState.STOPPED.getBytes(), CreateMode.PERSISTENT, true);
-          log.info("Created znode {}", this.getZnodePath());
-        }
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed to create CDCR process state node", e);
-      }
-    }
-
-    /**
-     * TODO: Should we handle disconnection and expired sessions ?
-     */
-    private class ProcessStateWatcher implements Watcher {
-
-      @Override
-      public void process(WatchedEvent event) {
-        log.debug("The CDCR process state has changed: {}", event);
-        if (Event.EventType.None.equals(event.getType())) {
-          return;
-        }
-        SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+    public static BufferState get(byte[] state) {
+      if (state != null) {
         try {
-          ProcessState state = ProcessState.get(zkClient.getData(ProcessStateManager.this.getZnodePath(), watcher, null, true));
-          ProcessStateManager.this.setState(state);
-          log.info("Received new CDCR process state from watcher: {}", state);
+          return BufferState.valueOf(new String(state).toUpperCase(Locale.ROOT));
         }
-        catch (KeeperException | InterruptedException e) {
-          log.warn("Failed synchronising new state", e);
-        }
+        catch (Exception e) {}
       }
+      return null;
+    }
 
+    public String toLower(){
+      return toString().toLowerCase(Locale.ROOT);
+    }
+
+    public byte[] getBytes() {
+      return toLower().getBytes();
+    }
+
+    public static String getParam() {
+      return "buffer";
     }
 
   }
@@ -498,173 +445,5 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
   }
-
-  /**
-   * The possible states of the CDCR buffer
-   */
-  public enum BufferState {
-    ENABLED,
-    DISABLED;
-
-    public static BufferState get(byte[] state) {
-      if (state != null) {
-        try {
-          return BufferState.valueOf(new String(state).toUpperCase(Locale.ROOT));
-        }
-        catch (Exception e) {}
-      }
-      return null;
-    }
-
-    public String toLower(){
-      return toString().toLowerCase(Locale.ROOT);
-    }
-
-    public byte[] getBytes() {
-      return toLower().getBytes();
-    }
-
-    public static String getParam() {
-      return "buffer";
-    }
-
-  }
-
-  /**
-   * Manage the state of the update log buffer. It is responsible of synchronising the state
-   * through Zookeeper. The state of the buffer is stored in the zk node defined by {@link #getZnodePath()}.
-   */
-  private class BufferStateManager {
-
-    private BufferStateWatcher watcher = new BufferStateWatcher();
-
-    BufferStateManager() {
-      // Ensure that the state znode exists
-      this.createStateNode();
-
-      // Synchronise at startup and register the watcher
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        this.setState(BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed fetching initial state", e);
-      }
-    }
-
-    private String getZnodeBase() {
-      return "/collections/" + collection + "/cdcr/state";
-    }
-
-    private String getZnodePath() {
-      return getZnodeBase() + "/buffer";
-    }
-
-    void setState(BufferState state) {
-      CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-      switch (state) {
-        case ENABLED: {
-          ulog.enableBuffer();
-          return;
-        }
-        case DISABLED: {
-          ulog.disableBuffer();
-          return;
-        }
-      }
-    }
-
-    BufferState getState() {
-      CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-      return ulog.isBuffering() ? BufferState.ENABLED : BufferState.DISABLED;
-    }
-
-    /**
-     * Synchronise the state to Zookeeper. This method must be called only by the handler receiving the
-     * action.
-     */
-    void synchronize() {
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        zkClient.setData(this.getZnodePath(), this.getState().getBytes(), true);
-        // check if nobody changed it in the meantime, and set a new watcher
-        this.setState(BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed synchronising new state", e);
-      }
-    }
-
-    private void createStateNode() {
-      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-      try {
-        if (!zkClient.exists(this.getZnodePath(), true)) {
-          if (!zkClient.exists(this.getZnodeBase(), true)) {
-            zkClient.makePath(this.getZnodeBase(), CreateMode.PERSISTENT, true);
-          }
-          zkClient.create(this.getZnodePath(), this.getState().getBytes(), CreateMode.PERSISTENT, true);
-          log.info("Created znode {}", this.getZnodePath());
-        }
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed to create CDCR buffer state node", e);
-      }
-    }
-
-    /**
-     * TODO: Should we handle disconnection and expired sessions ?
-     */
-    private class BufferStateWatcher implements Watcher {
-
-      @Override
-      public void process(WatchedEvent event) {
-        log.debug("The CDCR buffer state has changed: {}", event);
-        if (Event.EventType.None.equals(event.getType())) {
-          return;
-        }
-        SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-        try {
-          BufferState state = BufferState.get(zkClient.getData(BufferStateManager.this.getZnodePath(), watcher, null, true));
-          BufferStateManager.this.setState(state);
-          log.info("Received new CDCR buffer state from watcher: {}", state);
-        }
-        catch (KeeperException | InterruptedException e) {
-          log.warn("Failed synchronising new state", e);
-        }
-      }
-
-    }
-
-  }
-
-  private class ReplicatorStatesManager {
-
-    private final List<CdcReplicatorState> replicatorStates = new ArrayList<>();
-
-    void addTarget(String zkHost, String collection) {
-      CloudSolrServer client = new CloudSolrServer(zkHost, true);
-      client.setDefaultCollection(collection);
-      replicatorStates.add(new CdcReplicatorState(client));
-    }
-
-    void initLogReaders(CdcrUpdateLog ulog) {
-      for (CdcReplicatorState state : replicatorStates) {
-        state.setLogReader(ulog.newLogReader());
-      }
-    }
-
-    void shutdown() {
-      for (CdcReplicatorState state : replicatorStates) {
-        state.getClient().shutdown();
-        state.getLogReader().close();
-      }
-    }
-
-    CdcReplicatorState peek() {
-      return replicatorStates.get(0);
-    }
-
-  }
-
 
 }
