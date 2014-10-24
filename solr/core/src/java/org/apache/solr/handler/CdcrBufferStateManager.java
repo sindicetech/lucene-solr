@@ -35,7 +35,7 @@ class CdcrBufferStateManager {
 
   private boolean isInitialised = false;
 
-  private BufferStateWatcher watcher = new BufferStateWatcher();
+  private Watcher watcher;
 
   private SolrCore core;
 
@@ -54,6 +54,7 @@ class CdcrBufferStateManager {
       // Startup and register the watcher at startup
       try {
         SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+        watcher = this.initWatcher(zkClient);
         this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
       }
       catch (KeeperException | InterruptedException e) {
@@ -64,7 +65,12 @@ class CdcrBufferStateManager {
     }
   }
 
-  public void inform(SolrCore core) {
+  private Watcher initWatcher(SolrZkClient zkClient) {
+    BufferStateWatcher watcher = new BufferStateWatcher();
+    return zkClient.wrapWatcher(watcher);
+  }
+
+  void inform(SolrCore core) {
     this.core = core;
     // No need to reinitialise anything if the core is reloaded
   }
