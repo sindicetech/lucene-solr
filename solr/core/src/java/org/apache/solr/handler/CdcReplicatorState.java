@@ -25,6 +25,7 @@ import org.apache.solr.update.CdcrUpdateLog;
 
 class CdcReplicatorState {
 
+  private final String targetCollection;
   private final CloudSolrServer targetClient;
 
   private CdcrUpdateLog.CdcrLogReader logReader;
@@ -32,17 +33,9 @@ class CdcReplicatorState {
   private long consecutiveErrors = 0;
   private final Map<ErrorType, Long> errorCounters = new HashMap<>();
 
-  CdcReplicatorState(final CloudSolrServer targetClient) {
+  CdcReplicatorState(final String targetCollection, final CloudSolrServer targetClient) {
+    this.targetCollection = targetCollection;
     this.targetClient = targetClient;
-  }
-
-  void reset() {
-    // close reader
-    this.closeLogReader();
-
-    // reset error stats
-    consecutiveErrors = 0;
-    errorCounters.clear();
   }
 
   /**
@@ -64,13 +57,17 @@ class CdcReplicatorState {
     return logReader;
   }
 
+  String getTargetCollection() {
+    return targetCollection;
+  }
+
   CloudSolrServer getClient() {
     return targetClient;
   }
 
   void shutdown() {
     targetClient.shutdown();
-    this.reset();
+    this.closeLogReader();
   }
 
   void reportError(ErrorType error) {

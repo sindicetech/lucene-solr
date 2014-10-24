@@ -44,6 +44,7 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
+import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
@@ -61,41 +62,23 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private SolrCore core;
   private String collection;
 
+  private Map<String,List<SolrParams>> replicasConfiguration;
+
   private CdcrProcessStateManager processStateManager;
   private CdcrBufferStateManager bufferStateManager;
-  private CdcReplicatorStatesManager replicatorStatesManager;
+  private CdcReplicatorManager replicatorManager;
   private CdcrLeaderStateManager leaderStateManager;
-
-  private CdcReplicatorScheduler replicatorScheduler;
 
   public static final String REPLICAS_PARAM = "replicas";
   public static final String SOURCE_COLLECTION_PARAM = "source";
   public static final String TARGET_COLLECTION_PARAM = "target";
   public static final String ZK_HOST_PARAM = "zkHost";
 
-  public CdcrRequestHandler() {
-    // Initialise the replicator scheduler
-    replicatorScheduler = new CdcReplicatorScheduler(replicatorStatesManager);
-    // Initialise the replicator states manager
-    replicatorStatesManager = new CdcReplicatorStatesManager();
-    // Initialise the leader state manager, and register the replicator states manager for notification
-    leaderStateManager = new CdcrLeaderStateManager();
-    leaderStateManager.register(replicatorStatesManager);
-    leaderStateManager.register(replicatorScheduler);
-    // Initialise the process state manager, and register the replicator states manager for notification
-    processStateManager = new CdcrProcessStateManager();
-    processStateManager.register(leaderStateManager);
-    processStateManager.register(replicatorStatesManager);
-    processStateManager.register(replicatorScheduler);
-    // Initialise the buffer state manager
-    bufferStateManager = new CdcrBufferStateManager();
-  }
-
   @Override
   public void init(NamedList args) {
     super.init(args);
 
-    Map<String,List<SolrParams>> replicasConfiguration = new HashMap<>();
+    replicasConfiguration = new HashMap<>();
 
     if (args != null) {
       List replicas = args.getAll(REPLICAS_PARAM);
@@ -109,9 +92,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         }
       }
     }
-
-    // set the replicas configuration
-    this.replicatorStatesManager.setReplicasConfiguration(replicasConfiguration);
   }
 
   @Override
@@ -181,16 +161,37 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
           "Solr instance is not configured with the cdcr update log.");
     }
 
-    // inform the state managers
-    replicatorStatesManager.inform(core);
-    leaderStateManager.inform(core);
-    processStateManager.inform(core);
-    bufferStateManager.inform(core);
-    // initialise the state managers, apart from the leader state manager that will be initialised later
-    // when a change of process state occurs
-    replicatorStatesManager.init();
-    processStateManager.init();
-    bufferStateManager.init();
+    // Initialise the buffer state manager
+    bufferStateManager = new CdcrBufferStateManager(core);
+    // Initialise the process state manager
+    processStateManager = new CdcrProcessStateManager(core);
+    // Initialise the leader state manager
+    leaderStateManager = new CdcrLeaderStateManager(core);
+    // Initialise the replicator states manager
+    replicatorManager = new CdcReplicatorManager(core, replicasConfiguration);
+    replicatorManager.setProcessStateManager(processStateManager);
+    replicatorManager.setLeaderStateManager(leaderStateManager);
+
+    // register the close hook
+    this.registerCloseHook(core);
+  }
+
+  /**
+   * register a close hook to properly shutdown the state manager and scheduler
+   */
+  private void registerCloseHook(SolrCore core) {
+    core.addCloseHook(new CloseHook() {
+
+      @Override
+      public void preClose(SolrCore core) {
+        replicatorManager.shutdown();
+        leaderStateManager.shutdown();
+      }
+
+      @Override
+      public void postClose(SolrCore core) {}
+
+    });
   }
 
   /**
@@ -255,7 +256,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     for (Slice slice : slices) {
       ZkNodeProps leaderProps = cstate.getLeader(collection, slice.getName());
       ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
-      callables.add(new SliceCheckpointCallable(nodeProps.getBaseUrl(), cdcrPath));
+      callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
     }
 
     long checkpoint = Long.MAX_VALUE;
