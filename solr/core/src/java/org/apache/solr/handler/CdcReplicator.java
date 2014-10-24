@@ -27,6 +27,7 @@ import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
+import org.apache.solr.update.processor.CdcrUpdateProcessor;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +36,8 @@ public class CdcReplicator implements Runnable {
 
   private final CdcReplicatorState state;
 
-  private static final int BATCH_SIZE = 32;
+  // TODO: make this configurable
+  private static final int BATCH_SIZE = Integer.MAX_VALUE;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicator.class);
 
@@ -46,10 +48,12 @@ public class CdcReplicator implements Runnable {
   @Override
   public void run() {
     CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
+    if (logReader == null) return; // the log reader has been closed since the task submission, do nothing.
 
     try {
       // create update request
       UpdateRequest req = new UpdateRequest();
+      req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
       Object o = logReader.next();
       for (int i = 0; i < BATCH_SIZE && o != null; i++, o = logReader.next()) {

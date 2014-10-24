@@ -32,24 +32,18 @@ import org.slf4j.LoggerFactory;
  *   through Zookeeper. The state of the CDCR is stored in the zk node defined by {@link #getZnodePath()}.
  * </p>
  * <p>
- *   It takes care of notifying the {@link org.apache.solr.handler.CdcReplicatorStatesManager} and the
+ *   It takes care of notifying the {@link CdcReplicatorManager} and the
  *   {@link org.apache.solr.handler.CdcrLeaderStateManager} in case
  *   of a process state change.
  * </p>
  */
 class CdcrProcessStateManager {
 
-  private boolean isInitialised = false;
-
   private CdcrRequestHandler.ProcessState state = DEFAULT_STATE;
 
   private Watcher watcher;
 
   private SolrCore core;
-
-  private CdcReplicatorStatesManager replicatorStatesManager;
-  private CdcrLeaderStateManager leaderStateManager;
-  private CdcReplicatorScheduler replicatorScheduler;
 
   /**
    * The default state must be STOPPED. See comments in
@@ -59,57 +53,30 @@ class CdcrProcessStateManager {
 
   protected static Logger log = LoggerFactory.getLogger(CdcrProcessStateManager.class);
 
-  /**
-   * Register the {@link org.apache.solr.handler.CdcReplicatorStatesManager} to notify it
-   * from a process state change.
-   */
-  void register(CdcReplicatorStatesManager replicatorStatesManager) {
-    this.replicatorStatesManager = replicatorStatesManager;
-  }
+  CdcrProcessStateManager(final SolrCore core) {
+    this.core = core;
 
-  /**
-   * Register the {@link org.apache.solr.handler.CdcReplicatorScheduler} to notify it
-   * from a process state change.
-   */
-  void register(CdcReplicatorScheduler replicatorScheduler) {
-    this.replicatorScheduler = replicatorScheduler;
-  }
+    // Ensure that the status znode exists
+    this.createStateNode();
 
-  /**
-   * Register the {@link org.apache.solr.handler.CdcrLeaderStateManager} to notify it
-   * from a process state change.
-   */
-  void register(CdcrLeaderStateManager leaderStateManager) {
-    this.leaderStateManager = leaderStateManager;
-  }
-
-  void init() {
-    if (!isInitialised) {
-      // Ensure that the status znode exists
-      this.createStateNode();
-
-      // Register the watcher at startup
-      try {
-        SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-        watcher = this.initWatcher(zkClient);
-        this.setState(CdcrRequestHandler.ProcessState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed fetching initial state", e);
-      }
-
-      isInitialised = true;
+    // Register the watcher at startup
+    try {
+      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+      watcher = this.initWatcher(zkClient);
+      this.setState(CdcrRequestHandler.ProcessState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
+    }
+    catch (KeeperException | InterruptedException e) {
+      log.warn("Failed fetching initial state", e);
     }
   }
 
+  /**
+   * SolrZkClient does not guarantee that a watch object will only be triggered once for a given notification
+   * if we does not wrap the watcher - see SOLR-6621.
+   */
   private Watcher initWatcher(SolrZkClient zkClient) {
     ProcessStateWatcher watcher = new ProcessStateWatcher();
     return zkClient.wrapWatcher(watcher);
-  }
-
-  public void inform(SolrCore core) {
-    this.core = core;
-    // No need to reinitialise anything if the core is reloaded
   }
 
   private String getZnodeBase() {
@@ -121,22 +88,9 @@ class CdcrProcessStateManager {
   }
 
   void setState(CdcrRequestHandler.ProcessState state) {
-    // somehow a tricky logic is happening here. The first time the handler is instantiated, we will received a
-    // state from #init, which should be identical to the default state. In that case, the following condition will be
-    // false, and the leaderStateManager.inform(state) will not be called. This will avoid to get a Solr exception
-    // when the leader state manager tries to get the leader, since there is not yet a registered leader.
-    // Later, if the handler is instantiated again, e.g., when a node is restarted, then it should be fine, since
-    // a leader will probably be registered.
-    // TODO: See if we can improve this.
     if (this.state != state) {
       this.state = state;
-      // notify first the leader state manager since it might not yet been initialised - the
-      // replicator states manager relies on it
-      this.leaderStateManager.inform(state);
-      // notify the replicator states manager
-      this.replicatorStatesManager.inform(state);
-      // notify the scheduler
-      this.replicatorScheduler.inform(state);
+      this.callback();
     }
   }
 
@@ -183,21 +137,34 @@ class CdcrProcessStateManager {
 
     @Override
     public void process(WatchedEvent event) {
-      log.debug("The CDCR process state has changed: {}", event);
+      String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+      String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+
+      log.debug("The CDCR process state has changed: {} @ {}:{}", event, collectionName, shard);
       if (Event.EventType.None.equals(event.getType())) {
         return;
       }
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       try {
         CdcrRequestHandler.ProcessState state = CdcrRequestHandler.ProcessState.get(zkClient.getData(CdcrProcessStateManager.this.getZnodePath(), watcher, null, true));
+        log.info("Received new CDCR process state from watcher: {} @ {}:{}", state, collectionName, shard);
         CdcrProcessStateManager.this.setState(state);
-        log.info("Received new CDCR process state from watcher: {}", state);
       }
       catch (KeeperException | InterruptedException e) {
-        log.warn("Failed synchronising new state", e);
+        log.warn("Failed synchronising new state @ " + collectionName + ":" + shard, e);
       }
     }
 
+  }
+
+  private CdcReplicatorManager replicatorManager;
+
+  void register(CdcReplicatorManager replicatorManager) {
+    this.replicatorManager = replicatorManager;
+  }
+
+  private void callback() {
+    this.replicatorManager.stateEvent();
   }
 
 }

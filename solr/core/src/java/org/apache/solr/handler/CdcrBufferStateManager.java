@@ -33,8 +33,6 @@ import org.slf4j.LoggerFactory;
  */
 class CdcrBufferStateManager {
 
-  private boolean isInitialised = false;
-
   private Watcher watcher;
 
   private SolrCore core;
@@ -43,36 +41,33 @@ class CdcrBufferStateManager {
 
   protected static Logger log = LoggerFactory.getLogger(CdcrBufferStateManager.class);
 
-  void init() {
-    if (!isInitialised) {
-      // Ensure that the state znode exists
-      this.createStateNode();
+  CdcrBufferStateManager(final SolrCore core) {
+    this.core = core;
 
-      // set default state
-      this.setState(DEFAULT_STATE);
+    // Ensure that the state znode exists
+    this.createStateNode();
 
-      // Startup and register the watcher at startup
-      try {
-        SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-        watcher = this.initWatcher(zkClient);
-        this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
-      }
-      catch (KeeperException | InterruptedException e) {
-        log.warn("Failed fetching initial state", e);
-      }
+    // set default state
+    this.setState(DEFAULT_STATE);
 
-      isInitialised = true;
+    // Startup and register the watcher at startup
+    try {
+      SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+     this.initWatcher(zkClient);
+      this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
+    }
+    catch (KeeperException | InterruptedException e) {
+      log.warn("Failed fetching initial state", e);
     }
   }
 
-  private Watcher initWatcher(SolrZkClient zkClient) {
+  /**
+   * SolrZkClient does not guarantee that a watch object will only be triggered once for a given notification
+   * if we does not wrap the watcher - see SOLR-6621.
+   */
+  private void initWatcher(SolrZkClient zkClient) {
     BufferStateWatcher watcher = new BufferStateWatcher();
-    return zkClient.wrapWatcher(watcher);
-  }
-
-  void inform(SolrCore core) {
-    this.core = core;
-    // No need to reinitialise anything if the core is reloaded
+    this.watcher = zkClient.wrapWatcher(watcher);
   }
 
   private String getZnodeBase() {
@@ -141,18 +136,21 @@ class CdcrBufferStateManager {
 
     @Override
     public void process(WatchedEvent event) {
-      log.debug("The CDCR buffer state has changed: {}", event);
+      String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+      String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+
+      log.debug("The CDCR buffer state has changed: {} @ {}:{}", event, collectionName, shard);
       if (Event.EventType.None.equals(event.getType())) {
         return;
       }
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       try {
         CdcrRequestHandler.BufferState state = CdcrRequestHandler.BufferState.get(zkClient.getData(CdcrBufferStateManager.this.getZnodePath(), watcher, null, true));
+        log.info("Received new CDCR buffer state from watcher: {} @ {}:{}", state, collectionName, shard);
         CdcrBufferStateManager.this.setState(state);
-        log.info("Received new CDCR buffer state from watcher: {}", state);
       }
       catch (KeeperException | InterruptedException e) {
-        log.warn("Failed synchronising new state", e);
+        log.warn("Failed synchronising new state @ " + collectionName + ":" + shard, e);
       }
     }
 

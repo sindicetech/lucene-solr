@@ -20,7 +20,6 @@ package org.apache.solr.handler;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -28,67 +27,54 @@ import org.slf4j.LoggerFactory;
 
 class CdcReplicatorScheduler {
 
-  private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+  private boolean isStarted = false;
 
-  private final ExecutorService replicatorsPool = Executors.newFixedThreadPool(POOL_SIZE);
+  private ScheduledExecutorService scheduler;
+  private ExecutorService replicatorsPool;
 
-  private ScheduledFuture<?> schedulerHandle;
-
-  private final CdcReplicatorStatesManager replicatorStatesManager;
-
-  private CdcrRequestHandler.ProcessState processState = CdcrProcessStateManager.DEFAULT_STATE;
-  private boolean amILeader = false;
+  private final CdcReplicatorManager replicatorManager;
 
   public static final int POOL_SIZE = 8;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorScheduler.class);
 
-  CdcReplicatorScheduler(final CdcReplicatorStatesManager replicatorStatesManager) {
-    this.replicatorStatesManager = replicatorStatesManager;
-  }
-
-  /**
-   * If we become the leader and the process state is STARTED, we need to initialise the log readers.
-   * Otherwise, if the process state is STOPPED pr if we are not the leader, we need to close the log readers.
-   */
-  void inform(boolean amILeader) {
-    this.amILeader = amILeader;
-    if (amILeader && processState.equals(CdcrRequestHandler.ProcessState.STARTED)) {
-      this.start();
-      return;
-    }
-    this.stop();
-  }
-
-  /**
-   * If the process state changes to STARTED, and we are the leader, we need to initialise the log readers. Otherwise,
-   * we need to close the log readers.
-   */
-  void inform(CdcrRequestHandler.ProcessState state) {
-    this.processState = state;
-    if (amILeader && processState.equals(CdcrRequestHandler.ProcessState.STARTED)) {
-      this.start();
-      return;
-    }
-    this.stop();
+  CdcReplicatorScheduler(final CdcReplicatorManager replicatorStatesManager) {
+    this.replicatorManager = replicatorStatesManager;
   }
 
   void start() {
-    schedulerHandle = scheduler.scheduleWithFixedDelay(new Runnable() {
+    if (!isStarted) {
+      scheduler = Executors.newScheduledThreadPool(1);
+      replicatorsPool = Executors.newFixedThreadPool(POOL_SIZE);
 
-      @Override
-      public void run() {
-        for (CdcReplicatorState state : replicatorStatesManager.getReplicatorStates()) {
-          replicatorsPool.submit(new CdcReplicator(state));
+      scheduler.scheduleWithFixedDelay(new Runnable() {
+
+        @Override
+        public void run() {
+          for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+            replicatorsPool.execute(new CdcReplicator(state));
+          }
         }
-      }
 
-    }, 1, 1, TimeUnit.SECONDS);
+      }, 0, 1, TimeUnit.SECONDS);
+      isStarted = true;
+    }
   }
 
-  void stop() {
-    if (schedulerHandle != null) {
-      schedulerHandle.cancel(false);
+  void shutdown() {
+    if (isStarted) {
+      replicatorsPool.shutdown();
+      try {
+        replicatorsPool.awaitTermination(60, TimeUnit.SECONDS);
+      }
+      catch (InterruptedException e) {
+        log.warn("Thread interrupted while waiting for CDCR replicator threadpool close.");
+        Thread.currentThread().interrupt();
+      }
+      finally {
+        scheduler.shutdownNow();
+        isStarted = false;
+      }
     }
   }
 

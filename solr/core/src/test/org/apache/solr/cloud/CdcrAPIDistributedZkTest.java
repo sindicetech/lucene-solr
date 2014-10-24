@@ -31,37 +31,57 @@ public class CdcrAPIDistributedZkTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    // this.createTargetCollection();
+    this.createTargetCollection();
     this.printLayout(); // debug
 
-    // placeholder for future tests
     indexDoc(getDoc(id, "a"));
     indexDoc(getDoc(id, "b"));
     indexDoc(getDoc(id, "c"));
     indexDoc(getDoc(id, "d"));
     indexDoc(getDoc(id, "e"));
     indexDoc(getDoc(id, "f"));
-    commit();
+    commit(SOURCE_COLLECTION);
 
     assertEquals(6, getNumDocs(SOURCE_COLLECTION));
-    // assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    assertEquals(0, getNumDocs(TARGET_COLLECTION));
 
+    this.sendRequest(getLeaderUrl(TARGET_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
     this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
 
-    log.info("Sleeping 1s");
-    Thread.currentThread().sleep(1000);
-    log.info("Finished sleeping");
+    Thread.sleep(1000); // wait a bit for the replication to complete
 
-    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
-    log.info("Stopping leader of shard1 - {}", runner.coreNodeName);
-    ChaosMonkey.stop(runner.jetty);
+    commit(TARGET_COLLECTION);
 
-    log.info("Sleeping 2s");
-    Thread.currentThread().sleep(2000);
-    log.info("Finished sleeping");
+    assertEquals(6, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(6, getNumDocs(TARGET_COLLECTION));
 
-    log.info("Bringing back up the node");
-    ChaosMonkey.start(runner.jetty);
+    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+    this.sendRequest(getLeaderUrl(TARGET_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+
+    int start = 0;
+    for (int i = start; i < start + 100; i++) {
+      indexDoc(getDoc(id, Integer.toString(i)));
+    }
+    commit(SOURCE_COLLECTION);
+
+    assertEquals(106, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(6, getNumDocs(TARGET_COLLECTION));
+
+    // Start again CDCR, the source cluster should reinitialise its log readers
+    // with the latest checkpoints
+
+    this.sendRequest(getLeaderUrl(TARGET_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
+
+    Thread.sleep(2000); // wait a bit for the replication to complete
+
+    commit(TARGET_COLLECTION);
+
+    assertEquals(106, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(106, getNumDocs(TARGET_COLLECTION));
+
+    this.sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+    this.sendRequest(getLeaderUrl(TARGET_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.STOP);
   }
 
 }
