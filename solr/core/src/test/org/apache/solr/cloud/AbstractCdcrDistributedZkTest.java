@@ -163,8 +163,8 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     }
   }
 
-  protected void commit() throws IOException, SolrServerException {
-    CloudSolrServer client = this.getSourceClient();
+  protected void commit(String collection) throws IOException, SolrServerException {
+    CloudSolrServer client = createCloudClient(collection);
     try {
       client.commit();
     }
