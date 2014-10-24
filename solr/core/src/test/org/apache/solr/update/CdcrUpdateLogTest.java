@@ -572,4 +572,38 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     assertEquals(2, ulog.getLogList(logDir).length);
   }
 
+  /**
+   * Check that the reader is correctly reset to its last position
+   */
+  @Test
+  public void testResetToLastPosition() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    assertEquals(2, ulog.getLogList(logDir).length);
+
+    for (int i = 0; i < 22; i++) {
+      Object o = reader.next();
+      assertNotNull(o);
+      // reset to last position
+      reader.resetToLastPosition();
+      // we should read the same update operation, i.e., same version number
+      assertEquals(((List) o).get(1), ((List) reader.next()).get(1));
+    }
+    assertNull(reader.next());
+  }
+
+
 }
