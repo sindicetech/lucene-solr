@@ -43,7 +43,7 @@ class CdcrProcessStateManager {
 
   private CdcrRequestHandler.ProcessState state = DEFAULT_STATE;
 
-  private ProcessStateWatcher watcher = new ProcessStateWatcher();
+  private Watcher watcher;
 
   private SolrCore core;
 
@@ -91,6 +91,7 @@ class CdcrProcessStateManager {
       // Register the watcher at startup
       try {
         SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+        watcher = this.initWatcher(zkClient);
         this.setState(CdcrRequestHandler.ProcessState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
       }
       catch (KeeperException | InterruptedException e) {
@@ -99,6 +100,11 @@ class CdcrProcessStateManager {
 
       isInitialised = true;
     }
+  }
+
+  private Watcher initWatcher(SolrZkClient zkClient) {
+    ProcessStateWatcher watcher = new ProcessStateWatcher();
+    return zkClient.wrapWatcher(watcher);
   }
 
   public void inform(SolrCore core) {
