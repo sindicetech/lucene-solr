@@ -84,7 +84,7 @@ class CdcrLeaderStateManager {
    * We cannot initialise the {@link org.apache.solr.handler.CdcrLeaderStateManager}
    * in {@link org.apache.solr.util.plugin.SolrCoreAware#inform(org.apache.solr.core.SolrCore)}
    * since at startup, the core is not yet fully instantiated and therefore the leader process has not yet been
-   * registered. Therefore, we initialise it only when the process state changes.
+   * registered. Therefore, we initialise it only whenever the process state changes.
    */
   public void inform(CdcrRequestHandler.ProcessState state) {
     this.init();
