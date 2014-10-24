@@ -33,7 +33,7 @@ class CdcrLeaderStateManager {
 
   private boolean amILeader = false;
 
-  private LeaderStateWatcher watcher = new LeaderStateWatcher();
+  private Watcher watcher;
 
   private SolrCore core;
 
@@ -65,6 +65,7 @@ class CdcrLeaderStateManager {
       try {
         this.checkIfIAmLeader();
         SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+        watcher = this.initWatcher(zkClient);
         zkClient.getData(this.getZnodePath(), watcher, null, true);
       }
       catch (KeeperException | InterruptedException e) {
@@ -72,6 +73,11 @@ class CdcrLeaderStateManager {
       }
       isInitialised = true;
     }
+  }
+
+  private Watcher initWatcher(SolrZkClient zkClient) {
+    LeaderStateWatcher watcher = new LeaderStateWatcher();
+    return zkClient.wrapWatcher(watcher);
   }
 
   /**
