@@ -28,12 +28,11 @@ import org.slf4j.LoggerFactory;
 
 /**
  * <p>
- *   Manage the life-cycle state of the CDCR. It is responsible of synchronising the state
- *   through Zookeeper. The state of the CDCR is stored in the zk node defined by {@link #getZnodePath()}.
+ *   Manage the life-cycle state of the CDCR process. It is responsible of synchronising the state
+ *   through Zookeeper. The state of the CDCR process is stored in the zk node defined by {@link #getZnodePath()}.
  * </p>
  * <p>
- *   It takes care of notifying the {@link CdcReplicatorManager} and the
- *   {@link org.apache.solr.handler.CdcrLeaderStateManager} in case
+ *   It takes care of notifying the {@link CdcReplicatorManager} in case
  *   of a process state change.
  * </p>
  */
@@ -90,7 +89,7 @@ class CdcrProcessStateManager {
   void setState(CdcrRequestHandler.ProcessState state) {
     if (this.state != state) {
       this.state = state;
-      this.callback();
+      this.callback(); // notify the observers of a state change
     }
   }
 
@@ -163,6 +162,9 @@ class CdcrProcessStateManager {
     this.replicatorManager = replicatorManager;
   }
 
+  /**
+   * Notify the {@link org.apache.solr.handler.CdcReplicatorManager} of a state change.
+   */
   private void callback() {
     if (replicatorManager != null) {
       this.replicatorManager.stateUpdate();

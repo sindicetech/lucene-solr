@@ -27,6 +27,15 @@ import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * <p>
+ *   Manage the leader state of the CDCR nodes.
+ * </p>
+ * <p>
+ *   It takes care of notifying the {@link CdcReplicatorManager} in case
+ *   of a leader state change.
+ * </p>
+ */
 class CdcrLeaderStateManager {
 
   private boolean isInitialised = false;
@@ -88,7 +97,7 @@ class CdcrLeaderStateManager {
   void setAmILeader(boolean amILeader) {
     if (this.amILeader != amILeader) {
       this.amILeader = amILeader;
-      this.callback();
+      this.callback(); // notify the observers of a state change
     }
   }
 
@@ -142,6 +151,9 @@ class CdcrLeaderStateManager {
     this.replicatorManager = replicatorManager;
   }
 
+  /**
+   * Notify the {@link org.apache.solr.handler.CdcReplicatorManager} of a state change.
+   */
   private void callback() {
     if (replicatorManager != null) {
       this.replicatorManager.stateUpdate();
