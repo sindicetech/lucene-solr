@@ -26,6 +26,7 @@ import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.request.QueryRequest;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
@@ -79,12 +80,17 @@ class CdcReplicatorManager {
   }
 
   /**
-   * If we are the leader and the process state is STARTED, we need to initialise the log readers and start the
-   * scheduled thread poll.
-   * Otherwise, if the process state is STOPPED or if we are not the leader, we need to close the log readers and stop
-   * the thread pool.
+   * <p>
+   *   Inform the replicator manager of a change of state, and tell him to update its own state.
+   * </p>
+   * <p>
+   *   If we are the leader and the process state is STARTED, we need to initialise the log readers and start the
+   *   scheduled thread poll.
+   *   Otherwise, if the process state is STOPPED or if we are not the leader, we need to close the log readers and stop
+   *   the thread pool.
+   * </p>
    */
-  void stateEvent() {
+  void stateUpdate() {
     if (leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
       this.initLogReaders();
       this.scheduler.start();
@@ -113,7 +119,7 @@ class CdcReplicatorManager {
         reader.seek(checkpoint);
         state.init(ulog.newLogReader());
       }
-      catch (IOException | SolrServerException e) {
+      catch (IOException | SolrServerException | SolrException e) {
         log.warn("Unable to instantiate the log reader for target collection " + state.getTargetCollection(), e);
       }
       catch (InterruptedException e) {
