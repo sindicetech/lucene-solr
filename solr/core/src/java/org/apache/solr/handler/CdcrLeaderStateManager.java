@@ -115,13 +115,16 @@ class CdcrLeaderStateManager {
 
     private boolean isCancelled = false;
 
+    /**
+     * Cancel the watcher to avoid spurious warn messages during shutdown.
+     */
     void cancel() {
       isCancelled = true;
     }
 
     @Override
     public void process(WatchedEvent event) {
-      if (isCancelled) return;
+      if (isCancelled) return; // if the watcher is cancelled, do nothing.
       String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
       String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
 
