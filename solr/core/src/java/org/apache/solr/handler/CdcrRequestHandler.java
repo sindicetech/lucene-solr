@@ -161,6 +161,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
           "Solr instance is not configured with the cdcr update log.");
     }
 
+    // Initialisation phase
+    // If the Solr cloud is being initialised, each CDCR node will start up in its default state, i.e., STOPPED
+    // and non-leader. The leader state will be updated later, when all the Solr cores have been loaded.
+    // If the Solr cloud has already been initialised, and the core is reloaded (i.e., because a node died or a new node
+    // is added to the cluster), each CDCR node will synchronise its state with the global CDCR state that is stored
+    // in zookeeper.
+
     // Initialise the buffer state manager
     bufferStateManager = new CdcrBufferStateManager(core);
     // Initialise the process state manager
@@ -171,6 +178,9 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     replicatorManager = new CdcReplicatorManager(core, replicasConfiguration);
     replicatorManager.setProcessStateManager(processStateManager);
     replicatorManager.setLeaderStateManager(leaderStateManager);
+    // we need to inform it of a state event since the process and leader state
+    // may have been synchronised during the initialisation
+    replicatorManager.stateUpdate();
 
     // register the close hook
     this.registerCloseHook(core);

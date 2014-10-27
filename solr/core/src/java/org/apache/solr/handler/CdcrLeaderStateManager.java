@@ -143,7 +143,9 @@ class CdcrLeaderStateManager {
   }
 
   private void callback() {
-    this.replicatorManager.stateEvent();
+    if (replicatorManager != null) {
+      this.replicatorManager.stateUpdate();
+    }
   }
 
 }

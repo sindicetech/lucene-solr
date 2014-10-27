@@ -17,6 +17,7 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -33,6 +34,7 @@ class CdcReplicatorScheduler {
   private ExecutorService replicatorsPool;
 
   private final CdcReplicatorManager replicatorManager;
+  private final ConcurrentLinkedQueue<CdcReplicatorState> statesQueue;
 
   public static final int POOL_SIZE = 8;
 
@@ -40,19 +42,39 @@ class CdcReplicatorScheduler {
 
   CdcReplicatorScheduler(final CdcReplicatorManager replicatorStatesManager) {
     this.replicatorManager = replicatorStatesManager;
+    this.statesQueue = new ConcurrentLinkedQueue<>(replicatorManager.getReplicatorStates());
   }
 
   void start() {
     if (!isStarted) {
-      scheduler = Executors.newScheduledThreadPool(1);
+      scheduler = Executors.newSingleThreadScheduledExecutor();
       replicatorsPool = Executors.newFixedThreadPool(POOL_SIZE);
 
+      // the scheduler thread is executed every second and submits one replication task
+      // per available state in the queue
       scheduler.scheduleWithFixedDelay(new Runnable() {
 
         @Override
         public void run() {
-          for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
-            replicatorsPool.execute(new CdcReplicator(state));
+          int nCandidates = statesQueue.size();
+          for (int i = 0; i < nCandidates; i++) {
+            // a thread that pool one state from the queue, execute the replication task, and push back
+            // the state in the queue when the task is completed
+            replicatorsPool.execute(new Runnable() {
+
+              @Override
+              public void run() {
+                CdcReplicatorState state = statesQueue.poll();
+                try {
+                  new CdcReplicator(state).run();
+                }
+                finally {
+                  statesQueue.offer(state);
+                }
+              }
+
+            });
+
           }
         }
 
