@@ -121,7 +121,7 @@ class CdcrProcessStateManager {
         if (!zkClient.exists(this.getZnodeBase(), true)) {
           zkClient.makePath(this.getZnodeBase(), CreateMode.PERSISTENT, true);
         }
-        zkClient.create(this.getZnodePath(), CdcrRequestHandler.ProcessState.STOPPED.getBytes(), CreateMode.PERSISTENT, true);
+        zkClient.create(this.getZnodePath(), DEFAULT_STATE.getBytes(), CreateMode.PERSISTENT, true);
         log.info("Created znode {}", this.getZnodePath());
       }
     }
@@ -164,7 +164,9 @@ class CdcrProcessStateManager {
   }
 
   private void callback() {
-    this.replicatorManager.stateEvent();
+    if (replicatorManager != null) {
+      this.replicatorManager.stateUpdate();
+    }
   }
 
 }
