@@ -31,9 +31,6 @@ import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
-import org.apache.solr.common.cloud.Replica;
-import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.update.processor.CdcrUpdateProcessor;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
@@ -56,13 +53,13 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
   public CdcrVersionReplicationTest() {
     schemaString = "schema15.xml";      // we need a string id
-    super.sliceCount = 1;
-    super.shardCount = 2;
-    super.fixShardCount = true;  // we only want to test with exactly 2 slices.
+//    super.sliceCount = 1;
+//    super.shardCount = 2;
+//    super.fixShardCount = true;  // we only want to test with exactly 2 slices.
   }
 
   SolrServer createClientRandomly() throws Exception {
-    int r = 1;//random().nextInt(100);
+    int r = random().nextInt(100);
 
     // testing the smart cloud client (requests to leaders) is more important than testing the forwarding logic
     if (r < 80) {
@@ -109,30 +106,29 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     this.solrServer = solrServer;
 
     log.info("### STARTING doCdcrTestDocVersions - Add commands, client: " + solrServer);
-//    assertEquals(2, cloudClient.getZkStateReader().getClusterState().getCollection(DEFAULT_COLLECTION).getSlices().size());
 
-    vadd("doc1", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc2", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc3", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc4", 11, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc1", 10, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "10");
+    vadd("doc2", 11, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "11");
+    vadd("doc3", 10, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "10");
+    vadd("doc4", 11, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "11");
     commit();
 
     // versions are preserved and verifiable both by query and by real-time get
     doQuery(solrServer, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
     doRealTimeGet("doc1,doc2,doc3,doc4", "10,11,10,11");
 
-    vadd("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc2", 10, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc3", 9, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc4", 8, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "5");
+    vadd("doc2", 10, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "10");
+    vadd("doc3", 9, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "9");
+    vadd("doc4", 8, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "8");
 
     // lower versions are ignored
     doRealTimeGet("doc1,doc2,doc3,doc4", "10,11,10,11");
 
-    vadd("doc1", 12, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc2", 12, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc3", 12, CdcrUpdateProcessor.CDCR_UPDATE, "");
-    vadd("doc4", 12, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vadd("doc1", 12, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "12");
+    vadd("doc2", 12, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "12");
+    vadd("doc3", 12, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "12");
+    vadd("doc4", 12, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "12");
 
     // higher versions are accepted
     doRealTimeGet("doc1,doc2,doc3,doc4", "12,12,12,12");
@@ -148,8 +144,8 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     doQuery(solrServer, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // query all shard replicas individually
-    doQueryShard("shard1", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
-//    doQueryShard("shard2", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+    doQueryShardReplica("shard1", "doc1,12,doc2,12,doc3,12,doc4,12", "q", "*:*");
+    doQueryShardReplica("shard2", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // optimistic locking update
     vadd("doc4", 12);
@@ -164,25 +160,25 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     log.info("### STARTING doCdcrTestDocVersions - Delete commands");
 
     // send a delete update with an older version number
-    vdelete("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vdelete("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "5");
     // must ignore the delete
     doRealTimeGet("doc1", "12");
 
     // send a delete update with a higher version number
-    vdelete("doc1", 13, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vdelete("doc1", 13, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "13");
     // must be deleted
     doRealTimeGet("doc1", "");
 
     // send a delete update with a higher version number
-    vdelete("doc4", version + 1, CdcrUpdateProcessor.CDCR_UPDATE, "");
+    vdelete("doc4", version + 1, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, ""+(version+1));
     // must be deleted
     doRealTimeGet("doc4", "");
 
     commit();
 
     // query each shard replica individually
-    doQueryShard("shard1", "doc2,12,doc3,12", "q","*:*");
-//    doQueryShard("shard2", "doc2,12,doc3,12", "q","*:*");
+    doQueryShardReplica("shard1", "doc2,12,doc3,12", "q", "*:*");
+    doQueryShardReplica("shard2", "doc2,12,doc3,12", "q", "*:*");
 
     // version conflict thanks to optimistic locking
     if (solrServer instanceof CloudSolrServer) // TODO: it seems that optimistic locking doesn't work with forwarding, test with shard2 client
@@ -194,20 +190,24 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit();
 
     // deleteByQuery with a version lower than anything else should have no effect
-    doQuery(solrServer, "doc2,12,doc3,12", "q","*:*");
+    doQuery(solrServer, "doc2,12,doc3,12", "q", "*:*");
 
     doDeleteByQuery("id:doc*", CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, Long.toString(51));
     commit();
 
     // deleteByQuery with a version higher than everything else should delete all remaining docs
-    doQuery(solrServer, "", "q","*:*");
+    doQuery(solrServer, "", "q", "*:*");
+
+    // check that replicas are as expected too
+    doQueryShardReplica("shard1", "", "q", "*:*");
+    doQueryShardReplica("shard2", "", "q", "*:*");
   }
 
 
   // ------------------ auxiliary methods ------------------
 
 
-  public void doQueryShard(String shard, String expectedDocs, String... queryParams) throws Exception {
+  void doQueryShardReplica(String shard, String expectedDocs, String... queryParams) throws Exception {
     List<String> replicas = getReplicaUrls(DEFAULT_COLLECTION, shard);
 
     for (String replica : replicas) {
@@ -294,6 +294,10 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
       msg = ex.getMessage();
     }
     return msg;
+  }
+
+  void doQueryReplica(String collection, String shardId, String expectedDocs, String... queryParams) throws Exception {
+    doQuery(getReplicaClient(collection, shardId), expectedDocs, queryParams);
   }
 
   void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
