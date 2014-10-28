@@ -38,30 +38,33 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
   }
 
   // check that the life-cycle state is properly synchronised across nodes
-  public void doTestLifeCycleActions(){
-    try {
-      // check initial status
-      this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
+  public void doTestLifeCycleActions() throws Exception {
+    // check initial status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
 
-      // send start action to first shard
-      NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
-      NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-      assertEquals(CdcrRequestHandler.ProcessState.STARTED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
+    // send start action to first shard
+    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
+    NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
+    assertEquals(CdcrRequestHandler.ProcessState.STARTED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
 
-      // check status
-      this.assertState(CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
+    // check status
+    this.assertState(CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
 
-      // send stop action to second shard
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.STOP);
-      status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-      assertEquals(CdcrRequestHandler.ProcessState.STOPPED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
+    // Close the leader of shard 1, then bring it back up
+    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
+    ChaosMonkey.stop(runner.jetty);
+    ChaosMonkey.start(runner.jetty);
 
-      // check status
-      this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
-    }
-    catch (Exception e) {
-      e.printStackTrace();
-    }
+    // check status - the node that died should have picked up the original state
+    this.assertState(CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
+
+    // send stop action to second shard
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.STOP);
+    status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
+    assertEquals(CdcrRequestHandler.ProcessState.STOPPED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
+
+    // check status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
   }
 
   private void assertState(CdcrRequestHandler.ProcessState processState, CdcrRequestHandler.BufferState bufferState)
@@ -80,73 +83,71 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
 
   // check the checkpoint API
   public void doTestCheckpointActions() throws Exception {
-    try {
-      // initial request on an empty index, must return -1
-      NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
-      assertEquals(-1l, rsp.get("checkpoint"));
+    // initial request on an empty index, must return -1
+    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    assertEquals(-1l, rsp.get("checkpoint"));
 
-      index(id, "a"); // shard 2
-      commit();
+    index(id, "a"); // shard 2
+    commit();
 
-      // only one document indexed in shard 2, the checkpoint must be still -1
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
-      assertEquals(-1l, rsp.get("checkpoint"));
+    // only one document indexed in shard 2, the checkpoint must be still -1
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    assertEquals(-1l, rsp.get("checkpoint"));
 
-      index(id, "b"); // shard 1
-      commit();
+    index(id, "b"); // shard 1
+    commit();
 
-      // a second document indexed in shard 1, the checkpoint must come from shard 2
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
-      long checkpoint1 = (Long) rsp.get("checkpoint");
-      long expected = (Long) sendRequest(SHARD2, CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
-      assertEquals(expected, checkpoint1);
+    // a second document indexed in shard 1, the checkpoint must come from shard 2
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    long checkpoint1 = (Long) rsp.get("checkpoint");
+    long expected = (Long) sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
+    assertEquals(expected, checkpoint1);
 
-      index(id, "c"); // shard 1
-      commit();
+    index(id, "c"); // shard 1
+    commit();
 
-      // a third document indexed in shard 1, the checkpoint must still come from shard 2
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
-      assertEquals(checkpoint1, rsp.get("checkpoint"));
+    // a third document indexed in shard 1, the checkpoint must still come from shard 2
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    assertEquals(checkpoint1, rsp.get("checkpoint"));
 
-      index(id, "d"); // shard 2
-      commit();
+    index(id, "d"); // shard 2
+    commit();
 
-      // a fourth document indexed in shard 2, the checkpoint must come from shard 1
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
-      long checkpoint2 = (Long) rsp.get("checkpoint");
-      expected = (Long) sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
-      assertEquals(expected, checkpoint2);
-    }
-    catch (Exception e) {
-      e.printStackTrace();
-    }
+    // a fourth document indexed in shard 2, the checkpoint must come from shard 1
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    long checkpoint2 = (Long) rsp.get("checkpoint");
+    expected = (Long) sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
+    assertEquals(expected, checkpoint2);
   }
 
   // check that the buffer state is properly synchronised across nodes
-  public void doTestBufferActions() {
-    try {
-      // check initial status
-      this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
+  public void doTestBufferActions() throws Exception {
+    // check initial status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
 
-      // send disable buffer action to first shard
-      NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
-      NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-      assertEquals(CdcrRequestHandler.BufferState.DISABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
+    // send disable buffer action to first shard
+    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+    NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
+    assertEquals(CdcrRequestHandler.BufferState.DISABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
 
-      // check status
-      this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
+    // check status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
 
-      // send enable buffer action to second shard
-      rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.ENABLEBUFFER);
-      status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-      assertEquals(CdcrRequestHandler.BufferState.ENABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
+    // Close the leader of shard 1, then bring it back up
+    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
+    ChaosMonkey.stop(runner.jetty);
+    ChaosMonkey.start(runner.jetty);
 
-      // check status
-      this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
-    }
-    catch (Exception e) {
-      e.printStackTrace();
-    }
+    // check status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
+
+    // send enable buffer action to second shard
+    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.ENABLEBUFFER);
+    status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
+    assertEquals(CdcrRequestHandler.BufferState.ENABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
+
+    // check status
+    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
   }
 
 }

@@ -41,6 +41,7 @@ import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.cloud.ZooKeeperException;
+import org.apache.solr.common.params.CollectionParams;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.NamedList;
@@ -79,7 +80,12 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     sliceCount = 2;
   }
 
-  protected void createTargetCollection() throws Exception {
+  @Override
+  protected String getCloudSolrConfig() {
+    return "solrconfig-cdcr.xml";
+  }
+
+  protected void createCollection(String name) throws Exception {
     CloudSolrServer client = createCloudClient(null);
 
     // Create the target collection
@@ -89,9 +95,13 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     int maxShardsPerNode = (((numShards * replicationFactor) / getCommonCloudSolrServer()
         .getZkStateReader().getClusterState().getLiveNodes().size())) + 1;
 
-    createCollection(collectionInfos, TARGET_COLLECTION, numShards, replicationFactor, maxShardsPerNode, client, null);
+    createCollection(collectionInfos, name, numShards, replicationFactor, maxShardsPerNode, client, null);
 
     if (client != null) client.shutdown();
+  }
+
+  protected void createTargetCollection() throws Exception {
+    createCollection(TARGET_COLLECTION);
   }
 
   protected void printLayout() throws Exception {
@@ -111,6 +121,22 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
             CREATE_NODE_SET, createNodeSetStr,
             MAX_SHARDS_PER_NODE, maxShardsPerNode),
         client);
+  }
+
+  protected CollectionAdminResponse deleteCollection(String collectionName) throws SolrServerException, IOException {
+    SolrServer client = createCloudClient(null);
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.set("action", CollectionParams.CollectionAction.DELETE.toString());
+    params.set("name", collectionName);
+    QueryRequest request = new QueryRequest(params);
+    request.setPath("/admin/collections");
+
+    CollectionAdminResponse res = new CollectionAdminResponse();
+    res.setResponse(client.request(request));
+
+    client.shutdown();
+
+    return res;
   }
 
   protected CloudSolrServer getSourceClient() {
@@ -137,8 +163,8 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     }
   }
 
-  protected void commit() throws IOException, SolrServerException {
-    CloudSolrServer client = this.getSourceClient();
+  protected void commit(String collection) throws IOException, SolrServerException {
+    CloudSolrServer client = createCloudClient(collection);
     try {
       client.commit();
     }
@@ -199,6 +225,40 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     finally {
       client.shutdown();
     }
+  }
+
+  /**
+   * Creates a non-smart client to a replica (non-leader).
+   */
+  protected SolrServer getReplicaClient(String collection, String shard) throws Exception {
+    List<String> replicas = getReplicaUrls(collection, shard);
+    String leader = getLeaderUrl(collection, shard);
+    /*
+    getLeader returns e.g. http://127.0.0.1:59803/b_k/myCollection_shard1_replica1/
+    while getReplicaUrls returns e.g. http://127.0.0.1:59803/b_k
+
+     */
+    String tmp = leader.substring(0, leader.length()-1);
+    leader = tmp.substring(0, tmp.lastIndexOf('/'));
+
+    replicas.remove(leader);
+    return createNewSolrServer(collection, replicas.get(0));
+  }
+
+  /**
+   * Creates a non-smart client to a leader.
+   */
+  protected SolrServer getLeaderClient(String collection, String shard) throws Exception {
+    String leader = getLeaderUrl(collection, shard);
+    /*
+    getLeader returns e.g. http://127.0.0.1:59803/b_k/myCollection_shard1_replica1/
+    while getReplicaUrls returns e.g. http://127.0.0.1:59803/b_k
+
+     */
+    String tmp = leader.substring(0, leader.length()-1);
+    leader = tmp.substring(0, tmp.lastIndexOf('/'));
+
+    return createNewSolrServer(collection, leader);
   }
 
   protected NamedList sendRequest(String baseUrl, CdcrRequestHandler.CdcrAction action) throws Exception {
