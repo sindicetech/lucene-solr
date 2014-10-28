@@ -38,8 +38,6 @@ import org.slf4j.LoggerFactory;
  */
 class CdcrLeaderStateManager {
 
-  private boolean isInitialised = false;
-
   private boolean amILeader = false;
 
   private LeaderStateWatcher wrappedWatcher;

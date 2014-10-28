@@ -125,16 +125,21 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
 
   protected CollectionAdminResponse deleteCollection(String collectionName) throws SolrServerException, IOException {
     SolrServer client = createCloudClient(null);
-    ModifiableSolrParams params = new ModifiableSolrParams();
-    params.set("action", CollectionParams.CollectionAction.DELETE.toString());
-    params.set("name", collectionName);
-    QueryRequest request = new QueryRequest(params);
-    request.setPath("/admin/collections");
+    CollectionAdminResponse res;
 
-    CollectionAdminResponse res = new CollectionAdminResponse();
-    res.setResponse(client.request(request));
+    try {
+      ModifiableSolrParams params = new ModifiableSolrParams();
+      params.set("action", CollectionParams.CollectionAction.DELETE.toString());
+      params.set("name", collectionName);
+      QueryRequest request = new QueryRequest(params);
+      request.setPath("/admin/collections");
 
-    client.shutdown();
+      res = new CollectionAdminResponse();
+      res.setResponse(client.request(request));
+    }
+    finally {
+      client.shutdown();
+    }
 
     return res;
   }
