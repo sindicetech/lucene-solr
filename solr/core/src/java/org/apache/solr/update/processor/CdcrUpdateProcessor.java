@@ -88,6 +88,11 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
     ModifiableSolrParams result = super.filterParams(params);
     if (params.get(CDCR_UPDATE) != null) {
       result.set(CDCR_UPDATE, "");
+      if (params.get(DistributedUpdateProcessor.VERSION_FIELD) == null) {
+        log.warn("+++ cdcr.update but no version field, params are: " + params);
+      } else {
+        log.info("+++ cdcr.update version present, params are: " + params);
+      }
       result.set(DistributedUpdateProcessor.VERSION_FIELD, params.get(DistributedUpdateProcessor.VERSION_FIELD));
     }
 
@@ -95,17 +100,17 @@ public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
   }
 
   @Override
-  public void doDeleteByQuery(DeleteUpdateCommand cmd) throws IOException {
+  protected void versionDeleteByQuery(DeleteUpdateCommand cmd) throws IOException {
     /*
-    temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.doDeleteByQuery doesn't execute leader logic
+    temporarily set the PEER_SYNC flag so that DistributedUpdateProcessor.versionDeleteByQuery doesn't execute leader logic
     That way version remains preserved.
 
      */
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
-      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC); // we need super.doDeleteByQuery() to set leaderLogic to false
+      cmd.setFlags(cmd.getFlags() | UpdateCommand.PEER_SYNC); // we need super.versionDeleteByQuery() to set leaderLogic to false
     }
 
-    super.doDeleteByQuery(cmd);
+    super.versionDeleteByQuery(cmd);
 
     // unset the flag to avoid unintended consequences down the chain
     if (cmd.getReq().getParams().get(CDCR_UPDATE) != null) {
