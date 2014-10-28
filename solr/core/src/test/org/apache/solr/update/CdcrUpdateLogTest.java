@@ -26,6 +26,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.junit.AfterClass;
@@ -35,7 +36,7 @@ import org.noggit.ObjectBuilder;
 
 import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
 
-public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
+public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
   // means that we've seen the leader and have version info (i.e. we are a non-leader replica)
   private static String FROM_LEADER = DistributedUpdateProcessor.DistribPhase.FROMLEADER.toString();
@@ -507,5 +508,102 @@ public class TestCdcrUpdateLog extends SolrTestCaseJ4 {
     // old tlogs should have been removed
     assertEquals(2, ulog.getLogList(logDir).length);
   }
+
+  @Test
+  public void testSubReader() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    assertEquals(2, ulog.getLogList(logDir).length);
+
+    // start to read the first tlog
+    for (int i = 0; i < 10; i++) {
+      assertNotNull(reader.next());
+    }
+
+    // instantiate a sub reader, and finish tp read the first tlog (commit operation), plus start to read the
+    // second tlog (first five adds)
+    CdcrUpdateLog.CdcrLogReader subReader = reader.getSubReader();
+    for (int i = 0; i < 6; i++) {
+      assertNotNull(subReader.next());
+    }
+
+    // Generate a new tlog
+    addDocs(105, start, versions);  start+=105;
+    assertU(commit());
+
+    // Even if the subreader is past the first tlog, the first tlog should not have been removed
+    // since the parent reader is still pointing to it
+    assertEquals(3, ulog.getLogList(logDir).length);
+
+    // fast forward the parent reader with the subreader
+    reader.forwardSeek(subReader);
+    subReader.close();
+
+    // After fastforward, the parent reader should be position on the doc15
+    List o = (List) reader.next();
+    assertNotNull(o);
+    assertTrue(o.get(2) instanceof SolrInputDocument);
+    assertEquals("15", ((SolrInputDocument) o.get(2)).getFieldValue("id"));
+
+    // Finish to read the second tlog, and start to read the third one
+    for (int i = 0; i < 6; i++) {
+      assertNotNull(reader.next());
+    }
+
+    // Generate a new tlog to activate tlog cleaning
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    // If the parent reader was correctly fastforward, it should be on the third tlog, and the first two should
+    // have been removed.
+    assertEquals(2, ulog.getLogList(logDir).length);
+  }
+
+  /**
+   * Check that the reader is correctly reset to its last position
+   */
+  @Test
+  public void testResetToLastPosition() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    assertEquals(2, ulog.getLogList(logDir).length);
+
+    for (int i = 0; i < 22; i++) {
+      Object o = reader.next();
+      assertNotNull(o);
+      // reset to last position
+      reader.resetToLastPosition();
+      // we should read the same update operation, i.e., same version number
+      assertEquals(((List) o).get(1), ((List) reader.next()).get(1));
+    }
+    assertNull(reader.next());
+  }
+
 
 }

@@ -25,7 +25,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * An extension of the {@link org.apache.solr.update.UpdateLog} for the CDCR scenario.<br/>
@@ -46,6 +49,8 @@ public class CdcrUpdateLog extends UpdateLog {
    * A reader that will be used as toggle to turn on/off the buffering of tlogs
    */
   private CdcrLogReader bufferToggle;
+
+  protected static Logger log = LoggerFactory.getLogger(CdcrUpdateLog.class);
 
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
@@ -208,9 +213,9 @@ public class CdcrUpdateLog extends UpdateLog {
     private final CdcrLogPointer pointer;
 
     /**
-     * Used by {@link #seek(long)} to keep track of the latest log entry read.
+     * Used to record the last position of the tlog
      */
-    private Object lookahead = null;
+    private long lastPositionInTLog = 0;
 
     private CdcrLogReader(List<TransactionLog> tlogs) {
       this.tlogs = new LinkedList<>();
@@ -239,6 +244,31 @@ public class CdcrUpdateLog extends UpdateLog {
       }
     }
 
+    public CdcrLogReader getSubReader() {
+      CdcrLogReader clone = new CdcrLogReader((List<TransactionLog>) tlogs);
+      clone.lastPositionInTLog = this.lastPositionInTLog;
+      if (tlogReader != null) { // if the update log is emtpy, the tlogReader is equal to null
+        clone.tlogReader.close();
+        clone.tlogReader = currentTlog.getReader(this.tlogReader.currentPos());
+      }
+      return clone;
+    }
+
+    /**
+     * Expert: Fast forward this log reader with a log subreader. In order to avoid unexpected results, the log
+     * subreader must be created from this reader.
+     */
+    public void forwardSeek(CdcrLogReader subReader) {
+      tlogReader.close(); // close the existing reader, a new one will be created
+      while (this.tlogs.peekLast().id < subReader.tlogs.peekLast().id) {
+        tlogs.removeLast();
+        currentTlog = tlogs.peekLast();
+      }
+      assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
+      this.lastPositionInTLog = subReader.lastPositionInTLog;
+      this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
+    }
+
     /**
      * Advances to the next log entry in the updates log and returns the log entry itself.
      * Returns null if there are no more log entries in the updates log.<br>
@@ -247,13 +277,8 @@ public class CdcrUpdateLog extends UpdateLog {
      * log might have been updated with new entries.
      */
     public Object next() throws IOException, InterruptedException {
-      if (lookahead != null) {
-        Object o = lookahead;
-        lookahead = null;
-        return o;
-      }
-
       while (!tlogs.isEmpty()) {
+        lastPositionInTLog = tlogReader.currentPos();
         Object o = tlogReader.next();
 
         if (o != null) {
@@ -299,12 +324,11 @@ public class CdcrUpdateLog extends UpdateLog {
       // now that we might be on the right tlog, iterates over the entries to find the one we are looking for
       while ((o = this.next()) != null) {
         if (this.getVersion(o) >= targetVersion) {
-          lookahead = o;
+          this.resetToLastPosition();
           return true;
         }
       }
 
-      lookahead = null;
       return true;
     }
 
@@ -347,6 +371,21 @@ public class CdcrUpdateLog extends UpdateLog {
     private long getVersion(Object o) {
       List entry = (List)o;
       return (Long) entry.get(1);
+    }
+
+    /**
+     * If called after {@link #next()}, it resets the reader to its last position.
+     */
+    public void resetToLastPosition() {
+      try {
+        if (tlogReader != null) {
+          tlogReader.fis.seek(lastPositionInTLog);
+        }
+      }
+      catch (IOException e) {
+        log.error("Failed to seek last position in tlog", e);
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Failed to seek last position in tlog", e);
+      }
     }
 
     /**

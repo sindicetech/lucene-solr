@@ -80,6 +80,11 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     sliceCount = 2;
   }
 
+  @Override
+  protected String getCloudSolrConfig() {
+    return "solrconfig-cdcr.xml";
+  }
+
   protected void createCollection(String name) throws Exception {
     CloudSolrServer client = createCloudClient(null);
 
@@ -158,8 +163,8 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
     }
   }
 
-  protected void commit() throws IOException, SolrServerException {
-    CloudSolrServer client = this.getSourceClient();
+  protected void commit(String collection) throws IOException, SolrServerException {
+    CloudSolrServer client = createCloudClient(collection);
     try {
       client.commit();
     }
