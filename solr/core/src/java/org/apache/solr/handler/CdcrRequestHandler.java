@@ -194,7 +194,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
       @Override
       public void preClose(SolrCore core) {
+        String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+        String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+        log.info("Solr core is being closed - shutting down CDCR handler @ {}:{}", collectionName, shard);
+
         replicatorManager.shutdown();
+        bufferStateManager.shutdown();
+        processStateManager.shutdown();
         leaderStateManager.shutdown();
       }
 
