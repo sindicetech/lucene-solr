@@ -40,6 +40,7 @@ class CdcrProcessStateManager {
 
   private CdcrRequestHandler.ProcessState state = DEFAULT_STATE;
 
+  private ProcessStateWatcher wrappedWatcher;
   private Watcher watcher;
 
   private SolrCore core;
@@ -74,8 +75,8 @@ class CdcrProcessStateManager {
    * if we does not wrap the watcher - see SOLR-6621.
    */
   private Watcher initWatcher(SolrZkClient zkClient) {
-    ProcessStateWatcher watcher = new ProcessStateWatcher();
-    return zkClient.wrapWatcher(watcher);
+    wrappedWatcher = new ProcessStateWatcher();
+    return zkClient.wrapWatcher(wrappedWatcher);
   }
 
   private String getZnodeBase() {
@@ -129,17 +130,30 @@ class CdcrProcessStateManager {
     }
   }
 
-  /**
-   * TODO: Should we handle disconnection and expired sessions ?
-   */
+  void shutdown() {
+    if (wrappedWatcher != null) {
+      wrappedWatcher.cancel(); // cancel the watcher to avoid spurious warn messages during shutdown
+    }
+  }
+
   private class ProcessStateWatcher implements Watcher {
+
+    private boolean isCancelled = false;
+
+    /**
+     * Cancel the watcher to avoid spurious warn messages during shutdown.
+     */
+    void cancel() {
+      isCancelled = true;
+    }
 
     @Override
     public void process(WatchedEvent event) {
+      if (isCancelled) return; // if the watcher is cancelled, do nothing.
       String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
       String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
 
-      log.debug("The CDCR process state has changed: {} @ {}:{}", event, collectionName, shard);
+      log.info("The CDCR process state has changed: {} @ {}:{}", event, collectionName, shard);
       if (Event.EventType.None.equals(event.getType())) {
         return;
       }

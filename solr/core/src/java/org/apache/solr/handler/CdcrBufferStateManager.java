@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
  */
 class CdcrBufferStateManager {
 
+  private BufferStateWatcher wrappedWatcher;
   private Watcher watcher;
 
   private SolrCore core;
@@ -53,7 +54,7 @@ class CdcrBufferStateManager {
     // Startup and register the watcher at startup
     try {
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
-     this.initWatcher(zkClient);
+      watcher = this.initWatcher(zkClient);
       this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
     }
     catch (KeeperException | InterruptedException e) {
@@ -65,9 +66,9 @@ class CdcrBufferStateManager {
    * SolrZkClient does not guarantee that a watch object will only be triggered once for a given notification
    * if we does not wrap the watcher - see SOLR-6621.
    */
-  private void initWatcher(SolrZkClient zkClient) {
-    BufferStateWatcher watcher = new BufferStateWatcher();
-    this.watcher = zkClient.wrapWatcher(watcher);
+  private Watcher initWatcher(SolrZkClient zkClient) {
+    wrappedWatcher = new BufferStateWatcher();
+    return zkClient.wrapWatcher(wrappedWatcher);
   }
 
   private String getZnodeBase() {
@@ -129,17 +130,30 @@ class CdcrBufferStateManager {
     }
   }
 
-  /**
-   * TODO: Should we handle disconnection and expired sessions ?
-   */
+  void shutdown() {
+    if (wrappedWatcher != null) {
+      wrappedWatcher.cancel(); // cancel the watcher to avoid spurious warn messages during shutdown
+    }
+  }
+
   private class BufferStateWatcher implements Watcher {
+
+    private boolean isCancelled = false;
+
+    /**
+     * Cancel the watcher to avoid spurious warn messages during shutdown.
+     */
+    void cancel() {
+      isCancelled = true;
+    }
 
     @Override
     public void process(WatchedEvent event) {
+      if (isCancelled) return; // if the watcher is cancelled, do nothing.
       String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
       String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
 
-      log.debug("The CDCR buffer state has changed: {} @ {}:{}", event, collectionName, shard);
+      log.info("The CDCR buffer state has changed: {} @ {}:{}", event, collectionName, shard);
       if (Event.EventType.None.equals(event.getType())) {
         return;
       }
