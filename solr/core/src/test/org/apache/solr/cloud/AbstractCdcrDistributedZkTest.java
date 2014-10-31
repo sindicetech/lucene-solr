@@ -228,20 +228,27 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractFullDistribZ
   }
 
   /**
+   *
+   * getLeader returns e.g. http://127.0.0.1:59803/b_k/myCollection_shard1_replica1/
+   * while getReplicaUrls returns e.g. http://127.0.0.1:59803/b_k
+   *
+   */
+  protected String getTruncatedLeaderUrl(String collection, String shard) throws Exception {
+    String leader = getLeaderUrl(collection, shard);
+
+    String tmp = leader.substring(0, leader.length()-1);
+    leader = tmp.substring(0, tmp.lastIndexOf('/'));
+
+    return leader;
+  }
+
+  /**
    * Creates a non-smart client to a replica (non-leader).
    */
   protected SolrServer getReplicaClient(String collection, String shard) throws Exception {
     List<String> replicas = getReplicaUrls(collection, shard);
-    String leader = getLeaderUrl(collection, shard);
-    /*
-    getLeader returns e.g. http://127.0.0.1:59803/b_k/myCollection_shard1_replica1/
-    while getReplicaUrls returns e.g. http://127.0.0.1:59803/b_k
 
-     */
-    String tmp = leader.substring(0, leader.length()-1);
-    leader = tmp.substring(0, tmp.lastIndexOf('/'));
-
-    replicas.remove(leader);
+    replicas.remove(getTruncatedLeaderUrl(collection, shard));
     return createNewSolrServer(collection, replicas.get(0));
   }
 

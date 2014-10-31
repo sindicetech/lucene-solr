@@ -156,6 +156,10 @@ public class CdcrUpdateLog extends UpdateLog {
     }
   }
 
+  public CdcrLogReader getBufferToggle() {
+    return bufferToggle;
+  }
+
   /**
    * Is the update log buffering the tlogs ?
    */
@@ -217,6 +221,17 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     private long lastPositionInTLog = 0;
 
+    /**
+     * lastVersion is used to get nextToLastVersion
+     */
+    private long lastVersion = 0;
+    /**
+     * nextToLastVersion is communicated by leader to replicas so that they can remove no longer needed tlogs
+     *
+     * nextToLastVersion is used because thanks to {@link #resetToLastPosition()} lastVersion can become the current version
+     */
+    private long nextToLastVersion = 0;
+
     private CdcrLogReader(List<TransactionLog> tlogs) {
       this.tlogs = new LinkedList<>();
       this.tlogs.addAll(tlogs);
@@ -247,6 +262,7 @@ public class CdcrUpdateLog extends UpdateLog {
     public CdcrLogReader getSubReader() {
       CdcrLogReader clone = new CdcrLogReader((List<TransactionLog>) tlogs);
       clone.lastPositionInTLog = this.lastPositionInTLog;
+      //TODO lastVersion and nextToLast version update?
       if (tlogReader != null) { // if the update log is emtpy, the tlogReader is equal to null
         clone.tlogReader.close();
         clone.tlogReader = currentTlog.getReader(this.tlogReader.currentPos());
@@ -266,6 +282,7 @@ public class CdcrUpdateLog extends UpdateLog {
       }
       assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
       this.lastPositionInTLog = subReader.lastPositionInTLog;
+      //TODO lastVersion and nextToLast version update?
       this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
     }
 
@@ -283,6 +300,8 @@ public class CdcrUpdateLog extends UpdateLog {
 
         if (o != null) {
           pointer.set(currentTlog.tlogFile);
+          nextToLastVersion = lastVersion;
+          lastVersion = getVersion(o);
           return o;
         }
 
@@ -379,7 +398,7 @@ public class CdcrUpdateLog extends UpdateLog {
     public void resetToLastPosition() {
       try {
         if (tlogReader != null) {
-          tlogReader.fis.seek(lastPositionInTLog);
+          tlogReader.fis.seek(lastPositionInTLog); // TODO: should we update nextToLastVersion ?
         }
       }
       catch (IOException e) {
@@ -402,6 +421,13 @@ public class CdcrUpdateLog extends UpdateLog {
       logPointers.remove(this);
     }
 
+    public long getNextToLastVersion() {
+      return nextToLastVersion;
+    }
+
+    public long getLastVersion() {
+      return lastVersion;
+    }
   }
 
 }

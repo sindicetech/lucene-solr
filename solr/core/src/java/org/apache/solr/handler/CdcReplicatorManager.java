@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 class CdcReplicatorManager {
 
+  private final CdcrNonLeaderScheduler nonLeaderScheduler;
   private List<CdcReplicatorState> replicatorStates;
 
   private final CdcReplicatorScheduler scheduler;
@@ -67,6 +68,7 @@ class CdcReplicatorManager {
     }
 
     this.scheduler = new CdcReplicatorScheduler(this);
+    this.nonLeaderScheduler = new CdcrNonLeaderScheduler(core);
   }
 
   void setProcessStateManager(final CdcrProcessStateManager processStateManager) {
@@ -92,11 +94,20 @@ class CdcReplicatorManager {
    */
   void stateUpdate() {
     if (leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
+      this.nonLeaderScheduler.shutdown();
+
       this.initLogReaders();
       this.scheduler.start();
       return;
     }
+
+    if (!leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
+      this.nonLeaderScheduler.start();
+      return;
+    }
+
     this.scheduler.shutdown();
+    this.nonLeaderScheduler.shutdown();
     this.closeLogReaders();
   }
 

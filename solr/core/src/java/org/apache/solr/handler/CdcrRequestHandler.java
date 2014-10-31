@@ -136,6 +136,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleDisableBufferAction(req, rsp);
         break;
       }
+      case LEADERPROCESSEDVERSION: {
+        this.handleLeaderProcessedVersionAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -199,9 +203,72 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
 
       @Override
-      public void postClose(SolrCore core) {}
+      public void postClose(SolrCore core) {
+      }
 
     });
+  }
+
+  /**
+   *
+   */
+  private void handleLeaderProcessedVersionAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    if (!leaderStateManager.amILeader()) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrAction.LEADERPROCESSEDVERSION +
+          " sent to non-leader replica");
+    }
+
+    /*
+     We have to take care of four cases:
+     -    Replication &    Buffering
+     -    Replication & No Buffering
+     - No Replication &    Buffering
+     - No Replication & No Buffering
+     */
+
+    long lastProcessedVersion = Long.MAX_VALUE;
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      long version = Long.MAX_VALUE;
+      if (state.getLogReader() != null) {
+        version = state.getLogReader().getNextToLastVersion();
+      }
+      log.info("My last processed version for target {} is {}", state.getTargetCollection(), version);
+      lastProcessedVersion = Math.min(lastProcessedVersion, version);
+    }
+
+    // take care of the first three cases
+    CdcrUpdateLog.CdcrLogReader bufferLogReader = ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).getBufferToggle();
+    if (bufferLogReader != null) {
+      log.info("My last processed version for buffering is {}", bufferLogReader.getNextToLastVersion());
+      lastProcessedVersion = Math.min(lastProcessedVersion, bufferLogReader.getNextToLastVersion());
+    }
+
+    // the fourth case: no cdc replication, no buffering: all readers were null
+    if (lastProcessedVersion == Long.MAX_VALUE) {
+      CdcrUpdateLog.CdcrLogReader logReader = ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).newLogReader();
+      try {
+        // let the reader initialize lastVersion
+        logReader.next();
+
+        // here we call logReader.getLastVersion() because we created the log and called next() ourselves
+        lastProcessedVersion = Math.min(lastProcessedVersion, logReader.getLastVersion());
+        if (lastProcessedVersion == Long.MAX_VALUE) {
+          log.warn("Log reader reported Long.MAX_VALUE as lastVersion. This should never happen. Leader for collection {} shard {} node {}",
+              collection,
+              core.getCoreDescriptor().getCloudDescriptor().getShardId(),
+              core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName());
+          lastProcessedVersion = 0;
+        }
+      } catch (InterruptedException | IOException ex) {
+        //TODO: which error code to return?
+        throw new SolrException(SolrException.ErrorCode.INVALID_STATE, "Problem accessing log reader: " + ex.getMessage());
+      } finally {
+        logReader.close();
+      }
+    }
+
+    log.info("Returning the lowest last processed version {}", lastProcessedVersion);
+    rsp.add("lastProcessedVersion", lastProcessedVersion);
   }
 
   /**
@@ -340,7 +407,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     SLICECHECKPOINT,
     ENABLEBUFFER,
     DISABLEBUFFER,
-    TRIGGER;
+    TRIGGER,
+    LEADERPROCESSEDVERSION;
 
     public static CdcrAction get(String p) {
       if (p != null) {
