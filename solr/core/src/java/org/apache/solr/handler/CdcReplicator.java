@@ -48,13 +48,17 @@ public class CdcReplicator implements Runnable {
   @Override
   public void run() {
     CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
-    if (logReader == null) return; // the log reader has been closed since the task submission, do nothing.
+    if (logReader == null) {
+      log.warn("Log reader for target {} is not initialised, it will be ignored.", state.getTargetCollection());
+      return;
+    }
 
     try {
       // create update request
       UpdateRequest req = new UpdateRequest();
       req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
+      long counter = 0;
       Object o = logReader.next();
       for (int i = 0; i < BATCH_SIZE && o != null; i++, o = logReader.next()) {
         if (this.processUpdate(o, req) != null) {
@@ -64,8 +68,11 @@ public class CdcReplicator implements Runnable {
           }
           // we successfully forwarded the update, reset the number of consecutive errors
           state.resetConsecutiveErrors();
+          counter++;
         }
       }
+
+      log.info("Forwarded {} updates to target {}", counter, state.getTargetCollection());
     }
     catch (Exception e) {
       // there were an error while forwarding the update, reset the log reader to its previous position

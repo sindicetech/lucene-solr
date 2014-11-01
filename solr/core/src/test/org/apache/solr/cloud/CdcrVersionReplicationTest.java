@@ -31,15 +31,13 @@ import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
-import org.apache.solr.common.cloud.Replica;
-import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.update.processor.CdcrUpdateProcessor;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
 
 
 public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
+
   private static final String vfield = DistributedUpdateProcessor.VERSION_FIELD;
   SolrServer solrServer;
 
@@ -49,16 +47,11 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     shard2: doc4
    */
 
-  @Override
-  protected String getCloudSolrConfig() {
-    return "solrconfig-tlog-cdcr.xml";
-  }
-
   public CdcrVersionReplicationTest() {
     schemaString = "schema15.xml";      // we need a string id
     super.sliceCount = 1;
-    super.shardCount = 2;
-    super.fixShardCount = true;  // we only want to test with exactly 2 slices.
+    super.replicationFactor = 2;
+    super.createTargetCollection = false;
   }
 
   SolrServer createClientRandomly() throws Exception {

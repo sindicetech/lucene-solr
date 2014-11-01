@@ -136,6 +136,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleDisableBufferAction(req, rsp);
         break;
       }
+      case QUEUESIZE: {
+        this.handleQueueSizeAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -262,21 +266,26 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private void handleCollectionCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp)
   throws IOException, SolrServerException {
     ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
+    try {
+      zkController.getZkStateReader().updateClusterState(true);
+    } catch (Exception e) {
+      log.warn("Error when updating cluster state", e);
+    }
     ClusterState cstate = zkController.getClusterState();
     Collection<Slice> slices = cstate.getActiveSlices(collection);
 
     ExecutorService parallelExecutor = Executors.newCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
     String cdcrPath = rsp.getToLog().get("path").toString();
 
-    List<Callable<Long>> callables = new ArrayList<>();
-    for (Slice slice : slices) {
-      ZkNodeProps leaderProps = cstate.getLeader(collection, slice.getName());
-      ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
-      callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
-    }
-
     long checkpoint = Long.MAX_VALUE;
     try {
+      List<Callable<Long>> callables = new ArrayList<>();
+      for (Slice slice : slices) {
+        ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
+        ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
+        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
+      }
+
       for (final Future<Long> future : parallelExecutor.invokeAll(callables)) {
         long version = future.get();
         if (version < checkpoint) { // we must take the lowest checkpoint from all the slices
@@ -284,7 +293,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         }
       }
     }
-    catch (ExecutionException | InterruptedException e) {
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "Error while requesting slice's checkpoints", e);
+    }
+    catch (ExecutionException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Error while requesting slice's checkpoints", e);
     }
@@ -292,6 +306,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       parallelExecutor.shutdown();
     }
 
+    // TODO: register this param somewhere
     rsp.add("checkpoint", checkpoint);
   }
 
@@ -308,7 +323,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates();
     List<Long> versions = recentUpdates.getVersions(1);
     long lastVersion = versions.isEmpty() ? -1 : versions.get(0);
-    rsp.add("checkpoint", lastVersion);
+    rsp.add("checkpoint", lastVersion); // TODO: register this param somewhere
     recentUpdates.close();
   }
 
@@ -330,6 +345,26 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
+  private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList queue = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
+      if (logReader == null) {
+        String collectionName = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
+        String shard = req.getCore().getCoreDescriptor().getCloudDescriptor().getShardId();
+        log.warn("The log reader for target collection {} is not initialised @ {}:{}",
+            state.getTargetCollection(), collectionName, shard);
+        queue.add(state.getTargetCollection(), -1l);
+      }
+      else {
+        queue.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
+      }
+    }
+
+    rsp.add("queue", queue); // TODO: register this param somewhere
+  }
+
   @Override
   public String getDescription() {
     return "Manage Cross Data Center Replication";
@@ -346,7 +381,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     SLICECHECKPOINT,
     ENABLEBUFFER,
     DISABLEBUFFER,
-    TRIGGER;
+    QUEUESIZE;
 
     public static CdcrAction get(String p) {
       if (p != null) {
