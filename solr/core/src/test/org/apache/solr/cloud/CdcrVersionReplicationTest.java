@@ -37,6 +37,7 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 
 
 public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
+
   private static final String vfield = DistributedUpdateProcessor.VERSION_FIELD;
   SolrServer solrServer;
 
@@ -46,16 +47,11 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     shard2: doc4
    */
 
-  @Override
-  protected String getCloudSolrConfig() {
-    return "solrconfig-tlog-cdcr.xml";
-  }
-
   public CdcrVersionReplicationTest() {
     schemaString = "schema15.xml";      // we need a string id
-//    super.sliceCount = 1;
-//    super.shardCount = 2;
-//    super.fixShardCount = true;  // we only want to test with exactly 2 slices.
+    super.sliceCount = 1;
+    super.replicationFactor = 2;
+    super.createTargetCollection = false;
   }
 
   SolrServer createClientRandomly() throws Exception {
