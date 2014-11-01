@@ -17,6 +17,7 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkStateReader;
@@ -53,12 +54,13 @@ class CdcrLeaderStateManager {
     // Fetch leader state and register the watcher at startup
     try {
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
+      ClusterState clusterState = core.getCoreDescriptor().getCoreContainer().getZkController().getClusterState();
       // if the node does not exist, it means that the leader was not yet registered and the call to
       // checkIfIAmLeader will fail with a timeout. This can happen
       // when the cluster is starting up. The core is not yet fully loaded, and the leader election process
       // is waiting for it.
       watcher = this.initWatcher(zkClient);
-      if (zkClient.exists(this.getZnodePath(), watcher, true) != null) {
+      if (this.isLeaderRegistered(zkClient, clusterState)) {
         this.checkIfIAmLeader();
         zkClient.getData(this.getZnodePath(), watcher, null, true);
       }
@@ -66,6 +68,26 @@ class CdcrLeaderStateManager {
     catch (KeeperException | InterruptedException e) {
       log.warn("Failed fetching initial leader state and setting watch", e);
     }
+  }
+
+  /**
+   * Checks if the leader is registered. If it is not registered, we are probably at the
+   * initialisation phase of the cluster. In this case, we must attach a watcher to
+   * be notified when the leader is registered.
+   */
+  private boolean isLeaderRegistered(SolrZkClient zkClient, ClusterState clusterState)
+  throws KeeperException, InterruptedException {
+    // First check if the znode exists, and register the watcher at the same time
+    if (zkClient.exists(this.getZnodePath(), watcher, true) != null) {
+      String myShardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+      String myCollection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+      Replica replica = clusterState.getLeader(myCollection, myShardId);
+      if (replica != null && clusterState.liveNodesContain(replica.getNodeName())) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

@@ -27,6 +27,7 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
   @Before
   public void setUp() throws Exception {
     schemaString = "schema15.xml";      // we need a string id
+    createTargetCollection = false;     // we do not need the target cluster
     super.setUp();
   }
 
@@ -40,83 +41,63 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
   // check that the life-cycle state is properly synchronised across nodes
   public void doTestLifeCycleActions() throws Exception {
     // check initial status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
 
     // send start action to first shard
-    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.START);
+    NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
     NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(CdcrRequestHandler.ProcessState.STARTED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
 
     // check status
-    this.assertState(CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
 
-    // Close the leader of shard 1, then bring it back up
-    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
-    ChaosMonkey.stop(runner.jetty);
-    ChaosMonkey.start(runner.jetty);
+    // Restart the leader of shard 1
+    this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1));
 
     // check status - the node that died should have picked up the original state
-    this.assertState(CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
 
     // send stop action to second shard
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.STOP);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.STOP);
     status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(CdcrRequestHandler.ProcessState.STOPPED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
 
     // check status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
-  }
-
-  private void assertState(CdcrRequestHandler.ProcessState processState, CdcrRequestHandler.BufferState bufferState)
-  throws Exception {
-    String[] shards = new String[] { SHARD1, SHARD2 };
-
-    for (String shard : shards) { // check all shards
-      for (String baseUrl : getReplicaUrls(SOURCE_COLLECTION, shard)) { // check all replicas
-        NamedList rsp = sendRequest(baseUrl, CdcrRequestHandler.CdcrAction.STATUS);
-        NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-        assertEquals(processState.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
-        assertEquals(bufferState.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
-      }
-    }
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
   }
 
   // check the checkpoint API
   public void doTestCheckpointActions() throws Exception {
     // initial request on an empty index, must return -1
-    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
     assertEquals(-1l, rsp.get("checkpoint"));
 
-    index(id, "a"); // shard 2
-    commit();
+    index(SOURCE_COLLECTION, getDoc(id, "a")); // shard 2
 
     // only one document indexed in shard 2, the checkpoint must be still -1
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
     assertEquals(-1l, rsp.get("checkpoint"));
 
-    index(id, "b"); // shard 1
-    commit();
+    index(SOURCE_COLLECTION, getDoc(id, "b")); // shard 1
 
     // a second document indexed in shard 1, the checkpoint must come from shard 2
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
     long checkpoint1 = (Long) rsp.get("checkpoint");
-    long expected = (Long) sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
+    long expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
     assertEquals(expected, checkpoint1);
 
-    index(id, "c"); // shard 1
-    commit();
+    index(SOURCE_COLLECTION, getDoc(id, "c")); // shard 1
 
     // a third document indexed in shard 1, the checkpoint must still come from shard 2
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
     assertEquals(checkpoint1, rsp.get("checkpoint"));
 
-    index(id, "d"); // shard 2
-    commit();
+    index(SOURCE_COLLECTION, getDoc(id, "d")); // shard 2
 
     // a fourth document indexed in shard 2, the checkpoint must come from shard 1
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT);
     long checkpoint2 = (Long) rsp.get("checkpoint");
-    expected = (Long) sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
+    expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
     assertEquals(expected, checkpoint2);
 
     // replication never started, lastProcessedVersion should be 0 for both shards
@@ -132,31 +113,29 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
   // check that the buffer state is properly synchronised across nodes
   public void doTestBufferActions() throws Exception {
     // check initial status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
 
     // send disable buffer action to first shard
-    NamedList rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+    NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
     NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(CdcrRequestHandler.BufferState.DISABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
 
     // check status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
 
-    // Close the leader of shard 1, then bring it back up
-    CloudJettyRunner runner = shardToLeaderJetty.get(SHARD1);
-    ChaosMonkey.stop(runner.jetty);
-    ChaosMonkey.start(runner.jetty);
+    // Restart the leader of shard 1
+    this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1));
 
     // check status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.DISABLED);
 
     // send enable buffer action to second shard
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.ENABLEBUFFER);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.ENABLEBUFFER);
     status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
     assertEquals(CdcrRequestHandler.BufferState.ENABLED.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
 
     // check status
-    this.assertState(CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STOPPED, CdcrRequestHandler.BufferState.ENABLED);
   }
 
 }
