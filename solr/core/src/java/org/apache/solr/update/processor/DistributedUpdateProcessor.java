@@ -1349,53 +1349,10 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
     // at this point, there is an update we need to try and apply.
     // we may or may not be the leader.
 
-    // Find the version
-    long versionOnUpdate = cmd.getVersion();
-    if (versionOnUpdate == 0) {
-      String versionOnUpdateS = req.getParams().get(VERSION_FIELD);
-      versionOnUpdate = versionOnUpdateS == null ? 0 : Long.parseLong(versionOnUpdateS);
-    }
-    versionOnUpdate = Math.abs(versionOnUpdate);  // normalize to positive version
-
     boolean isReplayOrPeersync = (cmd.getFlags() & (UpdateCommand.REPLAY | UpdateCommand.PEER_SYNC)) != 0;
     boolean leaderLogic = isLeader && !isReplayOrPeersync;
 
-    if (!leaderLogic && versionOnUpdate==0) {
-      throw new SolrException(ErrorCode.BAD_REQUEST, "missing _version_ on update from leader");
-    }
-
-    vinfo.blockUpdates();
-    try {
-
-      if (versionsStored) {
-        if (leaderLogic) {
-          long version = vinfo.getNewClock();
-          cmd.setVersion(-version);
-          // TODO update versions in all buckets
-
-          doLocalDelete(cmd);
-
-        } else {
-          cmd.setVersion(-versionOnUpdate);
-
-          if (ulog.getState() != UpdateLog.State.ACTIVE && (cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-            // we're not in an active state, and this update isn't from a replay, so buffer it.
-            cmd.setFlags(cmd.getFlags() | UpdateCommand.BUFFERING);
-            ulog.deleteByQuery(cmd);
-            return;
-          }
-
-          doLocalDelete(cmd);
-        }
-      }
-
-      // since we don't know which documents were deleted, the easiest thing to do is to invalidate
-      // all real-time caches (i.e. UpdateLog) which involves also getting a new version of the IndexReader
-      // (so cache misses will see up-to-date data)
-
-    } finally {
-      vinfo.unblockUpdates();
-    }
+    versionDeleteByQuery(cmd);
 
     if (zkEnabled)  {
       // forward to all replicas
@@ -1462,6 +1419,56 @@ public class DistributedUpdateProcessor extends UpdateRequestProcessor {
         rsp.add("deleteByQuery",deleteByQueryResponse);
       }
       deleteByQueryResponse.add(cmd.getQuery(), cmd.getVersion());
+    }
+  }
+
+  protected void versionDeleteByQuery(DeleteUpdateCommand cmd) throws IOException {
+    // Find the version
+    long versionOnUpdate = cmd.getVersion();
+    if (versionOnUpdate == 0) {
+      String versionOnUpdateS = req.getParams().get(VERSION_FIELD);
+      versionOnUpdate = versionOnUpdateS == null ? 0 : Long.parseLong(versionOnUpdateS);
+    }
+    versionOnUpdate = Math.abs(versionOnUpdate);  // normalize to positive version
+
+    boolean isReplayOrPeersync = (cmd.getFlags() & (UpdateCommand.REPLAY | UpdateCommand.PEER_SYNC)) != 0;
+    boolean leaderLogic = isLeader && !isReplayOrPeersync;
+
+    if (!leaderLogic && versionOnUpdate==0) {
+      throw new SolrException(ErrorCode.BAD_REQUEST, "missing _version_ on update from leader");
+    }
+
+    vinfo.blockUpdates();
+    try {
+
+      if (versionsStored) {
+        if (leaderLogic) {
+          long version = vinfo.getNewClock();
+          cmd.setVersion(-version);
+          // TODO update versions in all buckets
+
+          doLocalDelete(cmd);
+
+        } else {
+          cmd.setVersion(-versionOnUpdate);
+
+          if (ulog.getState() != UpdateLog.State.ACTIVE && (cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
+            // we're not in an active state, and this update isn't from a replay, so buffer it.
+            cmd.setFlags(cmd.getFlags() | UpdateCommand.BUFFERING);
+            ulog.deleteByQuery(cmd);
+            return;
+          }
+
+          doLocalDelete(cmd);
+        }
+      }
+
+      // since we don't know which documents were deleted, the easiest thing to do is to invalidate
+      // all real-time caches (i.e. UpdateLog) which involves also getting a new version of the IndexReader
+      // (so cache misses will see up-to-date data)
+
+    } finally {
+      vinfo.unblockUpdates();
     }
   }
 
