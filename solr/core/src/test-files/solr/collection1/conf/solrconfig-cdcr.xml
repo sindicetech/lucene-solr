@@ -60,7 +60,7 @@
   <requestHandler name="/cdcr" class="solr.CdcrRequestHandler">
     <lst name="replicas">
       <str name="zkHost">${zkHost}</str>
-      <str name="source">collection1</str>
+      <str name="source">source_collection</str>
       <str name="target">target_collection</str>
     </lst>
   </requestHandler>
