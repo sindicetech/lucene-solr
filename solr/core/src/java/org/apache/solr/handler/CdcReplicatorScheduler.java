@@ -26,6 +26,12 @@ import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Schedule the execution of the {@link org.apache.solr.handler.CdcReplicator} threads at
+ * regular time interval. It relies on a queue of {@link org.apache.solr.handler.CdcReplicatorState} in
+ * order to avoid that one {@link org.apache.solr.handler.CdcReplicatorState} is used by two threads at the same
+ * time.
+ */
 class CdcReplicatorScheduler {
 
   private boolean isStarted = false;
@@ -36,7 +42,7 @@ class CdcReplicatorScheduler {
   private final CdcReplicatorManager replicatorManager;
   private final ConcurrentLinkedQueue<CdcReplicatorState> statesQueue;
 
-  public static final int POOL_SIZE = 8;
+  public static final int POOL_SIZE = 8; // TODO: Make this configurable
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorScheduler.class);
 
@@ -78,7 +84,7 @@ class CdcReplicatorScheduler {
           }
         }
 
-      }, 0, 1, TimeUnit.SECONDS);
+      }, 0, 1, TimeUnit.SECONDS); // TODO: Make this configurable
       isStarted = true;
     }
   }

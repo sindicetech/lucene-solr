@@ -32,6 +32,11 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * The replication logic. Given a {@link org.apache.solr.handler.CdcReplicatorState}, it reads all the new entries
+ * in the update log and forward them to the target cluster. If an error occurs, the replication is stopped and
+ * will be tried again later.
+ */
 public class CdcReplicator implements Runnable {
 
   private final CdcReplicatorState state;
@@ -56,6 +61,7 @@ public class CdcReplicator implements Runnable {
     try {
       // create update request
       UpdateRequest req = new UpdateRequest();
+      // Add the param to indicate the {@link CdcrUpdateProcessor} to keep the provided version number
       req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
       long counter = 0;
