@@ -23,6 +23,9 @@ import java.util.Map;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.update.CdcrUpdateLog;
 
+/**
+ * The state of the replication with a target cluster.
+ */
 class CdcReplicatorState {
 
   private final String targetCollection;
