@@ -128,7 +128,7 @@ class CdcReplicatorManager {
             checkpoint, collectionName, shard);
         CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
         reader.seek(checkpoint);
-        state.init(ulog.newLogReader());
+        state.init(reader);
       }
       catch (IOException | SolrServerException | SolrException e) {
         log.warn("Unable to instantiate the log reader for target collection " + state.getTargetCollection(), e);
@@ -163,6 +163,7 @@ class CdcReplicatorManager {
    * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}.
    */
   void shutdown() {
+    this.nonLeaderScheduler.shutdown();
     this.scheduler.shutdown();
     for (CdcReplicatorState state : replicatorStates) {
       state.shutdown();

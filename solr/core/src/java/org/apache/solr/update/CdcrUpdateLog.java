@@ -19,11 +19,10 @@ package org.apache.solr.update;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.LinkedBlockingDeque;
 
 import org.apache.solr.common.SolrException;
 import org.apache.solr.core.SolrCore;
@@ -133,7 +132,7 @@ public class CdcrUpdateLog extends UpdateLog {
    * initialised with the current list of tlogs.
    */
   public CdcrLogReader newLogReader() {
-    return new CdcrLogReader(new ArrayList(logs));
+    return new CdcrLogReader(new ArrayList(logs), tlog);
   }
 
   /**
@@ -213,7 +212,8 @@ public class CdcrUpdateLog extends UpdateLog {
     private TransactionLog currentTlog;
     private TransactionLog.LogReader tlogReader;
 
-    private final Deque<TransactionLog> tlogs;
+    // we need to use a blocking deque because of #getNumberOfRemainingRecords
+    private final LinkedBlockingDeque<TransactionLog> tlogs;
     private final CdcrLogPointer pointer;
 
     /**
@@ -232,9 +232,15 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     private long nextToLastVersion = 0;
 
-    private CdcrLogReader(List<TransactionLog> tlogs) {
-      this.tlogs = new LinkedList<>();
+    /**
+     * Used to record the number of records read in the current tlog
+     */
+    private long numRecordsReadInCurrentTlog = 0;
+
+    private CdcrLogReader(List<TransactionLog> tlogs, TransactionLog tlog) {
+      this.tlogs = new LinkedBlockingDeque<>();
       this.tlogs.addAll(tlogs);
+      if (tlog != null) this.tlogs.push(tlog); // ensure that the tlog being written is pushed
 
       // Register the pointer in the parent UpdateLog
       pointer = new CdcrLogPointer();
@@ -244,6 +250,8 @@ public class CdcrUpdateLog extends UpdateLog {
       if ((currentTlog = this.tlogs.peekLast()) != null) {
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
+        numRecordsReadInCurrentTlog = 0;
+        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
     }
 
@@ -256,34 +264,9 @@ public class CdcrUpdateLog extends UpdateLog {
         currentTlog = tlogs.peekLast();
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
+        numRecordsReadInCurrentTlog = 0;
+        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
-    }
-
-    public CdcrLogReader getSubReader() {
-      CdcrLogReader clone = new CdcrLogReader((List<TransactionLog>) tlogs);
-      clone.lastPositionInTLog = this.lastPositionInTLog;
-      //TODO lastVersion and nextToLast version update?
-      if (tlogReader != null) { // if the update log is emtpy, the tlogReader is equal to null
-        clone.tlogReader.close();
-        clone.tlogReader = currentTlog.getReader(this.tlogReader.currentPos());
-      }
-      return clone;
-    }
-
-    /**
-     * Expert: Fast forward this log reader with a log subreader. In order to avoid unexpected results, the log
-     * subreader must be created from this reader.
-     */
-    public void forwardSeek(CdcrLogReader subReader) {
-      tlogReader.close(); // close the existing reader, a new one will be created
-      while (this.tlogs.peekLast().id < subReader.tlogs.peekLast().id) {
-        tlogs.removeLast();
-        currentTlog = tlogs.peekLast();
-      }
-      assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
-      this.lastPositionInTLog = subReader.lastPositionInTLog;
-      //TODO lastVersion and nextToLast version update?
-      this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
     }
 
     /**
@@ -299,9 +282,9 @@ public class CdcrUpdateLog extends UpdateLog {
         Object o = tlogReader.next();
 
         if (o != null) {
-          pointer.set(currentTlog.tlogFile);
           nextToLastVersion = lastVersion;
           lastVersion = getVersion(o);
+          numRecordsReadInCurrentTlog++;
           return o;
         }
 
@@ -310,6 +293,9 @@ public class CdcrUpdateLog extends UpdateLog {
           tlogs.removeLast();
           currentTlog = tlogs.peekLast();
           tlogReader = currentTlog.getReader(0);
+          pointer.set(currentTlog.tlogFile);
+          numRecordsReadInCurrentTlog = 0;
+          log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
         }
         else {
           // the only tlog left is the new tlog which is currently being written,
@@ -336,7 +322,7 @@ public class CdcrUpdateLog extends UpdateLog {
     public boolean seek(long targetVersion) throws IOException, InterruptedException {
       Object o;
 
-      if (!this.seekTLog(targetVersion)) {
+      if (tlogs.isEmpty() || !this.seekTLog(targetVersion)) {
         return false;
       }
 
@@ -383,6 +369,8 @@ public class CdcrUpdateLog extends UpdateLog {
 
       currentTlog = tlogs.peekLast();
       tlogReader = currentTlog.getReader(0);
+      pointer.set(currentTlog.tlogFile);
+      numRecordsReadInCurrentTlog = 0;
 
       return true;
     }
@@ -399,12 +387,29 @@ public class CdcrUpdateLog extends UpdateLog {
       try {
         if (tlogReader != null) {
           tlogReader.fis.seek(lastPositionInTLog); // TODO: should we update nextToLastVersion ?
+          numRecordsReadInCurrentTlog--;
         }
       }
       catch (IOException e) {
         log.error("Failed to seek last position in tlog", e);
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Failed to seek last position in tlog", e);
       }
+    }
+
+    /**
+     * Returns the number of remaining records to be read in the logs.
+     */
+    public long getNumberOfRemainingRecords() {
+      long numRemainingRecords = 0;
+
+      synchronized (tlogs) {
+        for (TransactionLog tlog : tlogs) {
+          // TODO: currently, numRecords returns 0 for reopened existing log files.
+          numRemainingRecords += tlog.numRecords() - 1; // minus 1 as the number of records returned by the tlog includes the header
+        }
+      }
+
+      return numRemainingRecords - numRecordsReadInCurrentTlog;
     }
 
     /**

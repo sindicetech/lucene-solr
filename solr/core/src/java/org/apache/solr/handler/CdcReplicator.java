@@ -32,6 +32,11 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * The replication logic. Given a {@link org.apache.solr.handler.CdcReplicatorState}, it reads all the new entries
+ * in the update log and forward them to the target cluster. If an error occurs, the replication is stopped and
+ * will be tried again later.
+ */
 public class CdcReplicator implements Runnable {
 
   private final CdcReplicatorState state;
@@ -48,13 +53,18 @@ public class CdcReplicator implements Runnable {
   @Override
   public void run() {
     CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
-    if (logReader == null) return; // the log reader has been closed since the task submission, do nothing.
+    if (logReader == null) {
+      log.warn("Log reader for target {} is not initialised, it will be ignored.", state.getTargetCollection());
+      return;
+    }
 
     try {
       // create update request
       UpdateRequest req = new UpdateRequest();
+      // Add the param to indicate the {@link CdcrUpdateProcessor} to keep the provided version number
       req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
+      long counter = 0;
       Object o = logReader.next();
       for (int i = 0; i < BATCH_SIZE && o != null; i++, o = logReader.next()) {
         if (this.processUpdate(o, req) != null) {
@@ -64,8 +74,11 @@ public class CdcReplicator implements Runnable {
           }
           // we successfully forwarded the update, reset the number of consecutive errors
           state.resetConsecutiveErrors();
+          counter++;
         }
       }
+
+      log.info("Forwarded {} updates to target {}", counter, state.getTargetCollection());
     }
     catch (Exception e) {
       // there were an error while forwarding the update, reset the log reader to its previous position

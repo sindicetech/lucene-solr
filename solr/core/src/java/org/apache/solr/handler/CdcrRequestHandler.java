@@ -55,6 +55,33 @@ import org.apache.solr.util.plugin.SolrCoreAware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * <p>
+ *   This request handler implements the CDCR API and is responsible of the execution of the
+ *   {@link CdcReplicator} threads.
+ * </p>
+ * <p>
+ *   It relies on three classes, {@link org.apache.solr.handler.CdcrLeaderStateManager},
+ *   {@link org.apache.solr.handler.CdcrBufferStateManager} and {@link org.apache.solr.handler.CdcrProcessStateManager}
+ *   to synchronise the state of the CDCR across all the nodes.
+ * </p>
+ * <p>
+ *   The CDCR process can be either {@link ProcessState#STOPPED} or {@link ProcessState#STARTED} by using the
+ *   actions {@link CdcrAction#STOP} and {@link CdcrAction#START} respectively. If a node is leader and the process
+ *   state is {@link ProcessState#STARTED}, the {@link org.apache.solr.handler.CdcReplicatorManager} will
+ *   start the {@link CdcReplicator} threads. If a node becomes non-leader or if the process state becomes
+ *   {@link ProcessState#STOPPED}, the {@link CdcReplicator} threads are stopped.
+ * </p>
+ * <p>
+ *   The CDCR can be switched to a "buffering" mode, in which the update log will never delete old transaction log
+ *   files. Such a mode can be enabled or disabled using the action {@link CdcrAction#ENABLEBUFFER} and
+ *   {@link CdcrAction#DISABLEBUFFER} respectively.
+ * </p>
+ * <p>
+ *   Known limitations: The source and target clusters must have the same topology. Replication between clusters
+ *   with a different number of shards will likely results in an inconsistent index.
+ * </p>
+ */
 public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAware {
 
   protected static Logger log = LoggerFactory.getLogger(CdcrRequestHandler.class);
@@ -140,6 +167,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleLeaderProcessedVersionAction(req, rsp);
         break;
       }
+      case QUEUESIZE: {
+        this.handleQueueSizeAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -169,7 +200,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     // If the Solr cloud is being initialised, each CDCR node will start up in its default state, i.e., STOPPED
     // and non-leader. The leader state will be updated later, when all the Solr cores have been loaded.
     // If the Solr cloud has already been initialised, and the core is reloaded (i.e., because a node died or a new node
-    // is added to the cluster), each CDCR node will synchronise its state with the global CDCR state that is stored
+    // is added to the cluster), the CDCR node will synchronise its state with the global CDCR state that is stored
     // in zookeeper.
 
     // Initialise the buffer state manager
@@ -198,7 +229,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
       @Override
       public void preClose(SolrCore core) {
+        String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+        String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+        log.info("Solr core is being closed - shutting down CDCR handler @ {}:{}", collectionName, shard);
+
         replicatorManager.shutdown();
+        bufferStateManager.shutdown();
+        processStateManager.shutdown();
         leaderStateManager.shutdown();
       }
 
@@ -323,21 +360,26 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private void handleCollectionCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp)
   throws IOException, SolrServerException {
     ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
+    try {
+      zkController.getZkStateReader().updateClusterState(true);
+    } catch (Exception e) {
+      log.warn("Error when updating cluster state", e);
+    }
     ClusterState cstate = zkController.getClusterState();
     Collection<Slice> slices = cstate.getActiveSlices(collection);
 
     ExecutorService parallelExecutor = Executors.newCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
     String cdcrPath = rsp.getToLog().get("path").toString();
 
-    List<Callable<Long>> callables = new ArrayList<>();
-    for (Slice slice : slices) {
-      ZkNodeProps leaderProps = cstate.getLeader(collection, slice.getName());
-      ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
-      callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
-    }
-
     long checkpoint = Long.MAX_VALUE;
     try {
+      List<Callable<Long>> callables = new ArrayList<>();
+      for (Slice slice : slices) {
+        ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
+        ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
+        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
+      }
+
       for (final Future<Long> future : parallelExecutor.invokeAll(callables)) {
         long version = future.get();
         if (version < checkpoint) { // we must take the lowest checkpoint from all the slices
@@ -345,7 +387,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         }
       }
     }
-    catch (ExecutionException | InterruptedException e) {
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "Error while requesting slice's checkpoints", e);
+    }
+    catch (ExecutionException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Error while requesting slice's checkpoints", e);
     }
@@ -353,6 +400,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       parallelExecutor.shutdown();
     }
 
+    // TODO: register this param somewhere
     rsp.add("checkpoint", checkpoint);
   }
 
@@ -369,7 +417,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates();
     List<Long> versions = recentUpdates.getVersions(1);
     long lastVersion = versions.isEmpty() ? -1 : versions.get(0);
-    rsp.add("checkpoint", lastVersion);
+    rsp.add("checkpoint", lastVersion); // TODO: register this param somewhere
     recentUpdates.close();
   }
 
@@ -391,6 +439,26 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
+  private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList queue = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
+      if (logReader == null) {
+        String collectionName = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
+        String shard = req.getCore().getCoreDescriptor().getCloudDescriptor().getShardId();
+        log.warn("The log reader for target collection {} is not initialised @ {}:{}",
+            state.getTargetCollection(), collectionName, shard);
+        queue.add(state.getTargetCollection(), -1l);
+      }
+      else {
+        queue.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
+      }
+    }
+
+    rsp.add("queue", queue); // TODO: register this param somewhere
+  }
+
   @Override
   public String getDescription() {
     return "Manage Cross Data Center Replication";
@@ -407,8 +475,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     SLICECHECKPOINT,
     ENABLEBUFFER,
     DISABLEBUFFER,
-    TRIGGER,
-    LEADERPROCESSEDVERSION;
+    LEADERPROCESSEDVERSION,
+    QUEUESIZE;
 
     public static CdcrAction get(String p) {
       if (p != null) {
@@ -516,7 +584,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         request.setPath(cdcrPath);
 
         NamedList response = server.request(request);
-        return (Long) response.get("checkpoint");
+        return (Long) response.get("checkpoint"); // TODO: register this param somewhere
       }
       finally {
         server.shutdown();
