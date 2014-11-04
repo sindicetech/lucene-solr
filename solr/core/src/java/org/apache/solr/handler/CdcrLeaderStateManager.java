@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory;
  *   of a leader state change.
  * </p>
  */
-class CdcrLeaderStateManager {
+class CdcrLeaderStateManager extends CdcrStateManager {
 
   private boolean amILeader = false;
 
@@ -166,21 +166,6 @@ class CdcrLeaderStateManager {
       }
     }
 
-  }
-
-  private CdcReplicatorManager replicatorManager;
-
-  void register(CdcReplicatorManager replicatorManager) {
-    this.replicatorManager = replicatorManager;
-  }
-
-  /**
-   * Notify the {@link org.apache.solr.handler.CdcReplicatorManager} of a state change.
-   */
-  private void callback() {
-    if (replicatorManager != null) {
-      this.replicatorManager.stateUpdate();
-    }
   }
 
 }

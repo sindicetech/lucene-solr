@@ -17,12 +17,17 @@ package org.apache.solr.cloud;
  * limitations under the License.
  */
 
+import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.util.NamedList;
+import org.apache.solr.core.SolrCore;
 import org.apache.solr.handler.CdcrRequestHandler;
+import org.apache.solr.servlet.SolrDispatchFilter;
 import org.junit.Before;
 
 public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTest {
@@ -36,11 +41,13 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-    // this.doTestDeleteCreateSourceCollection();
+    this.doTestDeleteCreateSourceCollection();
     // this.doTestTargetCollectionNotAvailable();
-    // this.doTestReplicationAfterRestart();
-    // this.doTestReplicationAfterLeaderChange();
     this.doTestReplicationStartStop();
+    this.doTestReplicationAfterRestart();
+    this.doTestReplicationAfterLeaderChange();
+    this.doTestUpdateLogSynchronisation();
+    this.doTestBufferOnNonLeader();
   }
 
   /**
@@ -301,6 +308,83 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(110, getNumDocs(TARGET_COLLECTION));
   }
 
+  /**
+   * Check that the update logs are synchronised between leader and non-leader nodes
+   */
+  public void doTestUpdateLogSynchronisation() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // buffering is enabled by default, so disable it
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+
+    for (int i = 0; i < 50; i++) {
+      index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i))); // will perform a commit for every document
+    }
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+
+    Thread.sleep(2000); // wait for the update log synchronisation to complete
+
+    // logs on replicas should be trimmed
+    assertUpdateLogs(SOURCE_COLLECTION, true);
+
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+
+    for (int i = 50; i < 100; i++) {
+      index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i)));
+    }
+
+    Thread.sleep(2000); // wait for the update log synchronisation to complete
+
+    // at this stage, we should have created one tlog file per document, and some of them must have been cleaned on the
+    // leader since we are not buffering and replication is stopped
+    // the non-leader must have synchronised its update log with its leader
+    assertUpdateLogs(SOURCE_COLLECTION, true);
+  }
+
+  /**
+   * Check that the buffer is always activated on non-leader nodes.
+   */
+  public void doTestBufferOnNonLeader() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // buffering is enabled by default, so disable it
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+
+    // Index documents
+    for (int i = 0; i < 50; i++) {
+      index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i))); // will perform a commit for every document
+    }
+
+    // Close all the leaders, then restart them. At this stage, the new leader must have been elected
+    this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1));
+    this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2));
+
+    // Start CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    // If the non-leader node were buffering updates, then the replication must be complete
+    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+  }
+
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {
     while (true) {
       log.info("Checking queue size @ {}:{}", collectionName, shardId);
@@ -317,6 +401,125 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrRequestHandler.CdcrAction.QUEUESIZE);
     NamedList status = (NamedList) rsp.get("queue");
     return (Long) status.get(TARGET_COLLECTION);
+  }
+
+  /**
+   * if equals == true then checks that update logs contain the same number of files
+   * otherwise asserts the numbers are different
+   */
+  protected void assertUpdateLogs(String collection, boolean equals) throws Exception {
+    CollectionInfo info = collectInfo(collection);
+    Map<String, List<CollectionInfo.CoreInfo>> shardToCoresMap = info.getShardToCoresMap();
+    for (String shard : shardToCoresMap.keySet()) {
+      CollectionInfo.CoreInfo leader = info.getLeader(shard);
+      List<CollectionInfo.CoreInfo> replicas = info.getReplicas(shard);
+      assertUpdateLogs(leader, replicas, equals);
+    }
+  }
+
+  private void assertUpdateLogs(CollectionInfo.CoreInfo leader, List<CollectionInfo.CoreInfo> replicas, boolean equals) {
+    int leaderLogs = numberOfFiles(leader.ulogDir);
+
+    for (CollectionInfo.CoreInfo replica : replicas) {
+      int replicaLogs = numberOfFiles(replica.ulogDir);
+      log.info("Number of logs in update log on leader {} {} {} and on replica {} {} {}",
+          leader.shard, leader.collectionName, leaderLogs, replica.shard, replica.collectionName, replicaLogs);
+      if (equals) {
+        assertEquals(String.format("Number of tlogs on replica %s %s: %d is different than on leader: %d.",
+                replica.collectionName, replica.shard, replicaLogs, leaderLogs),
+            leaderLogs, replicaLogs);
+      } else {
+        assertTrue(String.format("Number of tlogs on replica %s %s: %d is the same as on leader: %d.",
+                replica.collectionName, replica.shard, replicaLogs, leaderLogs),
+            leaderLogs != replicaLogs);
+      }
+    }
+  }
+
+  private int numberOfFiles(String dir) {
+    File file = new File(dir);
+    if (!file.isDirectory()) {
+      assertTrue("Path to tlog " + dir + " does not exists or it's not a directory.", false);
+    }
+    log.info("Update log dir {} contains: {}", dir, file.listFiles());
+    return file.listFiles().length;
+  }
+
+  private CollectionInfo collectInfo(String collection) throws Exception {
+    CollectionInfo info = new CollectionInfo(collection);
+    for (String shard : shardToJetty.get(collection).keySet()) {
+      List<CloudJettyRunner> jettyRunners = shardToJetty.get(collection).get(shard);
+      for (CloudJettyRunner jettyRunner : jettyRunners) {
+        SolrDispatchFilter filter = (SolrDispatchFilter)jettyRunner.jetty.getDispatchFilter().getFilter();
+        for (SolrCore core : filter.getCores().getCores()) {
+          info.addCore(core, shard, shardToLeaderJetty.get(collection).containsValue(jettyRunner));
+        }
+      }
+    }
+
+    return info;
+  }
+
+  private class CollectionInfo {
+
+    List<CoreInfo> coreInfos = new ArrayList<>();
+
+    String collection;
+
+    CollectionInfo(String collection) {
+      this.collection = collection;
+    }
+
+    /**
+     * @return Returns a map shard -> list of cores
+     */
+    Map<String, List<CoreInfo>> getShardToCoresMap() {
+      Map<String, List<CoreInfo>> map = new HashMap<>();
+      for (CoreInfo info : coreInfos) {
+        List<CoreInfo> list = map.get(info.shard);
+        if (list == null) {
+          list = new ArrayList<>();
+          map.put(info.shard, list);
+        }
+        list.add(info);
+      }
+      return map;
+    }
+
+    CoreInfo getLeader(String shard) {
+      List<CoreInfo> coreInfos = getShardToCoresMap().get(shard);
+      for (CoreInfo info : coreInfos) {
+        if (info.isLeader) {
+          return info;
+        }
+      }
+      assertTrue(String.format("There is no leader for collection %s shard %s", collection, shard), false);
+      return null;
+    }
+
+    List<CoreInfo> getReplicas(String shard) {
+      List<CoreInfo> coreInfos = getShardToCoresMap().get(shard);
+      coreInfos.remove(getLeader(shard));
+      return coreInfos;
+    }
+
+    void addCore(SolrCore core, String shard, boolean isLeader) throws Exception {
+      CoreInfo info = new CoreInfo();
+      info.collectionName = core.getName();
+      info.shard = shard;
+      info.isLeader = isLeader;
+      info.ulogDir = core.getUlogDir() + "tlog";
+
+      this.coreInfos.add(info);
+    }
+
+    public class CoreInfo {
+      String collectionName;
+      String shard;
+      boolean isLeader;
+      String ulogDir;
+    }
+
   }
 
 }

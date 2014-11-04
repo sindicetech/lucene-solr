@@ -19,7 +19,6 @@ package org.apache.solr.handler;
 
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.core.SolrCore;
-import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
@@ -31,7 +30,9 @@ import org.slf4j.LoggerFactory;
  * Manage the state of the update log buffer. It is responsible of synchronising the state
  * through Zookeeper. The state of the buffer is stored in the zk node defined by {@link #getZnodePath()}.
  */
-class CdcrBufferStateManager {
+class CdcrBufferStateManager extends CdcrStateManager {
+
+  private CdcrRequestHandler.BufferState state = DEFAULT_STATE;
 
   private BufferStateWatcher wrappedWatcher;
   private Watcher watcher;
@@ -80,22 +81,11 @@ class CdcrBufferStateManager {
   }
 
   void setState(CdcrRequestHandler.BufferState state) {
-    CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-    switch (state) {
-      case ENABLED: {
-        ulog.enableBuffer();
-        return;
-      }
-      case DISABLED: {
-        ulog.disableBuffer();
-        return;
-      }
-    }
+    this.state = state;
   }
 
   CdcrRequestHandler.BufferState getState() {
-    CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-    return ulog.isBuffering() ? CdcrRequestHandler.BufferState.ENABLED : CdcrRequestHandler.BufferState.DISABLED;
+    return state;
   }
 
   /**
