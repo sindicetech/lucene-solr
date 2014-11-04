@@ -95,6 +95,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private CdcrBufferStateManager bufferStateManager;
   private CdcReplicatorManager replicatorManager;
   private CdcrLeaderStateManager leaderStateManager;
+  private CdcrUpdateLogSynchronizer updateLogSynchronizer;
+  private CdcrBufferManager bufferManager;
 
   public static final String REPLICAS_PARAM = "replicas";
   public static final String SOURCE_COLLECTION_PARAM = "source";
@@ -163,6 +165,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleDisableBufferAction(req, rsp);
         break;
       }
+      case LASTPROCESSEDVERSION: {
+        this.handleLastProcessedVersionAction(req, rsp);
+        break;
+      }
       case QUEUESIZE: {
         this.handleQueueSizeAction(req, rsp);
         break;
@@ -205,6 +211,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     processStateManager = new CdcrProcessStateManager(core);
     // Initialise the leader state manager
     leaderStateManager = new CdcrLeaderStateManager(core);
+
     // Initialise the replicator states manager
     replicatorManager = new CdcReplicatorManager(core, replicasConfiguration);
     replicatorManager.setProcessStateManager(processStateManager);
@@ -212,6 +219,21 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     // we need to inform it of a state event since the process and leader state
     // may have been synchronised during the initialisation
     replicatorManager.stateUpdate();
+
+    // Initialise the update log synchronizer
+    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core);
+    updateLogSynchronizer.setLeaderStateManager(leaderStateManager);
+    // we need to inform it of a state event since the leader state
+    // may have been synchronised during the initialisation
+    updateLogSynchronizer.stateUpdate();
+
+    // Initialise the buffer manager
+    bufferManager = new CdcrBufferManager(core);
+    bufferManager.setLeaderStateManager(leaderStateManager);
+    bufferManager.setBufferStateManager(bufferStateManager);
+    // we need to inform it of a state event since the leader state
+    // may have been synchronised during the initialisation
+    bufferManager.stateUpdate();
 
     // register the close hook
     this.registerCloseHook(core);
@@ -229,6 +251,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
         log.info("Solr core is being closed - shutting down CDCR handler @ {}:{}", collectionName, shard);
 
+        updateLogSynchronizer.shutdown();
         replicatorManager.shutdown();
         bufferStateManager.shutdown();
         processStateManager.shutdown();
@@ -236,7 +259,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
 
       @Override
-      public void postClose(SolrCore core) {}
+      public void postClose(SolrCore core) {
+      }
 
     });
   }
@@ -372,6 +396,73 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
+  /**
+   * <p>
+   *  We have to take care of four cases:
+   *  <ul>
+   *    <li>Replication & Buffering</li>
+   *    <li>Replication & No Buffering</li>
+   *    <li>No Replication & Buffering</li>
+   *    <li>No Replication & No Buffering</li>
+   *  </ul>
+   *  In the first three cases, at least one log reader should have been initialised. We should take the lowest
+   *  last processed version across all the initialised readers. In the last case, there isn't a log reader
+   *  initialised. We should instantiate one and get the version of the first entries.
+   * </p>
+   */
+  private void handleLastProcessedVersionAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    if (!leaderStateManager.amILeader()) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrAction.LASTPROCESSEDVERSION +
+          " sent to non-leader replica");
+    }
+
+    // take care of the first three cases
+    // first check the log readers from the replicator states
+    long lastProcessedVersion = Long.MAX_VALUE;
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      long version = Long.MAX_VALUE;
+      if (state.getLogReader() != null) {
+        version = state.getLogReader().getLastVersion();
+      }
+      lastProcessedVersion = Math.min(lastProcessedVersion, version);
+    }
+
+    // next check the log reader of the buffer
+    CdcrUpdateLog.CdcrLogReader bufferLogReader = ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).getBufferToggle();
+    if (bufferLogReader != null) {
+      lastProcessedVersion = Math.min(lastProcessedVersion, bufferLogReader.getLastVersion());
+    }
+
+    // the fourth case: no cdc replication, no buffering: all readers were null
+    if (processStateManager.getState().equals(ProcessState.STOPPED) &&
+        bufferStateManager.getState().equals(BufferState.DISABLED)) {
+      CdcrUpdateLog.CdcrLogReader logReader = ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).newLogReader();
+      try {
+        // let the reader initialize lastVersion
+        logReader.next();
+        lastProcessedVersion = Math.min(lastProcessedVersion, logReader.getLastVersion());
+      }
+      catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+            "Error while fetching the last processed version", e);
+      }
+      catch (IOException e) {
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+            "Error while fetching the last processed version", e);
+      }
+      finally {
+        logReader.close();
+      }
+    }
+
+    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+    log.info("Returning the lowest last processed version {}  @ {}:{}", lastProcessedVersion, collectionName, shard);
+    // TODO: register this param somewhere
+    rsp.add("lastProcessedVersion", lastProcessedVersion);
+  }
+
   private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
     NamedList queue = new NamedList();
 
@@ -408,6 +499,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     SLICECHECKPOINT,
     ENABLEBUFFER,
     DISABLEBUFFER,
+    LASTPROCESSEDVERSION,
     QUEUESIZE;
 
     public static CdcrAction get(String p) {

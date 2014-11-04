@@ -546,14 +546,12 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
           for (Map.Entry<String, Replica> entry : entries) {
             Replica replica = entry.getValue();
             if (replica.getStr(ZkStateReader.BASE_URL_PROP).contains(":" + port)) {
-              List<CloudJettyRunner> list = shardToJetty.get(slice.getName());
-              if (list == null) {
-                list = new ArrayList<>();
-                shardToJetty.put(slice.getName(), list);
+              if (!shardToJetty.containsKey(slice.getName())) {
+                shardToJetty.put(slice.getName(), new ArrayList<CloudJettyRunner>());
               }
               boolean isLeader = slice.getLeader() == replica;
               CloudJettyRunner cjr = new CloudJettyRunner(jetty, replica, collection, slice.getName(), entry.getKey());
-              list.add(cjr);
+              shardToJetty.get(slice.getName()).add(cjr);
               if (isLeader) {
                 shardToLeaderJetty.put(slice.getName(), cjr);
               }

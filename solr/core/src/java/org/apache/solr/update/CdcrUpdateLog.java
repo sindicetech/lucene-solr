@@ -155,6 +155,10 @@ public class CdcrUpdateLog extends UpdateLog {
     }
   }
 
+  public CdcrLogReader getBufferToggle() {
+    return bufferToggle;
+  }
+
   /**
    * Is the update log buffering the tlogs ?
    */
@@ -218,6 +222,18 @@ public class CdcrUpdateLog extends UpdateLog {
     private long lastPositionInTLog = 0;
 
     /**
+     * lastVersion is used to get nextToLastVersion
+     */
+    private long lastVersion = -1;
+
+    /**
+     * nextToLastVersion is communicated by leader to replicas so that they can remove no longer needed tlogs
+     *
+     * nextToLastVersion is used because thanks to {@link #resetToLastPosition()} lastVersion can become the current version
+     */
+    private long nextToLastVersion = -1;
+
+    /**
      * Used to record the number of records read in the current tlog
      */
     private long numRecordsReadInCurrentTlog = 0;
@@ -267,6 +283,8 @@ public class CdcrUpdateLog extends UpdateLog {
         Object o = tlogReader.next();
 
         if (o != null) {
+          nextToLastVersion = lastVersion;
+          lastVersion = getVersion(o);
           numRecordsReadInCurrentTlog++;
           return o;
         }
@@ -371,6 +389,7 @@ public class CdcrUpdateLog extends UpdateLog {
         if (tlogReader != null) {
           tlogReader.fis.seek(lastPositionInTLog);
           numRecordsReadInCurrentTlog--;
+          lastVersion = nextToLastVersion;
         }
       }
       catch (IOException e) {
@@ -409,6 +428,9 @@ public class CdcrUpdateLog extends UpdateLog {
       logPointers.remove(this);
     }
 
+    public long getLastVersion() {
+      return lastVersion;
+    }
   }
 
 }
