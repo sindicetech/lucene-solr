@@ -224,13 +224,14 @@ public class CdcrUpdateLog extends UpdateLog {
     /**
      * lastVersion is used to get nextToLastVersion
      */
-    private long lastVersion = 0;
+    private long lastVersion = -1;
+
     /**
      * nextToLastVersion is communicated by leader to replicas so that they can remove no longer needed tlogs
      *
      * nextToLastVersion is used because thanks to {@link #resetToLastPosition()} lastVersion can become the current version
      */
-    private long nextToLastVersion = 0;
+    private long nextToLastVersion = -1;
 
     /**
      * Used to record the number of records read in the current tlog
@@ -386,8 +387,9 @@ public class CdcrUpdateLog extends UpdateLog {
     public void resetToLastPosition() {
       try {
         if (tlogReader != null) {
-          tlogReader.fis.seek(lastPositionInTLog); // TODO: should we update nextToLastVersion ?
+          tlogReader.fis.seek(lastPositionInTLog);
           numRecordsReadInCurrentTlog--;
+          lastVersion = nextToLastVersion;
         }
       }
       catch (IOException e) {
@@ -424,10 +426,6 @@ public class CdcrUpdateLog extends UpdateLog {
       }
       tlogs.clear();
       logPointers.remove(this);
-    }
-
-    public long getNextToLastVersion() {
-      return nextToLastVersion;
     }
 
     public long getLastVersion() {

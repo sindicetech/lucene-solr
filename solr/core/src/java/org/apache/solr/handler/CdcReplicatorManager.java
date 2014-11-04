@@ -36,9 +36,8 @@ import org.apache.solr.update.CdcrUpdateLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class CdcReplicatorManager {
+class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
 
-  private final CdcrNonLeaderScheduler nonLeaderScheduler;
   private List<CdcReplicatorState> replicatorStates;
 
   private final CdcReplicatorScheduler scheduler;
@@ -68,7 +67,6 @@ class CdcReplicatorManager {
     }
 
     this.scheduler = new CdcReplicatorScheduler(this);
-    this.nonLeaderScheduler = new CdcrNonLeaderScheduler(core);
   }
 
   void setProcessStateManager(final CdcrProcessStateManager processStateManager) {
@@ -91,23 +89,19 @@ class CdcReplicatorManager {
    *   Otherwise, if the process state is STOPPED or if we are not the leader, we need to close the log readers and stop
    *   the thread pool.
    * </p>
+   * <p>
+   *   This method is synchronised as it can both be called by the leaderStateManager and the processStateManager.
+   * </p>
    */
-  void stateUpdate() {
+  @Override
+  public synchronized void stateUpdate() {
     if (leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
-      this.nonLeaderScheduler.shutdown();
-
       this.initLogReaders();
       this.scheduler.start();
       return;
     }
 
-    if (!leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
-      this.nonLeaderScheduler.start();
-      return;
-    }
-
     this.scheduler.shutdown();
-    this.nonLeaderScheduler.shutdown();
     this.closeLogReaders();
   }
 
@@ -163,7 +157,6 @@ class CdcReplicatorManager {
    * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}.
    */
   void shutdown() {
-    this.nonLeaderScheduler.shutdown();
     this.scheduler.shutdown();
     for (CdcReplicatorState state : replicatorStates) {
       state.shutdown();

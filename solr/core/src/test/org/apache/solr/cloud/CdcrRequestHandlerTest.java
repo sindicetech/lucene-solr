@@ -33,9 +33,9 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    //this.doTestLifeCycleActions();
+    this.doTestLifeCycleActions();
     this.doTestCheckpointActions();
-    //this.doTestBufferActions();
+    this.doTestBufferActions();
   }
 
   // check that the life-cycle state is properly synchronised across nodes
@@ -100,14 +100,14 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
     expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.SLICECHECKPOINT).get("checkpoint");
     assertEquals(expected, checkpoint2);
 
-    // replication never started, lastProcessedVersion should be 0 for both shards
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD1), CdcrRequestHandler.CdcrAction.LEADERPROCESSEDVERSION);
+    // replication never started, lastProcessedVersion should be -1 for both shards
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.LASTPROCESSEDVERSION);
     long lastVersion = (Long) rsp.get("lastProcessedVersion");
-    assertEquals(0, lastVersion);
+    assertEquals(-1l, lastVersion);
 
-    rsp = sendRequest(getLeaderUrl(SOURCE_COLLECTION, SHARD2), CdcrRequestHandler.CdcrAction.LEADERPROCESSEDVERSION);
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrRequestHandler.CdcrAction.LASTPROCESSEDVERSION);
     lastVersion = (Long) rsp.get("lastProcessedVersion");
-    assertEquals(0, lastVersion);
+    assertEquals(-1l, lastVersion);
   }
 
   // check that the buffer state is properly synchronised across nodes

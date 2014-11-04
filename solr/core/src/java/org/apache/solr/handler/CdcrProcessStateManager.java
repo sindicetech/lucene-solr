@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
  *   of a process state change.
  * </p>
  */
-class CdcrProcessStateManager {
+class CdcrProcessStateManager extends CdcrStateManager {
 
   private CdcrRequestHandler.ProcessState state = DEFAULT_STATE;
 
@@ -168,21 +168,6 @@ class CdcrProcessStateManager {
       }
     }
 
-  }
-
-  private CdcReplicatorManager replicatorManager;
-
-  void register(CdcReplicatorManager replicatorManager) {
-    this.replicatorManager = replicatorManager;
-  }
-
-  /**
-   * Notify the {@link org.apache.solr.handler.CdcReplicatorManager} of a state change.
-   */
-  private void callback() {
-    if (replicatorManager != null) {
-      this.replicatorManager.stateUpdate();
-    }
   }
 
 }
