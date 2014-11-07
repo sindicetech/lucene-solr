@@ -52,7 +52,7 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.StrUtils;
-import org.apache.solr.handler.CdcrRequestHandler;
+import org.apache.solr.handler.CdcrParams;
 import org.apache.solr.servlet.SolrDispatchFilter;
 import org.apache.zookeeper.CreateMode;
 import org.junit.Before;
@@ -212,7 +212,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   /**
    * Invokes a CDCR action on a given node.
    */
-  protected NamedList invokeCdcrAction(CloudJettyRunner jetty, CdcrRequestHandler.CdcrAction action) throws Exception {
+  protected NamedList invokeCdcrAction(CloudJettyRunner jetty, CdcrParams.CdcrAction action) throws Exception {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set(CommonParams.ACTION, action.toString());
 
@@ -225,13 +225,13 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   /**
    * Assert the state of CDCR on each nodes of the given collection.
    */
-  protected void assertState(String collection, CdcrRequestHandler.ProcessState processState, CdcrRequestHandler.BufferState bufferState)
+  protected void assertState(String collection, CdcrParams.ProcessState processState, CdcrParams.BufferState bufferState)
   throws Exception {
     for (CloudJettyRunner jetty : cloudJettys.get(collection)) { // check all replicas
-      NamedList rsp = invokeCdcrAction(jetty, CdcrRequestHandler.CdcrAction.STATUS);
-      NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-      assertEquals(processState.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
-      assertEquals(bufferState.toLower(), status.get(CdcrRequestHandler.BufferState.getParam()));
+      NamedList rsp = invokeCdcrAction(jetty, CdcrParams.CdcrAction.STATUS);
+      NamedList status = (NamedList) rsp.get(CdcrParams.CdcrAction.STATUS.toLower());
+      assertEquals(processState.toLower(), status.get(CdcrParams.ProcessState.getParam()));
+      assertEquals(bufferState.toLower(), status.get(CdcrParams.BufferState.getParam()));
     }
   }
 
