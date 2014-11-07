@@ -22,8 +22,8 @@ import java.util.Locale;
 
 public class CdcrParams {
 
-  /** The list of replicas **/
-  public static final String REPLICAS_PARAM = "replicas";
+  /** The definition of a replica configuration **/
+  public static final String REPLICA_PARAM = "replica";
 
   /** The source collection of a replica **/
   public static final String SOURCE_COLLECTION_PARAM = "source";
@@ -33,6 +33,18 @@ public class CdcrParams {
 
   /** The Zookeeper host of the target cluster hosting the replica **/
   public static final String ZK_HOST_PARAM = "zkHost";
+
+  /** The definition of the {@link org.apache.solr.handler.CdcReplicatorScheduler} configuration **/
+  public static final String REPLICATOR_PARAM = "replicator";
+
+  /** The thread pool size of the replicator **/
+  public static final String THREAD_POOL_SIZE_PARAM = "threadPoolSize";
+
+  /** The time schedule (in ms) of the replicator **/
+  public static final String SCHEDULE_PARAM = "schedule";
+
+  /** The definition of the {@link org.apache.solr.handler.CdcrUpdateLogSynchronizer} configuration **/
+  public static final String UPDATE_LOG_SYNCHRONIZER_PARAM = "updateLogSynchronizer";
 
   /** The latest update checkpoint on a target cluster **/
   public final static String CHECKPOINT = "checkpoint";

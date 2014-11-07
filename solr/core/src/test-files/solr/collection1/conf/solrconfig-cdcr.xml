@@ -58,10 +58,17 @@
   </updateRequestProcessorChain>
 
   <requestHandler name="/cdcr" class="solr.CdcrRequestHandler">
-    <lst name="replicas">
+    <lst name="replica">
       <str name="zkHost">${zkHost}</str>
       <str name="source">source_collection</str>
       <str name="target">target_collection</str>
+    </lst>
+    <lst name="replicator">
+      <str name="threadPoolSize">8</str>
+      <str name="schedule">1000</str>
+    </lst>
+    <lst name="updateLogSynchronizer">
+      <str name="schedule">1000</str>
     </lst>
   </requestHandler>
 

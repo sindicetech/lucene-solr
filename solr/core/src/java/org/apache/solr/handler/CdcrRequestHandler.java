@@ -90,6 +90,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private String collection;
   private String path;
 
+  private SolrParams updateLogSynchronizerConfiguration;
+  private SolrParams replicatorConfiguration;
   private Map<String,List<SolrParams>> replicasConfiguration;
 
   private CdcrProcessStateManager processStateManager;
@@ -103,10 +105,22 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   public void init(NamedList args) {
     super.init(args);
 
-    replicasConfiguration = new HashMap<>();
-
     if (args != null) {
-      List replicas = args.getAll(CdcrParams.REPLICAS_PARAM);
+      // Configuration of the Update Log Synchronizer
+      Object updateLogSynchonizerParam = args.get(CdcrParams.UPDATE_LOG_SYNCHRONIZER_PARAM);
+      if (updateLogSynchonizerParam != null && updateLogSynchonizerParam instanceof NamedList) {
+        updateLogSynchronizerConfiguration = SolrParams.toSolrParams((NamedList) updateLogSynchonizerParam);
+      }
+
+      // Configuration of the Replicator
+      Object replicatorParam = args.get(CdcrParams.REPLICATOR_PARAM);
+      if (replicatorParam != null && replicatorParam instanceof NamedList) {
+        replicatorConfiguration = SolrParams.toSolrParams((NamedList) replicatorParam);
+      }
+
+      // Configuration of the Replicas
+      replicasConfiguration = new HashMap<>();
+      List replicas = args.getAll(CdcrParams.REPLICA_PARAM);
       for (Object replica : replicas) {
         if (replicas != null && replica instanceof NamedList) {
           SolrParams params = SolrParams.toSolrParams((NamedList) replica);
@@ -226,7 +240,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     leaderStateManager = new CdcrLeaderStateManager(core);
 
     // Initialise the replicator states manager
-    replicatorManager = new CdcReplicatorManager(core, path, replicasConfiguration);
+    replicatorManager = new CdcReplicatorManager(core, path, replicatorConfiguration, replicasConfiguration);
     replicatorManager.setProcessStateManager(processStateManager);
     replicatorManager.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the process and leader state
@@ -234,7 +248,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     replicatorManager.stateUpdate();
 
     // Initialise the update log synchronizer
-    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core, path);
+    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core, path, updateLogSynchronizerConfiguration);
     updateLogSynchronizer.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the leader state
     // may have been synchronised during the initialisation
