@@ -46,11 +46,13 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
   private final SolrCore core;
   private final String collection;
   private final String shardId;
+  private final String path;
 
   protected static Logger log = LoggerFactory.getLogger(CdcrUpdateLogSynchronizer.class);
 
-  CdcrUpdateLogSynchronizer(SolrCore core) {
+  CdcrUpdateLogSynchronizer(SolrCore core, String path) {
     this.core = core;
+    this.path = path;
     this.collection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
     this.shardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
   }
@@ -101,7 +103,7 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
       params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.LASTPROCESSEDVERSION.toString());
 
       SolrRequest request = new QueryRequest(params);
-      request.setPath("/cdcr"); //TODO: hardcoded reference to cdcr path
+      request.setPath(path);
 
       long lastVersion;
       try {

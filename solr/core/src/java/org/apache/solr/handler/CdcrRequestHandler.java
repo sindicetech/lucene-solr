@@ -47,6 +47,7 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.request.SolrRequestHandler;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
@@ -88,6 +89,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private SolrCore core;
   private String collection;
+  private String path;
 
   private Map<String,List<SolrParams>> replicasConfiguration;
 
@@ -198,6 +200,23 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
           "Solr instance is not configured with the cdcr update log.");
     }
 
+    // Find the registered path of the handler
+    path = null;
+    for (Map.Entry<String, SolrRequestHandler> entry : core.getRequestHandlers().entrySet()) {
+      if (entry.getValue() == this) {
+        path = entry.getKey();
+        break;
+      }
+    }
+    if (path == null) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "The CdcrRequestHandler is not registered with the current core.");
+    }
+    if (!path.startsWith("/")) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "The CdcrRequestHandler needs to be registered to a path. Typically this is '/cdcr'");
+    }
+
     // Initialisation phase
     // If the Solr cloud is being initialised, each CDCR node will start up in its default state, i.e., STOPPED
     // and non-leader. The leader state will be updated later, when all the Solr cores have been loaded.
@@ -213,7 +232,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     leaderStateManager = new CdcrLeaderStateManager(core);
 
     // Initialise the replicator states manager
-    replicatorManager = new CdcReplicatorManager(core, replicasConfiguration);
+    replicatorManager = new CdcReplicatorManager(core, path, replicasConfiguration);
     replicatorManager.setProcessStateManager(processStateManager);
     replicatorManager.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the process and leader state
@@ -221,7 +240,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     replicatorManager.stateUpdate();
 
     // Initialise the update log synchronizer
-    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core);
+    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core, path);
     updateLogSynchronizer.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the leader state
     // may have been synchronised during the initialisation
@@ -326,7 +345,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     Collection<Slice> slices = cstate.getActiveSlices(collection);
 
     ExecutorService parallelExecutor = Executors.newCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
-    String cdcrPath = rsp.getToLog().get("path").toString();
 
     long checkpoint = Long.MAX_VALUE;
     try {
@@ -334,7 +352,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       for (Slice slice : slices) {
         ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
         ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
-        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
+        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), path));
       }
 
       for (final Future<Long> future : parallelExecutor.invokeAll(callables)) {
