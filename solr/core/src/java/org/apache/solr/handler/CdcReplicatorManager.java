@@ -45,11 +45,13 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
   private CdcrLeaderStateManager leaderStateManager;
 
   private SolrCore core;
+  private String path;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorManager.class);
 
-  CdcReplicatorManager(final SolrCore core, Map<String,List<SolrParams>> replicasConfiguration) {
+  CdcReplicatorManager(final SolrCore core, String path, Map<String,List<SolrParams>> replicasConfiguration) {
     this.core = core;
+    this.path = path;
 
     // create states
     replicatorStates = new ArrayList<>();
@@ -139,7 +141,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
     params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT.toString());
 
     SolrRequest request = new QueryRequest(params);
-    request.setPath("/cdcr"); //TODO: hardcoded reference to cdcr path
+    request.setPath(path);
 
     NamedList response = state.getClient().request(request);
     return (Long) response.get("checkpoint");
