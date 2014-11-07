@@ -26,7 +26,7 @@ import java.util.Map;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
-import org.apache.solr.handler.CdcrRequestHandler;
+import org.apache.solr.handler.CdcrParams;
 import org.apache.solr.servlet.SolrDispatchFilter;
 import org.junit.Before;
 
@@ -116,12 +116,12 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(6, getNumDocs(SOURCE_COLLECTION));
 
     // send start action to first shard
-    NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
-    NamedList status = (NamedList) rsp.get(CdcrRequestHandler.CdcrAction.STATUS.toLower());
-    assertEquals(CdcrRequestHandler.ProcessState.STARTED.toLower(), status.get(CdcrRequestHandler.ProcessState.getParam()));
+    NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+    NamedList status = (NamedList) rsp.get(CdcrParams.CdcrAction.STATUS.toLower());
+    assertEquals(CdcrParams.ProcessState.STARTED.toLower(), status.get(CdcrParams.ProcessState.getParam()));
 
     // check status
-    this.assertState(SOURCE_COLLECTION, CdcrRequestHandler.ProcessState.STARTED, CdcrRequestHandler.BufferState.ENABLED);
+    this.assertState(SOURCE_COLLECTION, CdcrParams.ProcessState.STARTED, CdcrParams.BufferState.ENABLED);
 
     // TODO: check error status when monitoring api is available
   }
@@ -140,7 +140,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(10, getNumDocs(SOURCE_COLLECTION));
     assertEquals(0, getNumDocs(TARGET_COLLECTION));
 
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
 
@@ -149,7 +149,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(10, getNumDocs(SOURCE_COLLECTION));
     assertEquals(10, getNumDocs(TARGET_COLLECTION));
 
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
 
     docs.clear();
     for (; start < 110; start++) {
@@ -163,7 +163,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // Start again CDCR, the source cluster should reinitialise its log readers
     // with the latest checkpoints
 
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
 
@@ -183,7 +183,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     log.info("Starting CDCR");
 
     // send start action to first shard
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     log.info("Indexing 10 documents");
 
@@ -247,7 +247,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     log.info("Starting CDCR");
 
     // send start action to first shard
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     log.info("Indexing 10 documents");
 
@@ -316,9 +316,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.clearTargetCollection();
 
     // buffering is enabled by default, so disable it
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.DISABLEBUFFER);
 
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     for (int i = 0; i < 50; i++) {
       index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i))); // will perform a commit for every document
@@ -338,7 +338,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // logs on replicas should be trimmed
     assertUpdateLogs(SOURCE_COLLECTION, true);
 
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.STOP);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
 
     for (int i = 50; i < 100; i++) {
       index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i)));
@@ -360,7 +360,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.clearTargetCollection();
 
     // buffering is enabled by default, so disable it
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.DISABLEBUFFER);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.DISABLEBUFFER);
 
     // Index documents
     for (int i = 0; i < 50; i++) {
@@ -372,7 +372,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2));
 
     // Start CDCR
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrRequestHandler.CdcrAction.START);
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
 
     // wait a bit for the replication to complete
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
@@ -398,8 +398,8 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   }
 
   protected long getQueueSize(String collectionName, String shardId) throws Exception {
-    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrRequestHandler.CdcrAction.QUEUESIZE);
-    NamedList status = (NamedList) rsp.get("queue");
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUESIZE);
+    NamedList status = (NamedList) rsp.get(CdcrParams.QUEUES);
     return (Long) status.get(TARGET_COLLECTION);
   }
 

@@ -59,8 +59,8 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
     List<SolrParams> targets = replicasConfiguration.get(myCollection);
     if (targets != null) {
       for (SolrParams params : targets) {
-        String zkHost = params.get(CdcrRequestHandler.ZK_HOST_PARAM);
-        String targetCollection = params.get(CdcrRequestHandler.TARGET_COLLECTION_PARAM);
+        String zkHost = params.get(CdcrParams.ZK_HOST_PARAM);
+        String targetCollection = params.get(CdcrParams.TARGET_COLLECTION_PARAM);
 
         CloudSolrServer client = new CloudSolrServer(zkHost, true);
         client.setDefaultCollection(targetCollection);
@@ -97,7 +97,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
    */
   @Override
   public synchronized void stateUpdate() {
-    if (leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrRequestHandler.ProcessState.STARTED)) {
+    if (leaderStateManager.amILeader() && processStateManager.getState().equals(CdcrParams.ProcessState.STARTED)) {
       this.initLogReaders();
       this.scheduler.start();
       return;
@@ -138,13 +138,13 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
 
   private long getCheckpoint(CdcReplicatorState state) throws IOException, SolrServerException {
     ModifiableSolrParams params = new ModifiableSolrParams();
-    params.set(CommonParams.ACTION, CdcrRequestHandler.CdcrAction.COLLECTIONCHECKPOINT.toString());
+    params.set(CommonParams.ACTION, CdcrParams.CdcrAction.COLLECTIONCHECKPOINT.toString());
 
     SolrRequest request = new QueryRequest(params);
     request.setPath(path);
 
     NamedList response = state.getClient().request(request);
-    return (Long) response.get("checkpoint");
+    return (Long) response.get(CdcrParams.CHECKPOINT);
   }
 
   void closeLogReaders() {

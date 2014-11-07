@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 /**
  * This manager is responsible in enabling or disabling the buffering of the update logs. Currently, buffer
  * is always activated for non-leader nodes. For leader nodes, it is enabled only if the user explicitly
- * enabled it with the action {@link org.apache.solr.handler.CdcrRequestHandler.CdcrAction#ENABLEBUFFER}.
+ * enabled it with the action {@link org.apache.solr.handler.CdcrParams.CdcrAction#ENABLEBUFFER}.
  */
 class CdcrBufferManager implements CdcrStateManager.CdcrStateObserver {
 
@@ -63,7 +63,7 @@ class CdcrBufferManager implements CdcrStateManager.CdcrStateObserver {
       return;
     }
     // If I am the leader, I should buffer my updates only if buffer is enabled
-    else if (bufferStateManager.getState().equals(CdcrRequestHandler.BufferState.ENABLED)) {
+    else if (bufferStateManager.getState().equals(CdcrParams.BufferState.ENABLED)) {
       ulog.enableBuffer();
       return;
     }
