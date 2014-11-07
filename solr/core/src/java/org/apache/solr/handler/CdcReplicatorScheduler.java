@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.solr.common.params.SolrParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,19 +43,27 @@ class CdcReplicatorScheduler {
   private final CdcReplicatorManager replicatorManager;
   private final ConcurrentLinkedQueue<CdcReplicatorState> statesQueue;
 
-  public static final int POOL_SIZE = 8; // TODO: Make this configurable
+  private int poolSize = DEFAULT_POOL_SIZE;
+  private int timeSchedule = DEFAULT_TIME_SCHEDULE;
+
+  private static final int DEFAULT_POOL_SIZE = 8;
+  private static final int DEFAULT_TIME_SCHEDULE = 1000;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorScheduler.class);
 
-  CdcReplicatorScheduler(final CdcReplicatorManager replicatorStatesManager) {
+  CdcReplicatorScheduler(final CdcReplicatorManager replicatorStatesManager, final SolrParams replicatorConfiguration) {
     this.replicatorManager = replicatorStatesManager;
     this.statesQueue = new ConcurrentLinkedQueue<>(replicatorManager.getReplicatorStates());
+    if (replicatorConfiguration != null) {
+      poolSize = replicatorConfiguration.getInt(CdcrParams.THREAD_POOL_SIZE_PARAM, DEFAULT_POOL_SIZE);
+      timeSchedule = replicatorConfiguration.getInt(CdcrParams.SCHEDULE_PARAM, DEFAULT_TIME_SCHEDULE);
+    }
   }
 
   void start() {
     if (!isStarted) {
       scheduler = Executors.newSingleThreadScheduledExecutor();
-      replicatorsPool = Executors.newFixedThreadPool(POOL_SIZE);
+      replicatorsPool = Executors.newFixedThreadPool(poolSize);
 
       // the scheduler thread is executed every second and submits one replication task
       // per available state in the queue
@@ -84,7 +93,7 @@ class CdcReplicatorScheduler {
           }
         }
 
-      }, 0, 1, TimeUnit.SECONDS); // TODO: Make this configurable
+      }, 0, timeSchedule, TimeUnit.MILLISECONDS);
       isStarted = true;
     }
   }

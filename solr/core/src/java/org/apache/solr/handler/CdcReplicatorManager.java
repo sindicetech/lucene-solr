@@ -49,7 +49,9 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorManager.class);
 
-  CdcReplicatorManager(final SolrCore core, String path, Map<String,List<SolrParams>> replicasConfiguration) {
+  CdcReplicatorManager(final SolrCore core, String path,
+                       SolrParams replicatorConfiguration,
+                       Map<String,List<SolrParams>> replicasConfiguration) {
     this.core = core;
     this.path = path;
 
@@ -68,7 +70,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
       }
     }
 
-    this.scheduler = new CdcReplicatorScheduler(this);
+    this.scheduler = new CdcReplicatorScheduler(this, replicatorConfiguration);
   }
 
   void setProcessStateManager(final CdcrProcessStateManager processStateManager) {

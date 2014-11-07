@@ -32,12 +32,25 @@ import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * <p>
+ *   Synchronize periodically the update log of non-leader nodes with their leaders.
+ * </p>
+ * <p>
+ *   Non-leader nodes must always buffer updates in case of leader failures. But they have to periodically
+ *   synchronize their update logs with their leader to remove old transaction logs that will never be used anymore.
+ *   This is performed by a background thread that is scheduled with a fixed delay. The background thread is sending
+ *   the action {@link org.apache.solr.handler.CdcrParams.CdcrAction#LASTPROCESSEDVERSION} to the leader to retrieve
+ *   the lowest last version number processed. This version is then used to move forward the buffer log reader.
+ * </p>
+ */
 class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
 
   private CdcrLeaderStateManager leaderStateManager;
@@ -48,13 +61,20 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
   private final String shardId;
   private final String path;
 
+  private int timeSchedule = DEFAULT_TIME_SCHEDULE;
+
+  private static final int DEFAULT_TIME_SCHEDULE = 60000;  // by default, every minute
+
   protected static Logger log = LoggerFactory.getLogger(CdcrUpdateLogSynchronizer.class);
 
-  CdcrUpdateLogSynchronizer(SolrCore core, String path) {
+  CdcrUpdateLogSynchronizer(SolrCore core, String path, SolrParams updateLogSynchonizerConfiguration) {
     this.core = core;
     this.path = path;
     this.collection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
     this.shardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+    if (updateLogSynchonizerConfiguration != null) {
+      this.timeSchedule = updateLogSynchonizerConfiguration.getInt(CdcrParams.SCHEDULE_PARAM, DEFAULT_TIME_SCHEDULE);
+    }
   }
 
   void setLeaderStateManager(final CdcrLeaderStateManager leaderStateManager) {
@@ -67,7 +87,7 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
     // If I am not the leader, I need to synchronise periodically my update log with my leader.
     if (!leaderStateManager.amILeader()) {
       scheduler = Executors.newSingleThreadScheduledExecutor();
-      scheduler.scheduleWithFixedDelay(new UpdateLogSynchronisation(), 1000, 1000, TimeUnit.MILLISECONDS);
+      scheduler.scheduleWithFixedDelay(new UpdateLogSynchronisation(), 0, timeSchedule, TimeUnit.MILLISECONDS);
       return;
     }
 
@@ -126,11 +146,12 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
         return;
       }
 
-      CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-
       try {
-        log.debug("Advancing replica buffering tlog reader to {} @ {}:{}", lastVersion, collection, shardId);
-        ulog.getBufferToggle().seek(lastVersion);
+        CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
+        if (ulog.isBuffering()) {
+          log.debug("Advancing replica buffering tlog reader to {} @ {}:{}", lastVersion, collection, shardId);
+          ulog.getBufferToggle().seek(lastVersion);
+        }
       }
       catch (InterruptedException e) {
         Thread.currentThread().interrupt();
