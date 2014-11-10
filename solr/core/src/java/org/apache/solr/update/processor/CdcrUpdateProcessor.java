@@ -21,7 +21,6 @@ import java.io.IOException;
 
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.params.UpdateParams;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.AddUpdateCommand;
@@ -29,9 +28,14 @@ import org.apache.solr.update.DeleteUpdateCommand;
 import org.apache.solr.update.UpdateCommand;
 
 /**
- *
+ * <p>
+ *   Extends {@link org.apache.solr.update.processor.DistributedUpdateProcessor} to force peer sync logic
+ *   for every updates. This ensures that the version parameter sent by the source cluster is kept
+ *   by the target cluster.
+ * </p>
  */
 public class CdcrUpdateProcessor extends DistributedUpdateProcessor {
+
   public static final String CDCR_UPDATE = "cdcr.update";
 
   public CdcrUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {

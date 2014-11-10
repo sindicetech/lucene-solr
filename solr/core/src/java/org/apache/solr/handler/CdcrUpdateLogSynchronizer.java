@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory;
  *   Synchronize periodically the update log of non-leader nodes with their leaders.
  * </p>
  * <p>
- *   Non-leader nodes must always buffer updates in case of leader failures. But they have to periodically
+ *   Non-leader nodes must always buffer updates in case of leader failures. They have to periodically
  *   synchronize their update logs with their leader to remove old transaction logs that will never be used anymore.
  *   This is performed by a background thread that is scheduled with a fixed delay. The background thread is sending
  *   the action {@link org.apache.solr.handler.CdcrParams.CdcrAction#LASTPROCESSEDVERSION} to the leader to retrieve
