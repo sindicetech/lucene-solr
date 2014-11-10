@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -47,6 +46,7 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.request.SolrRequestHandler;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
@@ -66,16 +66,16 @@ import org.slf4j.LoggerFactory;
  *   to synchronise the state of the CDCR across all the nodes.
  * </p>
  * <p>
- *   The CDCR process can be either {@link ProcessState#STOPPED} or {@link ProcessState#STARTED} by using the
- *   actions {@link CdcrAction#STOP} and {@link CdcrAction#START} respectively. If a node is leader and the process
- *   state is {@link ProcessState#STARTED}, the {@link org.apache.solr.handler.CdcReplicatorManager} will
+ *   The CDCR process can be either {@link org.apache.solr.handler.CdcrParams.ProcessState#STOPPED} or {@link org.apache.solr.handler.CdcrParams.ProcessState#STARTED} by using the
+ *   actions {@link org.apache.solr.handler.CdcrParams.CdcrAction#STOP} and {@link org.apache.solr.handler.CdcrParams.CdcrAction#START} respectively. If a node is leader and the process
+ *   state is {@link org.apache.solr.handler.CdcrParams.ProcessState#STARTED}, the {@link org.apache.solr.handler.CdcReplicatorManager} will
  *   start the {@link CdcReplicator} threads. If a node becomes non-leader or if the process state becomes
- *   {@link ProcessState#STOPPED}, the {@link CdcReplicator} threads are stopped.
+ *   {@link org.apache.solr.handler.CdcrParams.ProcessState#STOPPED}, the {@link CdcReplicator} threads are stopped.
  * </p>
  * <p>
  *   The CDCR can be switched to a "buffering" mode, in which the update log will never delete old transaction log
- *   files. Such a mode can be enabled or disabled using the action {@link CdcrAction#ENABLEBUFFER} and
- *   {@link CdcrAction#DISABLEBUFFER} respectively.
+ *   files. Such a mode can be enabled or disabled using the action {@link org.apache.solr.handler.CdcrParams.CdcrAction#ENABLEBUFFER} and
+ *   {@link org.apache.solr.handler.CdcrParams.CdcrAction#DISABLEBUFFER} respectively.
  * </p>
  * <p>
  *   Known limitations: The source and target clusters must have the same topology. Replication between clusters
@@ -88,7 +88,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private SolrCore core;
   private String collection;
+  private String path;
 
+  private SolrParams updateLogSynchronizerConfiguration;
+  private SolrParams replicatorConfiguration;
   private Map<String,List<SolrParams>> replicasConfiguration;
 
   private CdcrProcessStateManager processStateManager;
@@ -98,26 +101,33 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   private CdcrUpdateLogSynchronizer updateLogSynchronizer;
   private CdcrBufferManager bufferManager;
 
-  public static final String REPLICAS_PARAM = "replicas";
-  public static final String SOURCE_COLLECTION_PARAM = "source";
-  public static final String TARGET_COLLECTION_PARAM = "target";
-  public static final String ZK_HOST_PARAM = "zkHost";
-
   @Override
   public void init(NamedList args) {
     super.init(args);
 
-    replicasConfiguration = new HashMap<>();
-
     if (args != null) {
-      List replicas = args.getAll(REPLICAS_PARAM);
+      // Configuration of the Update Log Synchronizer
+      Object updateLogSynchonizerParam = args.get(CdcrParams.UPDATE_LOG_SYNCHRONIZER_PARAM);
+      if (updateLogSynchonizerParam != null && updateLogSynchonizerParam instanceof NamedList) {
+        updateLogSynchronizerConfiguration = SolrParams.toSolrParams((NamedList) updateLogSynchonizerParam);
+      }
+
+      // Configuration of the Replicator
+      Object replicatorParam = args.get(CdcrParams.REPLICATOR_PARAM);
+      if (replicatorParam != null && replicatorParam instanceof NamedList) {
+        replicatorConfiguration = SolrParams.toSolrParams((NamedList) replicatorParam);
+      }
+
+      // Configuration of the Replicas
+      replicasConfiguration = new HashMap<>();
+      List replicas = args.getAll(CdcrParams.REPLICA_PARAM);
       for (Object replica : replicas) {
         if (replicas != null && replica instanceof NamedList) {
           SolrParams params = SolrParams.toSolrParams((NamedList) replica);
-          if (!replicasConfiguration.containsKey(params.get(SOURCE_COLLECTION_PARAM))) {
-            replicasConfiguration.put(params.get(SOURCE_COLLECTION_PARAM), new ArrayList<SolrParams>());
+          if (!replicasConfiguration.containsKey(params.get(CdcrParams.SOURCE_COLLECTION_PARAM))) {
+            replicasConfiguration.put(params.get(CdcrParams.SOURCE_COLLECTION_PARAM), new ArrayList<SolrParams>());
           }
-          replicasConfiguration.get(params.get(SOURCE_COLLECTION_PARAM)).add(params);
+          replicasConfiguration.get(params.get(CdcrParams.SOURCE_COLLECTION_PARAM)).add(params);
         }
       }
     }
@@ -127,10 +137,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
     // Pick the action
     SolrParams params = req.getParams();
-    CdcrAction action = null;
+    CdcrParams.CdcrAction action = null;
     String a = params.get(CommonParams.ACTION);
     if (a != null) {
-      action = CdcrAction.get(a);
+      action = CdcrParams.CdcrAction.get(a);
     }
     if (action == null) {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Unknown action: " + a);
@@ -198,6 +208,23 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
           "Solr instance is not configured with the cdcr update log.");
     }
 
+    // Find the registered path of the handler
+    path = null;
+    for (Map.Entry<String, SolrRequestHandler> entry : core.getRequestHandlers().entrySet()) {
+      if (entry.getValue() == this) {
+        path = entry.getKey();
+        break;
+      }
+    }
+    if (path == null) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "The CdcrRequestHandler is not registered with the current core.");
+    }
+    if (!path.startsWith("/")) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "The CdcrRequestHandler needs to be registered to a path. Typically this is '/cdcr'");
+    }
+
     // Initialisation phase
     // If the Solr cloud is being initialised, each CDCR node will start up in its default state, i.e., STOPPED
     // and non-leader. The leader state will be updated later, when all the Solr cores have been loaded.
@@ -213,7 +240,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     leaderStateManager = new CdcrLeaderStateManager(core);
 
     // Initialise the replicator states manager
-    replicatorManager = new CdcReplicatorManager(core, replicasConfiguration);
+    replicatorManager = new CdcReplicatorManager(core, path, replicatorConfiguration, replicasConfiguration);
     replicatorManager.setProcessStateManager(processStateManager);
     replicatorManager.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the process and leader state
@@ -221,7 +248,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     replicatorManager.stateUpdate();
 
     // Initialise the update log synchronizer
-    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core);
+    updateLogSynchronizer = new CdcrUpdateLogSynchronizer(core, path, updateLogSynchronizerConfiguration);
     updateLogSynchronizer.setLeaderStateManager(leaderStateManager);
     // we need to inform it of a state event since the leader state
     // may have been synchronised during the initialisation
@@ -274,31 +301,31 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    * </p>
    */
   private void handleStartAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (processStateManager.getState() == ProcessState.STOPPED) {
-      processStateManager.setState(ProcessState.STARTED);
+    if (processStateManager.getState() == CdcrParams.ProcessState.STOPPED) {
+      processStateManager.setState(CdcrParams.ProcessState.STARTED);
       processStateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
+    rsp.add(CdcrParams.CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   private void handleStopAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (processStateManager.getState() == ProcessState.STARTED) {
-      processStateManager.setState(ProcessState.STOPPED);
+    if (processStateManager.getState() == CdcrParams.ProcessState.STARTED) {
+      processStateManager.setState(CdcrParams.ProcessState.STOPPED);
       processStateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
+    rsp.add(CdcrParams.CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   private void handleStatusAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
+    rsp.add(CdcrParams.CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   private NamedList getStatus() {
     NamedList status = new NamedList();
-    status.add(ProcessState.getParam(), processStateManager.getState().toLower());
-    status.add(BufferState.getParam(), bufferStateManager.getState().toLower());
+    status.add(CdcrParams.ProcessState.getParam(), processStateManager.getState().toLower());
+    status.add(CdcrParams.BufferState.getParam(), bufferStateManager.getState().toLower());
     return status;
   }
 
@@ -307,7 +334,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    * This checkpoint is used on the source cluster to setup the
    * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader} of a slice leader. <br/>
    * This method will execute in parallel one
-   * {@link org.apache.solr.handler.CdcrRequestHandler.CdcrAction#SLICECHECKPOINT} request per slice leader. It will
+   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SLICECHECKPOINT} request per slice leader. It will
    * then pick the lowest version number as checkpoint. Picking the lowest amongst all slices will ensure that we do not
    * pick a checkpoint that is ahead of the source cluster. This can occur when other slice leaders are sending new
    * updates to the target cluster while we are currently instantiating the
@@ -326,7 +353,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     Collection<Slice> slices = cstate.getActiveSlices(collection);
 
     ExecutorService parallelExecutor = Executors.newCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
-    String cdcrPath = rsp.getToLog().get("path").toString();
 
     long checkpoint = Long.MAX_VALUE;
     try {
@@ -334,7 +360,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       for (Slice slice : slices) {
         ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
         ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
-        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), cdcrPath));
+        callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), path));
       }
 
       for (final Future<Long> future : parallelExecutor.invokeAll(callables)) {
@@ -357,8 +383,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       parallelExecutor.shutdown();
     }
 
-    // TODO: register this param somewhere
-    rsp.add("checkpoint", checkpoint);
+    rsp.add(CdcrParams.CHECKPOINT, checkpoint);
   }
 
   /**
@@ -366,7 +391,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    */
   private void handleSliceCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp) {
     if (!leaderStateManager.amILeader()) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrAction.SLICECHECKPOINT +
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrParams.CdcrAction.SLICECHECKPOINT +
           "' sent to non-leader replica");
     }
 
@@ -374,26 +399,26 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates();
     List<Long> versions = recentUpdates.getVersions(1);
     long lastVersion = versions.isEmpty() ? -1 : versions.get(0);
-    rsp.add("checkpoint", lastVersion); // TODO: register this param somewhere
+    rsp.add(CdcrParams.CHECKPOINT, lastVersion);
     recentUpdates.close();
   }
 
   private void handleEnableBufferAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (bufferStateManager.getState() == BufferState.DISABLED) {
-      bufferStateManager.setState(BufferState.ENABLED);
+    if (bufferStateManager.getState() == CdcrParams.BufferState.DISABLED) {
+      bufferStateManager.setState(CdcrParams.BufferState.ENABLED);
       bufferStateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
+    rsp.add(CdcrParams.CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   private void handleDisableBufferAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    if (bufferStateManager.getState() == BufferState.ENABLED) {
-      bufferStateManager.setState(BufferState.DISABLED);
+    if (bufferStateManager.getState() == CdcrParams.BufferState.ENABLED) {
+      bufferStateManager.setState(CdcrParams.BufferState.DISABLED);
       bufferStateManager.synchronize();
     }
 
-    rsp.add(CdcrAction.STATUS.toLower(), this.getStatus());
+    rsp.add(CdcrParams.CdcrAction.STATUS.toLower(), this.getStatus());
   }
 
   /**
@@ -412,7 +437,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    */
   private void handleLastProcessedVersionAction(SolrQueryRequest req, SolrQueryResponse rsp) {
     if (!leaderStateManager.amILeader()) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrAction.LASTPROCESSEDVERSION +
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrParams.CdcrAction.LASTPROCESSEDVERSION +
           " sent to non-leader replica");
     }
 
@@ -434,8 +459,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
     // the fourth case: no cdc replication, no buffering: all readers were null
-    if (processStateManager.getState().equals(ProcessState.STOPPED) &&
-        bufferStateManager.getState().equals(BufferState.DISABLED)) {
+    if (processStateManager.getState().equals(CdcrParams.ProcessState.STOPPED) &&
+        bufferStateManager.getState().equals(CdcrParams.BufferState.DISABLED)) {
       CdcrUpdateLog.CdcrLogReader logReader = ((CdcrUpdateLog) core.getUpdateHandler().getUpdateLog()).newLogReader();
       try {
         // let the reader initialize lastVersion
@@ -459,12 +484,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
     String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
     log.info("Returning the lowest last processed version {}  @ {}:{}", lastProcessedVersion, collectionName, shard);
-    // TODO: register this param somewhere
-    rsp.add("lastProcessedVersion", lastProcessedVersion);
+    rsp.add(CdcrParams.LAST_PROCESSED_VERSION, lastProcessedVersion);
   }
 
   private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList queue = new NamedList();
+    NamedList queues = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
       CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
@@ -473,14 +497,14 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         String shard = req.getCore().getCoreDescriptor().getCloudDescriptor().getShardId();
         log.warn("The log reader for target collection {} is not initialised @ {}:{}",
             state.getTargetCollection(), collectionName, shard);
-        queue.add(state.getTargetCollection(), -1l);
+        queues.add(state.getTargetCollection(), -1l);
       }
       else {
-        queue.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
+        queues.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
       }
     }
 
-    rsp.add("queue", queue); // TODO: register this param somewhere
+    rsp.add(CdcrParams.QUEUES, queues);
   }
 
   @Override
@@ -489,100 +513,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   }
 
   /**
-   * The actions supported by the CDCR API
-   */
-  public enum CdcrAction {
-    START,
-    STOP,
-    STATUS,
-    COLLECTIONCHECKPOINT,
-    SLICECHECKPOINT,
-    ENABLEBUFFER,
-    DISABLEBUFFER,
-    LASTPROCESSEDVERSION,
-    QUEUESIZE;
-
-    public static CdcrAction get(String p) {
-      if (p != null) {
-        try {
-          return CdcrAction.valueOf(p.toUpperCase(Locale.ROOT));
-        }
-        catch (Exception e) {}
-      }
-      return null;
-    }
-
-    public String toLower(){
-      return toString().toLowerCase(Locale.ROOT);
-    }
-
-  }
-
-  /**
-   * The possible states of the CDCR process
-   */
-  public enum ProcessState {
-    STARTED,
-    STOPPED;
-
-    public static ProcessState get(byte[] state) {
-      if (state != null) {
-        try {
-          return ProcessState.valueOf(new String(state).toUpperCase(Locale.ROOT));
-        }
-        catch (Exception e) {}
-      }
-      return null;
-    }
-
-    public String toLower(){
-      return toString().toLowerCase(Locale.ROOT);
-    }
-
-    public byte[] getBytes() {
-      return toLower().getBytes();
-    }
-
-    public static String getParam() {
-      return "process";
-    }
-
-  }
-
-  /**
-   * The possible states of the CDCR buffer
-   */
-  public enum BufferState {
-    ENABLED,
-    DISABLED;
-
-    public static BufferState get(byte[] state) {
-      if (state != null) {
-        try {
-          return BufferState.valueOf(new String(state).toUpperCase(Locale.ROOT));
-        }
-        catch (Exception e) {}
-      }
-      return null;
-    }
-
-    public String toLower(){
-      return toString().toLowerCase(Locale.ROOT);
-    }
-
-    public byte[] getBytes() {
-      return toLower().getBytes();
-    }
-
-    public static String getParam() {
-      return "buffer";
-    }
-
-  }
-
-  /**
    * A thread subclass for executing a single
-   * {@link org.apache.solr.handler.CdcrRequestHandler.CdcrAction#SLICECHECKPOINT} action.
+   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SLICECHECKPOINT} action.
    */
   private static final class SliceCheckpointCallable implements Callable<Long> {
 
@@ -602,13 +534,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         server.setSoTimeout(60000);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
-        params.set(CommonParams.ACTION, CdcrAction.SLICECHECKPOINT.toString());
+        params.set(CommonParams.ACTION, CdcrParams.CdcrAction.SLICECHECKPOINT.toString());
 
         SolrRequest request = new QueryRequest(params);
         request.setPath(cdcrPath);
 
         NamedList response = server.request(request);
-        return (Long) response.get("checkpoint"); // TODO: register this param somewhere
+        return (Long) response.get(CdcrParams.CHECKPOINT);
       }
       finally {
         server.shutdown();

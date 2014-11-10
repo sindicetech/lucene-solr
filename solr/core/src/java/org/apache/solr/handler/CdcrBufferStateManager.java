@@ -32,14 +32,14 @@ import org.slf4j.LoggerFactory;
  */
 class CdcrBufferStateManager extends CdcrStateManager {
 
-  private CdcrRequestHandler.BufferState state = DEFAULT_STATE;
+  private CdcrParams.BufferState state = DEFAULT_STATE;
 
   private BufferStateWatcher wrappedWatcher;
   private Watcher watcher;
 
   private SolrCore core;
 
-  static CdcrRequestHandler.BufferState DEFAULT_STATE = CdcrRequestHandler.BufferState.ENABLED;
+  static CdcrParams.BufferState DEFAULT_STATE = CdcrParams.BufferState.ENABLED;
 
   protected static Logger log = LoggerFactory.getLogger(CdcrBufferStateManager.class);
 
@@ -56,7 +56,7 @@ class CdcrBufferStateManager extends CdcrStateManager {
     try {
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       watcher = this.initWatcher(zkClient);
-      this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
+      this.setState(CdcrParams.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
     }
     catch (KeeperException | InterruptedException e) {
       log.warn("Failed fetching initial state", e);
@@ -80,11 +80,11 @@ class CdcrBufferStateManager extends CdcrStateManager {
     return getZnodeBase() + "/buffer";
   }
 
-  void setState(CdcrRequestHandler.BufferState state) {
+  void setState(CdcrParams.BufferState state) {
     this.state = state;
   }
 
-  CdcrRequestHandler.BufferState getState() {
+  CdcrParams.BufferState getState() {
     return state;
   }
 
@@ -97,7 +97,7 @@ class CdcrBufferStateManager extends CdcrStateManager {
     try {
       zkClient.setData(this.getZnodePath(), this.getState().getBytes(), true);
       // check if nobody changed it in the meantime, and set a new watcher
-      this.setState(CdcrRequestHandler.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
+      this.setState(CdcrParams.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
     }
     catch (KeeperException | InterruptedException e) {
       log.warn("Failed synchronising new state", e);
@@ -149,7 +149,7 @@ class CdcrBufferStateManager extends CdcrStateManager {
       }
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       try {
-        CdcrRequestHandler.BufferState state = CdcrRequestHandler.BufferState.get(zkClient.getData(CdcrBufferStateManager.this.getZnodePath(), watcher, null, true));
+        CdcrParams.BufferState state = CdcrParams.BufferState.get(zkClient.getData(CdcrBufferStateManager.this.getZnodePath(), watcher, null, true));
         log.info("Received new CDCR buffer state from watcher: {} @ {}:{}", state, collectionName, shard);
         CdcrBufferStateManager.this.setState(state);
       }

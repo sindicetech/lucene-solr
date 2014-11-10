@@ -18,15 +18,12 @@ package org.apache.solr.cloud;
  */
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
@@ -120,8 +117,8 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     doQuery(solrServer, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // query all shard replicas individually
-    doQueryShardReplica("shard1", "doc1,12,doc2,12,doc3,12,doc4,12", "q", "*:*");
-    doQueryShardReplica("shard2", "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+    doQueryShardReplica(SHARD1, "doc1,12,doc2,12,doc3,12,doc4,12", "q", "*:*");
+    doQueryShardReplica(SHARD2, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // optimistic locking update
     vadd("doc4", 12);
@@ -153,8 +150,8 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit(SOURCE_COLLECTION);
 
     // query each shard replica individually
-    doQueryShardReplica("shard1", "doc2,12,doc3,12", "q", "*:*");
-    doQueryShardReplica("shard2", "doc2,12,doc3,12", "q", "*:*");
+    doQueryShardReplica(SHARD1, "doc2,12,doc3,12", "q", "*:*");
+    doQueryShardReplica(SHARD2, "doc2,12,doc3,12", "q", "*:*");
 
     // version conflict thanks to optimistic locking
     if (solrServer instanceof CloudSolrServer) // TODO: it seems that optimistic locking doesn't work with forwarding, test with shard2 client
@@ -175,8 +172,8 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     doQuery(solrServer, "", "q", "*:*");
 
     // check that replicas are as expected too
-    doQueryShardReplica("shard1", "", "q", "*:*");
-    doQueryShardReplica("shard2", "", "q", "*:*");
+    doQueryShardReplica(SHARD1, "", "q", "*:*");
+    doQueryShardReplica(SHARD2, "", "q", "*:*");
   }
 
 
