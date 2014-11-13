@@ -18,6 +18,7 @@
 
 package org.apache.solr.handler;
 
+import java.nio.charset.Charset;
 import java.util.Locale;
 
 public class CdcrParams {
@@ -95,7 +96,7 @@ public class CdcrParams {
     public static ProcessState get(byte[] state) {
       if (state != null) {
         try {
-          return ProcessState.valueOf(new String(state).toUpperCase(Locale.ROOT));
+          return ProcessState.valueOf(new String(state, Charset.forName("UTF-8")).toUpperCase(Locale.ROOT));
         }
         catch (Exception e) {}
       }
@@ -107,7 +108,7 @@ public class CdcrParams {
     }
 
     public byte[] getBytes() {
-      return toLower().getBytes();
+      return toLower().getBytes(Charset.forName("UTF-8"));
     }
 
     public static String getParam() {
@@ -126,7 +127,7 @@ public class CdcrParams {
     public static BufferState get(byte[] state) {
       if (state != null) {
         try {
-          return BufferState.valueOf(new String(state).toUpperCase(Locale.ROOT));
+          return BufferState.valueOf(new String(state, Charset.forName("UTF-8")).toUpperCase(Locale.ROOT));
         }
         catch (Exception e) {}
       }
@@ -138,7 +139,7 @@ public class CdcrParams {
     }
 
     public byte[] getBytes() {
-      return toLower().getBytes();
+      return toLower().getBytes(Charset.forName("UTF-8"));
     }
 
     public static String getParam() {

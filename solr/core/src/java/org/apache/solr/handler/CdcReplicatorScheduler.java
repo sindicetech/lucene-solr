@@ -24,6 +24,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,8 +63,8 @@ class CdcReplicatorScheduler {
 
   void start() {
     if (!isStarted) {
-      scheduler = Executors.newSingleThreadScheduledExecutor();
-      replicatorsPool = Executors.newFixedThreadPool(poolSize);
+      scheduler = Executors.newSingleThreadScheduledExecutor(new DefaultSolrThreadFactory("cdcr-scheduler"));
+      replicatorsPool = Executors.newFixedThreadPool(poolSize, new DefaultSolrThreadFactory("cdcr-replicator"));
 
       // the scheduler thread is executed every second and submits one replication task
       // per available state in the queue
