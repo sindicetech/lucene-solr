@@ -21,6 +21,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.solr.common.SolrInputDocument;
@@ -425,11 +426,11 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
       log.info("Number of logs in update log on leader {} {} {} and on replica {} {} {}",
           leader.shard, leader.collectionName, leaderLogs, replica.shard, replica.collectionName, replicaLogs);
       if (equals) {
-        assertEquals(String.format("Number of tlogs on replica %s %s: %d is different than on leader: %d.",
+        assertEquals(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is different than on leader: %d.",
                 replica.collectionName, replica.shard, replicaLogs, leaderLogs),
             leaderLogs, replicaLogs);
       } else {
-        assertTrue(String.format("Number of tlogs on replica %s %s: %d is the same as on leader: %d.",
+        assertTrue(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is the same as on leader: %d.",
                 replica.collectionName, replica.shard, replicaLogs, leaderLogs),
             leaderLogs != replicaLogs);
       }
@@ -493,7 +494,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
           return info;
         }
       }
-      assertTrue(String.format("There is no leader for collection %s shard %s", collection, shard), false);
+      assertTrue(String.format(Locale.ENGLISH,"There is no leader for collection %s shard %s", collection, shard), false);
       return null;
     }
 
