@@ -183,6 +183,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleQueueSizeAction(req, rsp);
         break;
       }
+      case QPS: {
+        this.handleOpsAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -505,6 +509,20 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
     rsp.add(CdcrParams.QUEUES, queues);
+  }
+
+  private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList ops = new NamedList();
+      ops.add("all", state.getBenchmarkTimer().getOperationsPerSecond());
+      ops.add("adds", state.getBenchmarkTimer().getAddsPerSecond());
+      ops.add("deletes", state.getBenchmarkTimer().getDeletesPerSecond());
+      collections.add(state.getTargetCollection(), ops);
+    }
+
+    rsp.add(CdcrParams.OPERATIONS_PER_SECOND, collections);
   }
 
   @Override
