@@ -271,6 +271,51 @@ public class CdcrUpdateLog extends UpdateLog {
     }
 
     /**
+     * Expert: Instantiate a sub-reader. A sub-reader is used for batch updates. It allows to iterates over the
+     * update logs entries without modifying the state of the parent log reader. If the batch update fails, the state
+     * of the sub-reader is discarded and the state of the parent reader is not modified. If the batch update
+     * is successful, the sub-reader is used to fast forward the parent reader with the method
+     * {@link #forwardSeek(org.apache.solr.update.CdcrUpdateLog.CdcrLogReader)}.
+     */
+    public CdcrLogReader getSubReader() {
+      // Add the last element of the queue to properly initialise the pointer and log reader
+      CdcrLogReader clone = new CdcrLogReader(new ArrayList<TransactionLog>(), this.tlogs.peekLast());
+      clone.tlogs.clear(); // clear queue before copy
+      clone.tlogs.addAll(tlogs); // perform a copy of the list
+      clone.lastPositionInTLog = this.lastPositionInTLog;
+      clone.numRecordsReadInCurrentTlog = this.numRecordsReadInCurrentTlog;
+      clone.lastVersion = this.lastVersion;
+      clone.nextToLastVersion = this.nextToLastVersion;
+
+      // If the update log is not empty, we need to initialise the tlog reader
+      // NB: the tlogReader is equal to null if the update log is empty
+      if (tlogReader != null) {
+        clone.tlogReader.close();
+        clone.tlogReader = currentTlog.getReader(this.tlogReader.currentPos());
+      }
+
+      return clone;
+    }
+
+    /**
+     * Expert: Fast forward this log reader with a log subreader. In order to avoid unexpected results, the log
+     * subreader must be created from this reader with the method {@link #getSubReader()}.
+     */
+    public void forwardSeek(CdcrLogReader subReader) {
+      tlogReader.close(); // close the existing reader, a new one will be created
+      while (this.tlogs.peekLast().id < subReader.tlogs.peekLast().id) {
+        tlogs.removeLast();
+        currentTlog = tlogs.peekLast();
+      }
+      assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
+      this.lastPositionInTLog = subReader.lastPositionInTLog;
+      this.numRecordsReadInCurrentTlog = subReader.numRecordsReadInCurrentTlog;
+      this.lastVersion = subReader.lastVersion;
+      this.nextToLastVersion = subReader.nextToLastVersion;
+      this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
+    }
+
+    /**
      * Advances to the next log entry in the updates log and returns the log entry itself.
      * Returns null if there are no more log entries in the updates log.<br>
      *
