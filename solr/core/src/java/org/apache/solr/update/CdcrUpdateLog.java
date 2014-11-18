@@ -298,7 +298,8 @@ public class CdcrUpdateLog extends UpdateLog {
     }
 
     /**
-     * Expert: Fast forward this log reader with a log subreader. In order to avoid unexpected results, the log
+     * Expert: Fast forward this log reader with a log subreader. The subreader will be closed after calling this
+     * method. In order to avoid unexpected results, the log
      * subreader must be created from this reader with the method {@link #getSubReader()}.
      */
     public void forwardSeek(CdcrLogReader subReader) {
@@ -313,6 +314,7 @@ public class CdcrUpdateLog extends UpdateLog {
       this.lastVersion = subReader.lastVersion;
       this.nextToLastVersion = subReader.nextToLastVersion;
       this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
+      subReader.close(); // ensure that the subreader is closed and the assocaited pointer is removed
     }
 
     /**
