@@ -49,6 +49,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.doTestReplicationAfterLeaderChange();
     this.doTestUpdateLogSynchronisation();
     this.doTestBufferOnNonLeader();
+    this.doTestQps();
   }
 
   /**
@@ -384,6 +385,38 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // If the non-leader node were buffering updates, then the replication must be complete
     assertEquals(50, getNumDocs(SOURCE_COLLECTION));
     assertEquals(50, getNumDocs(TARGET_COLLECTION));
+  }
+
+  /**
+   * Check the qps statistics.
+   */
+  public void doTestQps() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // Index documents
+    List<SolrInputDocument> docs = new ArrayList<>();
+    for (int i = 0; i < 200; i++) {
+      docs.add(getDoc(id, Integer.toString(i)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Start CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.QPS);
+    NamedList qps = (NamedList) ((NamedList) rsp.get(CdcrParams.OPERATIONS_PER_SECOND)).get(TARGET_COLLECTION);
+    double qpsAll = (Double) qps.get(CdcrParams.COUNTER_ALL);
+    double qpsAdds = (Double) qps.get(CdcrParams.COUNTER_ADDS);
+    assertTrue(qpsAll > 0);
+    assertEquals(qpsAll, qpsAdds, 0);
+
+    double qpsDeletes = (Double) qps.get(CdcrParams.COUNTER_DELETES);
+    assertEquals(0, qpsDeletes, 0);
   }
 
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {

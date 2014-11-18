@@ -22,6 +22,7 @@ import java.util.Map;
 
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.update.CdcrUpdateLog;
+import org.apache.solr.update.UpdateLog;
 
 /**
  * The state of the replication with a target cluster.
@@ -36,9 +37,12 @@ class CdcReplicatorState {
   private long consecutiveErrors = 0;
   private final Map<ErrorType, Long> errorCounters = new HashMap<>();
 
+  private BenchmarkTimer benchmarkTimer;
+
   CdcReplicatorState(final String targetCollection, final CloudSolrServer targetClient) {
     this.targetCollection = targetCollection;
     this.targetClient = targetClient;
+    this.benchmarkTimer = new BenchmarkTimer();
   }
 
   /**
@@ -89,9 +93,83 @@ class CdcReplicatorState {
     return consecutiveErrors;
   }
 
+  BenchmarkTimer getBenchmarkTimer() {
+    return this.benchmarkTimer;
+  }
+
   enum ErrorType {
     INTERNAL,
     BAD_REQUEST
+  }
+
+  class BenchmarkTimer {
+
+    private long startTime;
+    private long runTime = 0;
+    private Map<Integer, Long> opCounters = new HashMap<>();
+
+    /**
+     * Start recording time.
+     */
+    void start() {
+      startTime = System.nanoTime();
+    }
+
+    /**
+     * Stop recording time.
+     */
+    void stop() {
+      runTime += System.nanoTime() - startTime;
+      startTime = -1;
+    }
+
+    void incrementCounter(final int operationType) {
+      switch (operationType) {
+        case UpdateLog.ADD:
+        case UpdateLog.DELETE:
+        case UpdateLog.DELETE_BY_QUERY: {
+          if (!opCounters.containsKey(operationType)) {
+            opCounters.put(operationType, 0l);
+          }
+          opCounters.put(operationType, opCounters.get(operationType) + 1);
+          return;
+        }
+
+        default:
+          return;
+      }
+    }
+
+    long getRunTime() {
+      long totalRunTime = runTime;
+      if (startTime != -1) { // we are currently recording the time
+        totalRunTime += System.nanoTime() - startTime;
+      }
+      return totalRunTime;
+    }
+
+    double getOperationsPerSecond() {
+      long total = 0;
+      for (long counter : opCounters.values()) {
+        total += counter;
+      }
+      double elapsedTimeInSeconds = ((double) this.getRunTime() / 1E9);
+      return total / elapsedTimeInSeconds;
+    }
+
+    double getAddsPerSecond() {
+      long total = opCounters.get(UpdateLog.ADD) != null ? opCounters.get(UpdateLog.ADD) : 0;
+      double elapsedTimeInSeconds = ((double) this.getRunTime() / 1E9);
+      return total / elapsedTimeInSeconds;
+    }
+
+    double getDeletesPerSecond() {
+      long total = opCounters.get(UpdateLog.DELETE) != null ? opCounters.get(UpdateLog.DELETE) : 0;
+      total += opCounters.get(UpdateLog.DELETE_BY_QUERY) != null ? opCounters.get(UpdateLog.DELETE_BY_QUERY) : 0;
+      double elapsedTimeInSeconds = ((double) this.getRunTime() / 1E9);
+      return total / elapsedTimeInSeconds;
+    }
+
   }
 
 }
