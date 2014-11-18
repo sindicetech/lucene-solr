@@ -36,6 +36,7 @@ import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.update.CdcrUpdateLog;
+import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,7 +87,7 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
   public void stateUpdate() {
     // If I am not the leader, I need to synchronise periodically my update log with my leader.
     if (!leaderStateManager.amILeader()) {
-      scheduler = Executors.newSingleThreadScheduledExecutor();
+      scheduler = Executors.newSingleThreadScheduledExecutor(new DefaultSolrThreadFactory("cdcr-update-log-synchronizer"));
       scheduler.scheduleWithFixedDelay(new UpdateLogSynchronisation(), 0, timeSchedule, TimeUnit.MILLISECONDS);
       return;
     }
