@@ -26,6 +26,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.junit.AfterClass;
@@ -504,6 +505,75 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     assertU(commit());
 
     // old tlogs should have been removed
+    assertEquals(2, ulog.getLogList(logDir).length);
+  }
+
+
+  @Test
+  public void testSubReader() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    assertU(commit());
+
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    assertEquals(2, ulog.getLogList(logDir).length);
+
+    // start to read the first tlog
+    for (int i = 0; i < 10; i++) {
+      assertNotNull(reader.next());
+    }
+
+    // instantiate a sub reader, and finish to read the first tlog (commit operation), plus start to read the
+    // second tlog (first five adds)
+    CdcrUpdateLog.CdcrLogReader subReader = reader.getSubReader();
+    for (int i = 0; i < 6; i++) {
+      assertNotNull(subReader.next());
+    }
+
+    // Five adds + one commit
+    assertEquals(6, subReader.getNumberOfRemainingRecords());
+
+    // Generate a new tlog
+    addDocs(105, start, versions);  start+=105;
+    assertU(commit());
+
+    // Even if the subreader is past the first tlog, the first tlog should not have been removed
+    // since the parent reader is still pointing to it
+    assertEquals(3, ulog.getLogList(logDir).length);
+
+    // fast forward the parent reader with the subreader
+    reader.forwardSeek(subReader);
+    subReader.close();
+
+    // After fast forward, the parent reader should be position on the doc15
+    List o = (List) reader.next();
+    assertNotNull(o);
+    assertTrue(o.get(2) instanceof SolrInputDocument);
+    assertEquals("15", ((SolrInputDocument) o.get(2)).getFieldValue("id"));
+
+    // Finish to read the second tlog, and start to read the third one
+    for (int i = 0; i < 6; i++) {
+      assertNotNull(reader.next());
+    }
+
+    assertEquals(105, reader.getNumberOfRemainingRecords());
+
+    // Generate a new tlog to activate tlog cleaning
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    // If the parent reader was correctly fast forwarded, it should be on the third tlog, and the first two should
+    // have been removed.
     assertEquals(2, ulog.getLogList(logDir).length);
   }
 
