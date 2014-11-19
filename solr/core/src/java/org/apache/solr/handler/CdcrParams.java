@@ -68,6 +68,12 @@ public class CdcrParams {
   /** Counter for Deletes **/
   public final static String COUNTER_DELETES = "deletes";
 
+  /** A list of errors per collection **/
+  public final static String ERRORS = "errors";
+
+  /** Counter for consecutive errors **/
+  public final static String CONSECUTIVE_ERRORS = "consecutiveErrors";
+
   /**
    * The actions supported by the CDCR API
    */
@@ -81,7 +87,8 @@ public class CdcrParams {
     DISABLEBUFFER,
     LASTPROCESSEDVERSION,
     QUEUESIZE,
-    QPS;
+    QPS,
+    ERRORS;
 
     public static CdcrAction get(String p) {
       if (p != null) {
