@@ -545,10 +545,15 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
    */
   @Test
   public void testGetNumberOfRemainingRecords() throws Exception {
-    this.clearCore();
+    final Semaphore logReplayFinish = new Semaphore(0);
+    UpdateLog.testing_logReplayFinishHook = new Runnable() {
+      @Override
+      public void run() {
+        logReplayFinish.release();
+      }
+    };
 
-    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
-    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+    this.clearCore();
 
     int start = 0;
 
@@ -556,9 +561,20 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
-    addDocs(10, start, versions);
-    assertU(commit());
+    addDocs(10, start, versions); start+=10;
 
+    h.close();
+    createCore();
+
+    // At this stage, we have re-opened a capped tlog, and an uncapped tlog.
+    // check that the number of remaining records is correctly computed in these two cases
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    assertTrue(logReplayFinish.tryAcquire(timeout, TimeUnit.SECONDS));
+
+    // 20 records + 2 commits
     assertEquals(22, reader.getNumberOfRemainingRecords());
 
     for (int i = 0; i < 22; i++) {
@@ -568,6 +584,10 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     }
     assertNull(reader.next());
     assertEquals(0, reader.getNumberOfRemainingRecords());
+
+    // It should pick up the new tlog files
+    addDocs(10, start, versions);
+    assertEquals(10, reader.getNumberOfRemainingRecords());
   }
 
   /**

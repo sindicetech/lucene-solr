@@ -399,14 +399,13 @@ public class CdcrUpdateLog extends UpdateLog {
     }
 
     /**
-     * Returns the number of remaining records to be read in the logs.
+     * Returns the number of remaining records (including commit but excluding header) to be read in the logs.
      */
     public long getNumberOfRemainingRecords() {
       long numRemainingRecords = 0;
 
       synchronized (tlogs) {
         for (TransactionLog tlog : tlogs) {
-          // TODO: currently, numRecords returns 0 for reopened existing log files.
           numRemainingRecords += tlog.numRecords() - 1; // minus 1 as the number of records returned by the tlog includes the header
         }
       }
