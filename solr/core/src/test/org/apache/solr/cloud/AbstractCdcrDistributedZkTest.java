@@ -367,7 +367,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   /**
    * Delete a collection through the Collection API.
    */
-  private CollectionAdminResponse deleteCollection(String collectionName) throws SolrServerException, IOException {
+  protected CollectionAdminResponse deleteCollection(String collectionName) throws SolrServerException, IOException {
     SolrServer client = createCloudClient(null);
     CollectionAdminResponse res;
 
