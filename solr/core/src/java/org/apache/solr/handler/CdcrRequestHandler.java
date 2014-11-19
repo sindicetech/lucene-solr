@@ -187,6 +187,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleOpsAction(req, rsp);
         break;
       }
+      case ERRORS: {
+        this.handleErrorsAction(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -516,13 +520,27 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
       NamedList ops = new NamedList();
-      ops.add("all", state.getBenchmarkTimer().getOperationsPerSecond());
-      ops.add("adds", state.getBenchmarkTimer().getAddsPerSecond());
-      ops.add("deletes", state.getBenchmarkTimer().getDeletesPerSecond());
+      ops.add(CdcrParams.COUNTER_ALL, state.getBenchmarkTimer().getOperationsPerSecond());
+      ops.add(CdcrParams.COUNTER_ADDS, state.getBenchmarkTimer().getAddsPerSecond());
+      ops.add(CdcrParams.COUNTER_DELETES, state.getBenchmarkTimer().getDeletesPerSecond());
       collections.add(state.getTargetCollection(), ops);
     }
 
     rsp.add(CdcrParams.OPERATIONS_PER_SECOND, collections);
+  }
+
+  private void handleErrorsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList errors = new NamedList();
+
+      errors.add(CdcrParams.CONSECUTIVE_ERRORS, state.getConsecutiveErrors());
+
+      collections.add(state.getTargetCollection(), errors);
+    }
+
+    rsp.add(CdcrParams.ERRORS, collections);
   }
 
   @Override
