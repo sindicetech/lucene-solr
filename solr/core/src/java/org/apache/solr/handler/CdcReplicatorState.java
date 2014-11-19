@@ -17,10 +17,17 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
+import org.apache.solr.schema.TrieDateField;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
 
@@ -36,6 +43,7 @@ class CdcReplicatorState {
 
   private long consecutiveErrors = 0;
   private final Map<ErrorType, Long> errorCounters = new HashMap<>();
+  private final FixedQueue<ErrorQueueEntry> errorsQueue = new FixedQueue<>(100); // keep the last 100 errors
 
   private BenchmarkTimer benchmarkTimer;
 
@@ -82,6 +90,7 @@ class CdcReplicatorState {
       errorCounters.put(error, 0l);
     }
     errorCounters.put(error, errorCounters.get(error) + 1);
+    errorsQueue.add(new ErrorQueueEntry(error, System.currentTimeMillis()));
     consecutiveErrors++;
   }
 
@@ -89,17 +98,55 @@ class CdcReplicatorState {
     consecutiveErrors = 0;
   }
 
+  /**
+   * Returns the number of consecutive errors encoutnered while trying to forward updates to the target.
+   */
   long getConsecutiveErrors() {
     return consecutiveErrors;
   }
 
+  /**
+   * Gets the number of errors of a particular type.
+   */
+  long getErrorCount(ErrorType type) {
+    if (errorCounters.containsKey(type)) {
+      return errorCounters.get(type);
+    }
+    else {
+      return 0;
+    }
+  }
+
+  /**
+   * Gets the last errors ordered by timestamp (most recent first)
+   */
+  List<String[]> getLastErrors() {
+    List<String[]> lastErrors = new ArrayList<>();
+    synchronized(errorsQueue) {
+      Iterator<ErrorQueueEntry> it = errorsQueue.iterator();
+      while (it.hasNext()) {
+        ErrorQueueEntry entry = it.next();
+        lastErrors.add(new String[] { TrieDateField.formatExternal(new Date(entry.timestamp)), entry.type.toLower() });
+      }
+    }
+    return lastErrors;
+  }
+
+  /**
+   * Gets the benchmark timer.
+   */
   BenchmarkTimer getBenchmarkTimer() {
     return this.benchmarkTimer;
   }
 
   enum ErrorType {
     INTERNAL,
-    BAD_REQUEST
+    BAD_REQUEST;
+
+    public String toLower(){
+      return toString().toLowerCase(Locale.ROOT);
+    }
+
   }
 
   class BenchmarkTimer {
@@ -170,6 +217,35 @@ class CdcReplicatorState {
       return total / elapsedTimeInSeconds;
     }
 
+  }
+
+  private class ErrorQueueEntry {
+
+    private ErrorType type;
+    private long timestamp;
+
+    private ErrorQueueEntry(ErrorType type, long timestamp) {
+      this.type = type;
+      this.timestamp = timestamp;
+    }
+  }
+
+  private class FixedQueue<E> extends LinkedList<E> {
+
+    private int maxSize;
+
+    public FixedQueue(int maxSize) {
+      this.maxSize = maxSize;
+    }
+
+    @Override
+    public synchronized boolean add(E e) {
+      super.addFirst(e);
+      if (size() > maxSize){
+        removeLast();
+      }
+      return true;
+    }
   }
 
 }

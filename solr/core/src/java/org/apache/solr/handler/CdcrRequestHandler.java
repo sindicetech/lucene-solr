@@ -536,6 +536,14 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       NamedList errors = new NamedList();
 
       errors.add(CdcrParams.CONSECUTIVE_ERRORS, state.getConsecutiveErrors());
+      errors.add(CdcReplicatorState.ErrorType.BAD_REQUEST.toLower(), state.getErrorCount(CdcReplicatorState.ErrorType.BAD_REQUEST));
+      errors.add(CdcReplicatorState.ErrorType.INTERNAL.toLower(), state.getErrorCount(CdcReplicatorState.ErrorType.INTERNAL));
+
+      NamedList lastErrors = new NamedList();
+      for (String[] lastError : state.getLastErrors()) {
+        lastErrors.add(lastError[0], lastError[1]);
+      }
+      errors.add("last", lastErrors);
 
       collections.add(state.getTargetCollection(), errors);
     }
