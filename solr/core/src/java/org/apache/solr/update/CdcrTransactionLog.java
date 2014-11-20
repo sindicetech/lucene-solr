@@ -38,13 +38,21 @@ import org.apache.solr.common.util.JavaBinCodec;
  */
 public class CdcrTransactionLog extends TransactionLog {
 
+  private boolean isRecovering;
+
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings) {
     super(tlogFile, globalStrings);
+    isRecovering = false;
   }
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     super(tlogFile, globalStrings, openExisting);
     numRecords = openExisting ? this.readNumRecords() : 0;
+    // if we try to reopen an existing tlog file and that the number of records is equal to 0, then we are recovering
+    // and we will write a commit
+    if (openExisting && numRecords == 0) {
+      isRecovering = true;
+    }
   }
 
   /**
@@ -101,6 +109,8 @@ public class CdcrTransactionLog extends TransactionLog {
         fos.flush();  // flush since this will be the last record in a log fill
         assert fos.size() == channel.size();
 
+        isRecovering = false; // we have recovered and added the commit record with the number of records in the file
+
         return pos;
       } catch (IOException e) {
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
@@ -129,9 +139,8 @@ public class CdcrTransactionLog extends TransactionLog {
       Object o = super.next();
       if (o != null) {
         this.numRecords++;
-        // the only case where the numRecords read here is larger than the original numRecords of the tlog file
-        // is during a recovery. We need to update it for the writeCommit.
-        if (this.numRecords > CdcrTransactionLog.this.numRecords()) {
+        // We are recovering. We need to update the number of records for the writeCommit.
+        if (isRecovering) {
           CdcrTransactionLog.this.numRecords = this.numRecords;
         }
       }
