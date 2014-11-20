@@ -17,18 +17,18 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.List;
 
+import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
-import org.apache.solr.common.SolrInputField;
 import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.UpdateLog;
-import org.apache.solr.update.VersionInfo;
 import org.apache.solr.update.processor.CdcrUpdateProcessor;
 import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.slf4j.Logger;
@@ -44,7 +44,7 @@ public class CdcReplicator implements Runnable {
   private final CdcReplicatorState state;
 
   // TODO: make this configurable
-  private static final int BATCH_SIZE = Integer.MAX_VALUE;
+  private static final int BATCH_SIZE = 128;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicator.class);
 
@@ -55,6 +55,7 @@ public class CdcReplicator implements Runnable {
   @Override
   public void run() {
     CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
+    CdcrUpdateLog.CdcrLogReader subReader = null;
     if (logReader == null) {
       log.warn("Log reader for target {} is not initialised, it will be ignored.", state.getTargetCollection());
       return;
@@ -66,13 +67,12 @@ public class CdcReplicator implements Runnable {
       // Add the param to indicate the {@link CdcrUpdateProcessor} to keep the provided version number
       req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
-
       long counter = 0;
-      CdcrUpdateLog.CdcrLogReader subReader = logReader.getSubReader();
+      subReader = logReader.getSubReader();
       Object o = subReader.next();
 
       for (int i = 0; i < BATCH_SIZE && o != null; i++, o = subReader.next()) {
-        if(isDelete(o)) {
+        if (isDelete(o)) {
 
           /*
           * Deletes are sent one at a time.
@@ -81,65 +81,39 @@ public class CdcReplicator implements Runnable {
           // First send out current batch of SolrInputDocument, the non-deletes.
           List<SolrInputDocument> docs = req.getDocuments();
 
-          if(docs != null && docs.size() > 0) {
-
+          if (docs != null && docs.size() > 0) {
             subReader.resetToLastPosition(); // Push back the delete for now.
-            UpdateResponse rsp = req.process(state.getClient());
-            if (rsp.getStatus() != 0) {
-              throw new CdcReplicatorException(req, rsp);
-            }
-
-            state.resetConsecutiveErrors();
-            logReader.forwardSeek(subReader); //Advance the main reader to just befor the delete.
-            o = subReader.next(); //Read the delete again
-            counter+= docs.size();
+            this.sendRequest(req); // Send the batch update request
+            logReader.forwardSeek(subReader); // Advance the main reader to just before the delete.
+            o = subReader.next(); // Read the delete again
+            counter += docs.size();
             req.clear();
           }
 
-          //Process Delete
+          // Process Delete
           this.processUpdate(o, req);
-          UpdateResponse rsp = req.process(state.getClient());
-          if (rsp.getStatus() != 0) {
-            throw new CdcReplicatorException(req, rsp);
-          }
-
-          state.resetConsecutiveErrors();
+          this.sendRequest(req);
           logReader.forwardSeek(subReader);
           counter++;
           req.clear();
 
         } else {
 
-          if (this.processUpdate(o, req) != null) {
-            int buffered = req.getDocuments().size();
-            if(buffered > 100) {
-              UpdateResponse rsp = req.process(state.getClient());
-              if (rsp.getStatus() != 0) {
-                throw new CdcReplicatorException(req, rsp);
-              }
-              // we successfully forwarded the update, reset the number of consecutive errors
-              state.resetConsecutiveErrors();
-              counter+=buffered;
-              logReader.forwardSeek(subReader);
-              req.clear();
-            }
-          }
+          this.processUpdate(o, req);
+
         }
       }
 
       //Send the final batch out.
       List<SolrInputDocument> docs = req.getDocuments();
 
-      if((docs != null && docs.size() > 0)) {
-        UpdateResponse rsp = req.process(state.getClient());
-        if (rsp.getStatus() != 0) {
-          throw new CdcReplicatorException(req, rsp);
-        }
-
-        state.resetConsecutiveErrors();
-        logReader.forwardSeek(subReader);
-        counter+= docs.size();
+      if ((docs != null && docs.size() > 0)) {
+        this.sendRequest(req);
+        counter += docs.size();
       }
+
+      // we might have read a single commit operation and reached the end of the update logs
+      logReader.forwardSeek(subReader);
 
       log.info("Forwarded {} updates to target {}", counter, state.getTargetCollection());
     }
@@ -147,6 +121,18 @@ public class CdcReplicator implements Runnable {
       // report error and update error stats
       this.handleException(e);
     }
+    finally {
+      // ensure that the subreader is closed and the associated pointer is removed
+      if (subReader != null) subReader.close();
+    }
+  }
+
+  private void sendRequest(UpdateRequest req) throws IOException, SolrServerException, CdcReplicatorException {
+    UpdateResponse rsp = req.process(state.getClient());
+    if (rsp.getStatus() != 0) {
+      throw new CdcReplicatorException(req, rsp);
+    }
+    state.resetConsecutiveErrors();
   }
 
   private boolean isDelete(Object o) {
@@ -185,11 +171,9 @@ public class CdcReplicator implements Runnable {
 
     switch (oper) {
       case UpdateLog.ADD: {
+        // the version is already attached to the document
         SolrInputDocument sdoc = (SolrInputDocument) entry.get(entry.size() - 1);
         req.add(sdoc);
-        //SolrInputField f = new SolrInputField(VersionInfo.VERSION_FIELD);
-        //f.setValue(version, 1.0f);
-        //sdoc.addField(VersionInfo.VERSION_FIELD,f);
         return req;
       }
       case UpdateLog.DELETE: {
