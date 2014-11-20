@@ -303,6 +303,13 @@ public class CdcrUpdateLog extends UpdateLog {
      * subreader must be created from this reader with the method {@link #getSubReader()}.
      */
     public void forwardSeek(CdcrLogReader subReader) {
+      // If a subreader has a null tlog reader, does nothing
+      // This can happend if a subreader is instantiated from a non-initialised parent reader, or if the subreader
+      // has been closed.
+      if (subReader.tlogReader == null) {
+        return;
+      }
+
       tlogReader.close(); // close the existing reader, a new one will be created
       while (this.tlogs.peekLast().id < subReader.tlogs.peekLast().id) {
         tlogs.removeLast();
@@ -314,7 +321,6 @@ public class CdcrUpdateLog extends UpdateLog {
       this.lastVersion = subReader.lastVersion;
       this.nextToLastVersion = subReader.nextToLastVersion;
       this.tlogReader = currentTlog.getReader(subReader.tlogReader.currentPos());
-      subReader.close(); // ensure that the subreader is closed and the assocaited pointer is removed
     }
 
     /**
