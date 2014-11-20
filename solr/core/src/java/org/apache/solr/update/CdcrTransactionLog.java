@@ -38,20 +38,20 @@ import org.apache.solr.common.util.JavaBinCodec;
  */
 public class CdcrTransactionLog extends TransactionLog {
 
-  private boolean isRecovering;
+  private boolean isReplaying;
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings) {
     super(tlogFile, globalStrings);
-    isRecovering = false;
+    isReplaying = false;
   }
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     super(tlogFile, globalStrings, openExisting);
     numRecords = openExisting ? this.readNumRecords() : 0;
-    // if we try to reopen an existing tlog file and that the number of records is equal to 0, then we are recovering
-    // and we will write a commit
+    // if we try to reopen an existing tlog file and that the number of records is equal to 0, then we are replaying
+    // the log and we will append a commit
     if (openExisting && numRecords == 0) {
-      isRecovering = true;
+      isReplaying = true;
     }
   }
 
@@ -109,7 +109,7 @@ public class CdcrTransactionLog extends TransactionLog {
         fos.flush();  // flush since this will be the last record in a log fill
         assert fos.size() == channel.size();
 
-        isRecovering = false; // we have recovered and added the commit record with the number of records in the file
+        isReplaying = false; // we have replayed and appended a commit record with the number of records in the file
 
         return pos;
       } catch (IOException e) {
@@ -139,8 +139,8 @@ public class CdcrTransactionLog extends TransactionLog {
       Object o = super.next();
       if (o != null) {
         this.numRecords++;
-        // We are recovering. We need to update the number of records for the writeCommit.
-        if (isRecovering) {
+        // We are replaying the log. We need to update the number of records for the writeCommit.
+        if (isReplaying) {
           CdcrTransactionLog.this.numRecords = this.numRecords;
         }
       }

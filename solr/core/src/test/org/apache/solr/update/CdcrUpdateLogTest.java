@@ -577,6 +577,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
       CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
       CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
 
+      // wait for the replay to finish
       assertTrue(logReplayFinish.tryAcquire(timeout, TimeUnit.SECONDS));
 
       // 20 records + 2 commits
