@@ -66,6 +66,7 @@
     <lst name="replicator">
       <str name="threadPoolSize">8</str>
       <str name="schedule">1000</str>
+      <str name="batchSize">64</str>
     </lst>
     <lst name="updateLogSynchronizer">
       <str name="schedule">1000</str>
