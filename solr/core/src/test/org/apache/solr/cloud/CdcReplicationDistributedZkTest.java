@@ -42,14 +42,15 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-//    this.doTestDeleteCreateSourceCollection();
-    this.doTestTargetCollectionNotAvailable();
-//    this.doTestReplicationStartStop();
-//    this.doTestReplicationAfterRestart();
-//    this.doTestReplicationAfterLeaderChange();
-//    this.doTestUpdateLogSynchronisation();
-//    this.doTestBufferOnNonLeader();
-//    this.doTestQps();
+    this.doTestDeleteCreateSourceCollection();
+    // this.doTestTargetCollectionNotAvailable();
+    this.doTestReplicationStartStop();
+    this.doTestReplicationAfterRestart();
+    this.doTestReplicationAfterLeaderChange();
+    this.doTestUpdateLogSynchronisation();
+    this.doTestBufferOnNonLeader();
+    this.doTestQps();
+    this.doTestBatchAddsWithDelete();
   }
 
   /**
@@ -420,6 +421,61 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     double qpsDeletes = (Double) qps.get(CdcrParams.COUNTER_DELETES);
     assertEquals(0, qpsDeletes, 0);
+  }
+
+  /**
+   * Check that batch updates with deletes
+   */
+  public void doTestBatchAddsWithDelete() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // Index 50 documents
+    int start = 0;
+    List<SolrInputDocument> docs = new ArrayList<>();
+    for (; start < 50; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Delete 10 documents: 10-19
+    List<String> ids = new ArrayList<>();
+    for (int id = 10; id < 20; id++) {
+      ids.add(Integer.toString(id));
+    }
+    deleteById(SOURCE_COLLECTION, ids);
+
+    // Index 10 documents
+    docs = new ArrayList<>();
+    for (; start < 60; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Delete 1 document: 50
+    ids = new ArrayList<>();
+    ids.add(Integer.toString(50));
+    deleteById(SOURCE_COLLECTION, ids);
+
+    // Index 10 documents
+    docs = new ArrayList<>();
+    for (; start < 70; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Start CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    // If the non-leader node were buffering updates, then the replication must be complete
+    assertEquals(59, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(59, getNumDocs(TARGET_COLLECTION));
   }
 
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {
