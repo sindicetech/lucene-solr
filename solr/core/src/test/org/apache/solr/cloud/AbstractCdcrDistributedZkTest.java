@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.http.params.CoreConnectionPNames;
 import org.apache.solr.client.solrj.SolrQuery;
@@ -176,6 +175,17 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     CloudSolrServer client = createCloudClient(collection);
     try {
       client.add(docs);
+      client.commit(true, true);
+    }
+    finally {
+      client.shutdown();
+    }
+  }
+
+  protected void deleteById(String collection, List<String> ids) throws IOException, SolrServerException {
+    CloudSolrServer client = createCloudClient(collection);
+    try {
+      client.deleteById(ids);
       client.commit(true, true);
     }
     finally {
@@ -453,7 +463,6 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     }
   }
 
-  private AtomicInteger homeCount = new AtomicInteger();
   private List<JettySolrRunner> jettys = new ArrayList<>();
 
   /**
@@ -464,9 +473,10 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     System.setProperty("collection", temporaryCollection);
     for (int i = 1; i <= nServer; i++) {
       // give everyone there own solrhome
-      File jettyHome = new File(new File(getSolrHome()).getParentFile(), "jetty" + homeCount.incrementAndGet());
-      setupJettySolrHome(jettyHome);
-      JettySolrRunner jetty = createJetty(jettyHome, null, "shard" + i);
+      File jettyDir = createTempDir("jetty");
+      jettyDir.mkdirs();
+      setupJettySolrHome(jettyDir);
+      JettySolrRunner jetty = createJetty(jettyDir, null, "shard" + i);
       jettys.add(jetty);
     }
 
