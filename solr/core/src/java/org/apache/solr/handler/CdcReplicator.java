@@ -42,14 +42,13 @@ import org.slf4j.LoggerFactory;
 public class CdcReplicator implements Runnable {
 
   private final CdcReplicatorState state;
-
-  // TODO: make this configurable
-  private static final int BATCH_SIZE = 128;
+  private final int batchSize;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicator.class);
 
-  public CdcReplicator(CdcReplicatorState state) {
+  public CdcReplicator(CdcReplicatorState state, int batchSize) {
     this.state = state;
+    this.batchSize = batchSize;
   }
 
   @Override
@@ -71,7 +70,7 @@ public class CdcReplicator implements Runnable {
       subReader = logReader.getSubReader();
       Object o = subReader.next();
 
-      for (int i = 0; i < BATCH_SIZE && o != null; i++, o = subReader.next()) {
+      for (int i = 0; i < batchSize && o != null; i++, o = subReader.next()) {
         if (isDelete(o)) {
 
           /*
