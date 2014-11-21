@@ -179,8 +179,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleLastProcessedVersionAction(req, rsp);
         break;
       }
-      case QUEUESIZE: {
-        this.handleQueueSizeAction(req, rsp);
+      case QUEUES: {
+        this.handleQueuesAction(req, rsp);
         break;
       }
       case QPS: {
@@ -495,24 +495,29 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrParams.LAST_PROCESSED_VERSION, lastProcessedVersion);
   }
 
-  private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList queues = new NamedList();
+  private void handleQueuesAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList queueStats = new NamedList();
+
       CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
       if (logReader == null) {
         String collectionName = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
         String shard = req.getCore().getCoreDescriptor().getCloudDescriptor().getShardId();
         log.warn("The log reader for target collection {} is not initialised @ {}:{}",
             state.getTargetCollection(), collectionName, shard);
-        queues.add(state.getTargetCollection(), -1l);
+        queueStats.add(CdcrParams.QUEUE_SIZE, -1l);
       }
       else {
-        queues.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
+        queueStats.add(CdcrParams.QUEUE_SIZE, logReader.getNumberOfRemainingRecords());
       }
+      queueStats.add(CdcrParams.LAST_TIMESTAMP, state.getTimestampOfLastProcessedOperation());
+
+      collections.add(state.getTargetCollection(), queueStats);
     }
 
-    rsp.add(CdcrParams.QUEUES, queues);
+    rsp.add(CdcrParams.QUEUES, collections);
   }
 
   private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {

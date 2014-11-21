@@ -42,14 +42,14 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-//    this.doTestDeleteCreateSourceCollection();
+    this.doTestDeleteCreateSourceCollection();
     this.doTestTargetCollectionNotAvailable();
-//    this.doTestReplicationStartStop();
-//    this.doTestReplicationAfterRestart();
-//    this.doTestReplicationAfterLeaderChange();
-//    this.doTestUpdateLogSynchronisation();
-//    this.doTestBufferOnNonLeader();
-//    this.doTestQps();
+    this.doTestReplicationStartStop();
+    this.doTestReplicationAfterRestart();
+    this.doTestReplicationAfterLeaderChange();
+    this.doTestUpdateLogSynchronisation();
+    this.doTestBufferOnNonLeader();
+    this.doTestQps();
   }
 
   /**
@@ -136,7 +136,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   public void doTestReplicationStartStop() throws Exception {
     this.clearSourceCollection();
-    this.clearTargetCollection();
+    this.clearTargetCollection(); // this might log a warning to indicate he was not able to delete the collection (collection was deleted in the previous test)
 
     int start = 0;
     List<SolrInputDocument> docs = new ArrayList<>();
@@ -438,9 +438,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   }
 
   protected long getQueueSize(String collectionName, String shardId) throws Exception {
-    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUESIZE);
-    NamedList status = (NamedList) rsp.get(CdcrParams.QUEUES);
-    return (Long) status.get(TARGET_COLLECTION);
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUES);
+    NamedList status = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).get(TARGET_COLLECTION);
+    return (Long) status.get(CdcrParams.QUEUE_SIZE);
   }
 
   /**

@@ -99,7 +99,7 @@ class CdcReplicatorState {
   }
 
   /**
-   * Returns the number of consecutive errors encoutnered while trying to forward updates to the target.
+   * Returns the number of consecutive errors encountered while trying to forward updates to the target.
    */
   long getConsecutiveErrors() {
     return consecutiveErrors;
@@ -130,6 +130,17 @@ class CdcReplicatorState {
       }
     }
     return lastErrors;
+  }
+
+  /**
+   * Return the timestamp of the last processed operations
+   */
+  String getTimestampOfLastProcessedOperation() {
+    if (logReader != null && logReader.getLastVersion() != -1) {
+      // Shift back to the right by 20 bits the version number - See VersionInfo#getNewClock
+      return TrieDateField.formatExternal(new Date(logReader.getLastVersion() >> 20));
+    }
+    return new String();
   }
 
   /**
