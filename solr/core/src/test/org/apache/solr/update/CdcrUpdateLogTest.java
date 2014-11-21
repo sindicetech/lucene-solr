@@ -615,29 +615,60 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
    */
   @Test
   public void testGetNumberOfRemainingRecords() throws Exception {
-    this.clearCore();
+    try {
+      DirectUpdateHandler2.commitOnClose = false;
+      final Semaphore logReplayFinish = new Semaphore(0);
+      UpdateLog.testing_logReplayFinishHook = new Runnable() {
+        @Override
+        public void run() {
+          logReplayFinish.release();
+        }
+      };
 
-    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
-    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+      this.clearCore();
 
-    int start = 0;
+      int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
-    addDocs(10, start, versions); start+=10;
-    assertU(commit());
+      LinkedList<Long> versions = new LinkedList<>();
+      addDocs(10, start, versions);
+      start += 10;
+      assertU(commit());
 
-    addDocs(10, start, versions);
-    assertU(commit());
+      addDocs(10, start, versions);
+      start += 10;
 
-    assertEquals(22, reader.getNumberOfRemainingRecords());
+      h.close();
+      logReplayFinish.drainPermits();
+      createCore();
 
-    for (int i = 0; i < 22; i++) {
-      Object o = reader.next();
-      assertNotNull(o);
-      assertEquals(22 - (i + 1), reader.getNumberOfRemainingRecords());
+      // At this stage, we have re-opened a capped tlog, and an uncapped tlog.
+      // check that the number of remaining records is correctly computed in these two cases
+
+      CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+      CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+      // wait for the replay to finish
+      assertTrue(logReplayFinish.tryAcquire(timeout, TimeUnit.SECONDS));
+
+      // 20 records + 2 commits
+      assertEquals(22, reader.getNumberOfRemainingRecords());
+
+      for (int i = 0; i < 22; i++) {
+        Object o = reader.next();
+        assertNotNull(o);
+        assertEquals(22 - (i + 1), reader.getNumberOfRemainingRecords());
+      }
+      assertNull(reader.next());
+      assertEquals(0, reader.getNumberOfRemainingRecords());
+
+      // It should pick up the new tlog files
+      addDocs(10, start, versions);
+      assertEquals(10, reader.getNumberOfRemainingRecords());
     }
-    assertNull(reader.next());
-    assertEquals(0, reader.getNumberOfRemainingRecords());
+    finally {
+      DirectUpdateHandler2.commitOnClose = true;
+      UpdateLog.testing_logReplayFinishHook = null;
+    }
   }
 
   /**

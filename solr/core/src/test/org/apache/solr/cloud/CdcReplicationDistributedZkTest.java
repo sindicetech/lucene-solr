@@ -43,12 +43,13 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   @Override
   public void doTest() throws Exception {
     this.doTestDeleteCreateSourceCollection();
-    // this.doTestTargetCollectionNotAvailable();
+    this.doTestTargetCollectionNotAvailable();
     this.doTestReplicationStartStop();
     this.doTestReplicationAfterRestart();
     this.doTestReplicationAfterLeaderChange();
     this.doTestUpdateLogSynchronisation();
     this.doTestBufferOnNonLeader();
+    this.doTestQps();
     this.doTestBatchAddsWithDelete();
   }
 
@@ -105,18 +106,6 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.clearSourceCollection();
     this.clearTargetCollection();
 
-    this.printLayout(); // debug
-
-    indexDoc(getDoc(id, "a"));
-    indexDoc(getDoc(id, "b"));
-    indexDoc(getDoc(id, "c"));
-    indexDoc(getDoc(id, "d"));
-    indexDoc(getDoc(id, "e"));
-    indexDoc(getDoc(id, "f"));
-    commit(SOURCE_COLLECTION);
-
-    assertEquals(6, getNumDocs(SOURCE_COLLECTION));
-
     // send start action to first shard
     NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
     NamedList status = (NamedList) rsp.get(CdcrParams.CdcrAction.STATUS.toLower());
@@ -125,12 +114,30 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // check status
     this.assertState(SOURCE_COLLECTION, CdcrParams.ProcessState.STARTED, CdcrParams.BufferState.ENABLED);
 
-    // TODO: check error status when monitoring api is available
+    // Kill all the servers of the target
+    this.deleteCollection(TARGET_COLLECTION);
+
+    // Index a few documents to trigger the replication
+    index(SOURCE_COLLECTION, getDoc(id, "a"));
+    index(SOURCE_COLLECTION, getDoc(id, "b"));
+    index(SOURCE_COLLECTION, getDoc(id, "c"));
+    index(SOURCE_COLLECTION, getDoc(id, "d"));
+    index(SOURCE_COLLECTION, getDoc(id, "e"));
+    index(SOURCE_COLLECTION, getDoc(id, "f"));
+
+    assertEquals(6, getNumDocs(SOURCE_COLLECTION));
+
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.ERRORS);
+    NamedList errors = (NamedList) ((NamedList) rsp.get(CdcrParams.ERRORS)).get(TARGET_COLLECTION);
+    assertTrue(0 < (Long) errors.get(CdcrParams.CONSECUTIVE_ERRORS));
+    NamedList lastErrors = (NamedList) errors.get(CdcrParams.LAST);
+    assertNotNull(lastErrors);
+    assertTrue(0 < lastErrors.size());
   }
 
   public void doTestReplicationStartStop() throws Exception {
     this.clearSourceCollection();
-    this.clearTargetCollection();
+    this.clearTargetCollection(); // this might log a warning to indicate he was not able to delete the collection (collection was deleted in the previous test)
 
     int start = 0;
     List<SolrInputDocument> docs = new ArrayList<>();
@@ -388,6 +395,38 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   }
 
   /**
+   * Check the qps statistics.
+   */
+  public void doTestQps() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // Index documents
+    List<SolrInputDocument> docs = new ArrayList<>();
+    for (int i = 0; i < 200; i++) {
+      docs.add(getDoc(id, Integer.toString(i)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Start CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.QPS);
+    NamedList qps = (NamedList) ((NamedList) rsp.get(CdcrParams.OPERATIONS_PER_SECOND)).get(TARGET_COLLECTION);
+    double qpsAll = (Double) qps.get(CdcrParams.COUNTER_ALL);
+    double qpsAdds = (Double) qps.get(CdcrParams.COUNTER_ADDS);
+    assertTrue(qpsAll > 0);
+    assertEquals(qpsAll, qpsAdds, 0);
+
+    double qpsDeletes = (Double) qps.get(CdcrParams.COUNTER_DELETES);
+    assertEquals(0, qpsDeletes, 0);
+  }
+
+  /**
    * Check that batch updates with deletes
    */
   public void doTestBatchAddsWithDelete() throws Exception {
@@ -426,6 +465,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     for (; start < 70; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
+
     index(SOURCE_COLLECTION, docs);
 
     // Start CDCR
@@ -440,7 +480,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // If the non-leader node were buffering updates, then the replication must be complete
     assertEquals(59, getNumDocs(SOURCE_COLLECTION));
     assertEquals(59, getNumDocs(TARGET_COLLECTION));
-  }
+    }
 
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {
     while (true) {
@@ -455,9 +495,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   }
 
   protected long getQueueSize(String collectionName, String shardId) throws Exception {
-    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUESIZE);
-    NamedList status = (NamedList) rsp.get(CdcrParams.QUEUES);
-    return (Long) status.get(TARGET_COLLECTION);
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUES);
+    NamedList status = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).get(TARGET_COLLECTION);
+    return (Long) status.get(CdcrParams.QUEUE_SIZE);
   }
 
   /**

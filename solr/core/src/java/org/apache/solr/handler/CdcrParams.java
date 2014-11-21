@@ -59,6 +59,33 @@ public class CdcrParams {
   /** A list of replica queues on a source cluster **/
   public final static String QUEUES = "queues";
 
+  /** The size of a replica queue on a source cluster **/
+  public final static String QUEUE_SIZE = "queueSize";
+
+  /** The timestamp of the last processed operation in a replica queue **/
+  public final static String LAST_TIMESTAMP = "lastTimestamp";
+
+  /** A list of qps statistics per collection **/
+  public final static String OPERATIONS_PER_SECOND = "operationsPerSecond";
+
+  /** Overall counter **/
+  public final static String COUNTER_ALL = "all";
+
+  /** Counter for Adds **/
+  public final static String COUNTER_ADDS = "adds";
+
+  /** Counter for Deletes **/
+  public final static String COUNTER_DELETES = "deletes";
+
+  /** A list of errors per target collection **/
+  public final static String ERRORS = "errors";
+
+  /** Counter for consecutive errors encountered by a replicator thread **/
+  public final static String CONSECUTIVE_ERRORS = "consecutiveErrors";
+
+  /** A list of the last errors encountered by a replicator thread **/
+  public final static String LAST = "last";
+
   /**
    * The actions supported by the CDCR API
    */
@@ -71,7 +98,9 @@ public class CdcrParams {
     ENABLEBUFFER,
     DISABLEBUFFER,
     LASTPROCESSEDVERSION,
-    QUEUESIZE;
+    QUEUES,
+    QPS,
+    ERRORS;
 
     public static CdcrAction get(String p) {
       if (p != null) {

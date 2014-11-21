@@ -24,19 +24,129 @@ import java.util.Collection;
 
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.FastOutputStream;
+import org.apache.solr.common.util.JavaBinCodec;
 
 /**
- * Extends {@link org.apache.solr.update.TransactionLog} to reopen automatically the
- * output stream if its reference count reached 0.
+ * Extends {@link org.apache.solr.update.TransactionLog} to:
+ * <ul>
+ *   <li>reopen automatically the output stream if its reference count reached 0. This is achieved by extending
+ *   methods {@link #incref()}, {@link #close()} and {@link #reopenOutputStream()}.</li>
+ *   <li>encode the number of records in the tlog file in the last commit record. The number of records will be
+ *   decoded and reuse if the tlog file is reopened. This is achieved by extending the constructor, and the
+ *   methods {@link #writeCommit(CommitUpdateCommand, int)} and {@link #getReader(long)}.</li>
+ * </ul>
  */
 public class CdcrTransactionLog extends TransactionLog {
 
+  private boolean isReplaying;
+
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings) {
     super(tlogFile, globalStrings);
+    isReplaying = false;
   }
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     super(tlogFile, globalStrings, openExisting);
+    numRecords = openExisting ? this.readNumRecords() : 0;
+    // if we try to reopen an existing tlog file and that the number of records is equal to 0, then we are replaying
+    // the log and we will append a commit
+    if (openExisting && numRecords == 0) {
+      isReplaying = true;
+    }
+  }
+
+  /**
+   * Returns the number of records in the log (currently includes the header and an optional commit).
+   */
+  public int numRecords() {
+    return this.numRecords;
+  }
+
+  /**
+   * The last record of the transaction log file is expected to be a commit with a 4 byte integer that encodes the
+   * number of records in the file.
+   */
+  private int readNumRecords() {
+    try {
+      if (endsWithCommit()) {
+        long size = fos.size();
+        // 4 bytes for the record size, the lenght of the end message + 1 byte for its value tag,
+        // and 4 bytes for the number of records
+        long pos = size - 4 - END_MESSAGE.length() - 1 - 4;
+        if (pos < 0) return 0;
+
+        ChannelFastInputStream is = new ChannelFastInputStream(channel, pos);
+        return is.readInt();
+      }
+    }
+    catch (IOException e) {
+      log.error("Error while reading number of records in tlog " + this, e);
+    }
+    return 0;
+  }
+
+  @Override
+  public long writeCommit(CommitUpdateCommand cmd, int flags) {
+    LogCodec codec = new LogCodec(resolver);
+    synchronized (this) {
+      try {
+        long pos = fos.size();   // if we had flushed, this should be equal to channel.position()
+
+        if (pos == 0) {
+          writeLogHeader(codec);
+          pos = fos.size();
+        }
+        codec.init(fos);
+        codec.writeTag(JavaBinCodec.ARR, 4);
+        codec.writeInt(UpdateLog.COMMIT | flags);  // should just take one byte
+        codec.writeLong(cmd.getVersion());
+        codec.writeTag(JavaBinCodec.INT); // Enforce the encoding of a plain integer, to simplify decoding
+        fos.writeInt(numRecords + 1); // the number of records in the file - +1 to account for the commit operation being written
+        codec.writeStr(END_MESSAGE);  // ensure these bytes are (almost) last in the file
+
+        endRecord(pos);
+
+        fos.flush();  // flush since this will be the last record in a log fill
+        assert fos.size() == channel.size();
+
+        isReplaying = false; // we have replayed and appended a commit record with the number of records in the file
+
+        return pos;
+      } catch (IOException e) {
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+      }
+    }
+  }
+
+  /** Returns a reader that can be used while a log is still in use.
+   * Currently only *one* LogReader may be outstanding, and that log may only
+   * be used from a single thread. */
+  @Override
+  public LogReader getReader(long startingPos) {
+    return new CdcrLogReader(startingPos);
+  }
+
+  public class CdcrLogReader extends LogReader {
+
+    private int numRecords = 1; // start at 1 to account for the header record
+
+    public CdcrLogReader(long startingPos) {
+      super(startingPos);
+    }
+
+    @Override
+    public Object next() throws IOException, InterruptedException {
+      Object o = super.next();
+      if (o != null) {
+        this.numRecords++;
+        // We are replaying the log. We need to update the number of records for the writeCommit.
+        if (isReplaying) {
+          CdcrTransactionLog.this.numRecords = this.numRecords;
+        }
+      }
+      return o;
+    }
+
   }
 
   @Override

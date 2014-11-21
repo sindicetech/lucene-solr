@@ -66,6 +66,9 @@ public class CdcReplicator implements Runnable {
       // Add the param to indicate the {@link CdcrUpdateProcessor} to keep the provided version number
       req.setParam(CdcrUpdateProcessor.CDCR_UPDATE, "");
 
+      // Start the benchmakr timer
+      state.getBenchmarkTimer().start();
+
       long counter = 0;
       subReader = logReader.getSubReader();
       Object o = subReader.next();
@@ -121,6 +124,8 @@ public class CdcReplicator implements Runnable {
       this.handleException(e);
     }
     finally {
+      // stop the benchmark timer
+      state.getBenchmarkTimer().stop();
       // ensure that the subreader is closed and the associated pointer is removed
       if (subReader != null) subReader.close();
     }
@@ -159,7 +164,6 @@ public class CdcReplicator implements Runnable {
   }
 
   private UpdateRequest processUpdate(Object o, UpdateRequest req) {
-
     // should currently be a List<Oper,Ver,Doc/Id>
     List entry = (List) o;
 
@@ -167,6 +171,8 @@ public class CdcReplicator implements Runnable {
     int oper = operationAndFlags & UpdateLog.OPERATION_MASK;
     long version = (Long) entry.get(1);
 
+    // record the operation in the benchmark timer
+    state.getBenchmarkTimer().incrementCounter(oper);
 
     switch (oper) {
       case UpdateLog.ADD: {

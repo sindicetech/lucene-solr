@@ -179,8 +179,16 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleLastProcessedVersionAction(req, rsp);
         break;
       }
-      case QUEUESIZE: {
-        this.handleQueueSizeAction(req, rsp);
+      case QUEUES: {
+        this.handleQueuesAction(req, rsp);
+        break;
+      }
+      case QPS: {
+        this.handleOpsAction(req, rsp);
+        break;
+      }
+      case ERRORS: {
+        this.handleErrorsAction(req, rsp);
         break;
       }
       default: {
@@ -487,24 +495,65 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrParams.LAST_PROCESSED_VERSION, lastProcessedVersion);
   }
 
-  private void handleQueueSizeAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList queues = new NamedList();
+  private void handleQueuesAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList queueStats = new NamedList();
+
       CdcrUpdateLog.CdcrLogReader logReader = state.getLogReader();
       if (logReader == null) {
         String collectionName = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
         String shard = req.getCore().getCoreDescriptor().getCloudDescriptor().getShardId();
         log.warn("The log reader for target collection {} is not initialised @ {}:{}",
             state.getTargetCollection(), collectionName, shard);
-        queues.add(state.getTargetCollection(), -1l);
+        queueStats.add(CdcrParams.QUEUE_SIZE, -1l);
       }
       else {
-        queues.add(state.getTargetCollection(), logReader.getNumberOfRemainingRecords());
+        queueStats.add(CdcrParams.QUEUE_SIZE, logReader.getNumberOfRemainingRecords());
       }
+      queueStats.add(CdcrParams.LAST_TIMESTAMP, state.getTimestampOfLastProcessedOperation());
+
+      collections.add(state.getTargetCollection(), queueStats);
     }
 
-    rsp.add(CdcrParams.QUEUES, queues);
+    rsp.add(CdcrParams.QUEUES, collections);
+  }
+
+  private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList ops = new NamedList();
+      ops.add(CdcrParams.COUNTER_ALL, state.getBenchmarkTimer().getOperationsPerSecond());
+      ops.add(CdcrParams.COUNTER_ADDS, state.getBenchmarkTimer().getAddsPerSecond());
+      ops.add(CdcrParams.COUNTER_DELETES, state.getBenchmarkTimer().getDeletesPerSecond());
+      collections.add(state.getTargetCollection(), ops);
+    }
+
+    rsp.add(CdcrParams.OPERATIONS_PER_SECOND, collections);
+  }
+
+  private void handleErrorsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    NamedList collections = new NamedList();
+
+    for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
+      NamedList errors = new NamedList();
+
+      errors.add(CdcrParams.CONSECUTIVE_ERRORS, state.getConsecutiveErrors());
+      errors.add(CdcReplicatorState.ErrorType.BAD_REQUEST.toLower(), state.getErrorCount(CdcReplicatorState.ErrorType.BAD_REQUEST));
+      errors.add(CdcReplicatorState.ErrorType.INTERNAL.toLower(), state.getErrorCount(CdcReplicatorState.ErrorType.INTERNAL));
+
+      NamedList lastErrors = new NamedList();
+      for (String[] lastError : state.getLastErrors()) {
+        lastErrors.add(lastError[0], lastError[1]);
+      }
+      errors.add(CdcrParams.LAST, lastErrors);
+
+      collections.add(state.getTargetCollection(), errors);
+    }
+
+    rsp.add(CdcrParams.ERRORS, collections);
   }
 
   @Override
