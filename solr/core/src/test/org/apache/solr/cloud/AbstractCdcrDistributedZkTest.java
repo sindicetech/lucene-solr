@@ -391,6 +391,10 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       res = new CollectionAdminResponse();
       res.setResponse(client.request(request));
     }
+    catch (Exception e) {
+      log.warn("Error while deleting the collection " + collectionName, e);
+      return new CollectionAdminResponse();
+    }
     finally {
       client.shutdown();
     }
