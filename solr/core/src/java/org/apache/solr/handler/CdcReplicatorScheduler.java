@@ -46,9 +46,11 @@ class CdcReplicatorScheduler {
 
   private int poolSize = DEFAULT_POOL_SIZE;
   private int timeSchedule = DEFAULT_TIME_SCHEDULE;
+  private int batchSize = DEFAULT_BATCH_SIZE;
 
   private static final int DEFAULT_POOL_SIZE = 8;
   private static final int DEFAULT_TIME_SCHEDULE = 1000;
+  private static final int DEFAULT_BATCH_SIZE = 128;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorScheduler.class);
 
@@ -58,6 +60,7 @@ class CdcReplicatorScheduler {
     if (replicatorConfiguration != null) {
       poolSize = replicatorConfiguration.getInt(CdcrParams.THREAD_POOL_SIZE_PARAM, DEFAULT_POOL_SIZE);
       timeSchedule = replicatorConfiguration.getInt(CdcrParams.SCHEDULE_PARAM, DEFAULT_TIME_SCHEDULE);
+      batchSize = replicatorConfiguration.getInt(CdcrParams.BATCH_SIZE_PARAM, DEFAULT_BATCH_SIZE);
     }
   }
 
@@ -82,7 +85,7 @@ class CdcReplicatorScheduler {
               public void run() {
                 CdcReplicatorState state = statesQueue.poll();
                 try {
-                  new CdcReplicator(state).run();
+                  new CdcReplicator(state, batchSize).run();
                 }
                 finally {
                   statesQueue.offer(state);

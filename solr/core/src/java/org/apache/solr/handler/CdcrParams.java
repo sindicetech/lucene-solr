@@ -44,6 +44,9 @@ public class CdcrParams {
   /** The time schedule (in ms) of the replicator **/
   public static final String SCHEDULE_PARAM = "schedule";
 
+  /** The batch size of the replicator **/
+  public static final String BATCH_SIZE_PARAM = "batchSize";
+
   /** The definition of the {@link org.apache.solr.handler.CdcrUpdateLogSynchronizer} configuration **/
   public static final String UPDATE_LOG_SYNCHRONIZER_PARAM = "updateLogSynchronizer";
 
