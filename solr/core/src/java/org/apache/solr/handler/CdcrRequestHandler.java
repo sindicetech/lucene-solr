@@ -543,7 +543,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       for (String[] lastError : state.getLastErrors()) {
         lastErrors.add(lastError[0], lastError[1]);
       }
-      errors.add("last", lastErrors);
+      errors.add(CdcrParams.LAST, lastErrors);
 
       collections.add(state.getTargetCollection(), errors);
     }

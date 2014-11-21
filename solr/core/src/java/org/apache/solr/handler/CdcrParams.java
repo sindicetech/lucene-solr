@@ -74,6 +74,9 @@ public class CdcrParams {
   /** Counter for consecutive errors **/
   public final static String CONSECUTIVE_ERRORS = "consecutiveErrors";
 
+  /** A list of the last errors encountered by a replicator thread **/
+  public final static String LAST = "last";
+
   /**
    * The actions supported by the CDCR API
    */

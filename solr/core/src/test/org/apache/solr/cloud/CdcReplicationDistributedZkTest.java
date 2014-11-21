@@ -126,9 +126,12 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     assertEquals(6, getNumDocs(SOURCE_COLLECTION));
 
-    // TODO: check error status when monitoring api is available
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.ERRORS);
     NamedList errors = (NamedList) ((NamedList) rsp.get(CdcrParams.ERRORS)).get(TARGET_COLLECTION);
+    assertTrue(0 < (Long) errors.get(CdcrParams.CONSECUTIVE_ERRORS));
+    NamedList lastErrors = (NamedList) errors.get(CdcrParams.LAST);
+    assertNotNull(lastErrors);
+    assertTrue(0 < lastErrors.size());
   }
 
   public void doTestReplicationStartStop() throws Exception {
