@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.util.NamedList;
@@ -492,10 +491,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     log.info("Indexing documents");
 
-    Random r = new Random();
     List<SolrInputDocument> docs = new ArrayList<>();
     for (int i = 0; i < 128; i++) { // should create two full batches (default batch = 64)
-      docs.add(getDoc(id, Integer.toString(i), "num_i", r.nextInt()));
+      docs.add(getDoc(id, Integer.toString(i)));
     }
     index(SOURCE_COLLECTION, docs);
 
