@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.util.NamedList;
@@ -51,6 +52,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.doTestBufferOnNonLeader();
     this.doTestQps();
     this.doTestBatchAddsWithDelete();
+    this.doTestBatchBoundaries();
   }
 
   /**
@@ -480,7 +482,32 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     // If the non-leader node were buffering updates, then the replication must be complete
     assertEquals(59, getNumDocs(SOURCE_COLLECTION));
     assertEquals(59, getNumDocs(TARGET_COLLECTION));
+  }
+
+  /**
+   * Checks that batches are correctly constructed when batch boundaries are reached.
+   */
+  public void doTestBatchBoundaries() throws Exception {
+    invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    log.info("Indexing documents");
+
+    Random r = new Random();
+    List<SolrInputDocument> docs = new ArrayList<>();
+    for (int i = 0; i < 128; i++) { // should create two full batches (default batch = 64)
+      docs.add(getDoc(id, Integer.toString(i), "num_i", r.nextInt()));
     }
+    index(SOURCE_COLLECTION, docs);
+
+    assertEquals(128, getNumDocs(SOURCE_COLLECTION));
+
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+
+    commit(TARGET_COLLECTION);
+
+    assertEquals(128, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(128, getNumDocs(TARGET_COLLECTION));
+  }
 
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {
     while (true) {
