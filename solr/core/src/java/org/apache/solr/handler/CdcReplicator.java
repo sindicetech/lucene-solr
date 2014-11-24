@@ -71,9 +71,11 @@ public class CdcReplicator implements Runnable {
 
       long counter = 0;
       subReader = logReader.getSubReader();
-      Object o = subReader.next();
 
-      for (int i = 0; i < batchSize && o != null; i++, o = subReader.next()) {
+      for (int i = 0; i < batchSize; i++) {
+        Object o = subReader.next();
+        if (o == null) break; // we have reached the end of the update logs, we should close the batch
+
         if (isDelete(o)) {
 
           /*
