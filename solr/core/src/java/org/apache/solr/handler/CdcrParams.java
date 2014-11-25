@@ -92,6 +92,8 @@ public class CdcrParams {
   /** Total count of transaction logs **/
   public final static String TLOG_TOTAL_COUNT = "tlogTotalCount";
 
+  /** The state of the update log synchronizer **/
+  public final static String UPDATE_LOG_SYNCHRONIZER = "updateLogSynchronizer";
 
   /**
    * The actions supported by the CDCR API

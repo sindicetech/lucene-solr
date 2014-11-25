@@ -95,6 +95,10 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
     this.shutdown();
   }
 
+  boolean isStarted() {
+    return scheduler != null;
+  }
+
   void shutdown() {
     if (scheduler != null) {
       scheduler.shutdownNow();
@@ -108,58 +112,66 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
       ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
       ClusterState cstate = zkController.getClusterState();
       ZkNodeProps leaderProps = cstate.getLeader(collection, shardId);
+      if (leaderProps == null) { // we might not have a leader yet, returns null
+        return null;
+      }
       ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
       return nodeProps.getCoreUrl();
     }
 
     @Override
     public void run() {
-      String leaderUrl = getLeaderUrl();
-
-      HttpSolrServer server = new HttpSolrServer(leaderUrl);
-      server.setConnectionTimeout(15000);
-      server.setSoTimeout(60000);
-
-      ModifiableSolrParams params = new ModifiableSolrParams();
-      params.set(CommonParams.ACTION, CdcrParams.CdcrAction.LASTPROCESSEDVERSION.toString());
-
-      SolrRequest request = new QueryRequest(params);
-      request.setPath(path);
-
-      long lastVersion;
       try {
-        NamedList response = server.request(request);
-        lastVersion = (Long) response.get(CdcrParams.LAST_PROCESSED_VERSION);
-        log.debug("My leader {} says its last processed _version_ number is: {}. I am {}", leaderUrl, lastVersion,
-            core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName());
-      }
-      catch(IOException | SolrServerException e) {
-        log.warn("Couldn't get last processed version from leader {}: {}", leaderUrl, e.getMessage());
-        return;
-      }
-      finally {
-        server.shutdown();
-      }
+        String leaderUrl = getLeaderUrl();
+        if (leaderUrl == null) { // we might not have a leader yet, stop and try again later
+          return;
+        }
 
-      // if we received -1, it means that the log reader on the leader has not yet started to read log entries
-      // do nothing
-      if (lastVersion == -1) {
-        return;
-      }
+        HttpSolrServer server = new HttpSolrServer(leaderUrl);
+        server.setConnectionTimeout(15000);
+        server.setSoTimeout(60000);
 
-      try {
-        CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
-        if (ulog.isBuffering()) {
-          log.debug("Advancing replica buffering tlog reader to {} @ {}:{}", lastVersion, collection, shardId);
-          ulog.getBufferToggle().seek(lastVersion);
+        ModifiableSolrParams params = new ModifiableSolrParams();
+        params.set(CommonParams.ACTION, CdcrParams.CdcrAction.LASTPROCESSEDVERSION.toString());
+
+        SolrRequest request = new QueryRequest(params);
+        request.setPath(path);
+
+        long lastVersion;
+        try {
+          NamedList response = server.request(request);
+          lastVersion = (Long) response.get(CdcrParams.LAST_PROCESSED_VERSION);
+          log.debug("My leader {} says its last processed _version_ number is: {}. I am {}", leaderUrl, lastVersion,
+              core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName());
+        } catch (IOException | SolrServerException e) {
+          log.warn("Couldn't get last processed version from leader {}: {}", leaderUrl, e.getMessage());
+          return;
+        } finally {
+          server.shutdown();
+        }
+
+        // if we received -1, it means that the log reader on the leader has not yet started to read log entries
+        // do nothing
+        if (lastVersion == -1) {
+          return;
+        }
+
+        try {
+          CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
+          if (ulog.isBuffering()) {
+            log.debug("Advancing replica buffering tlog reader to {} @ {}:{}", lastVersion, collection, shardId);
+            ulog.getBufferToggle().seek(lastVersion);
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          log.warn("Couldn't advance replica buffering tlog reader to {} (to remove old tlogs): {}", lastVersion, e.getMessage());
+        } catch (IOException e) {
+          log.warn("Couldn't advance replica buffering tlog reader to {} (to remove old tlogs): {}", lastVersion, e.getMessage());
         }
       }
-      catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        log.warn("Couldn't advance replica buffering tlog reader to {} (to remove old tlogs): {}", lastVersion, e.getMessage());
-      }
-      catch (IOException e) {
-        log.warn("Couldn't advance replica buffering tlog reader to {} (to remove old tlogs): {}", lastVersion, e.getMessage());
+      catch (Throwable e) {
+        log.warn("Caught unexpected exception", e);
+        throw e;
       }
     }
   }
