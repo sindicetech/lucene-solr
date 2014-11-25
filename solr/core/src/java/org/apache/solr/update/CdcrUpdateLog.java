@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
 
 import org.apache.solr.common.SolrException;
@@ -42,7 +43,7 @@ import org.slf4j.LoggerFactory;
  */
 public class CdcrUpdateLog extends UpdateLog {
 
-  protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new HashMap<>();
+  protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new ConcurrentHashMap<>();
 
   /**
    * A reader that will be used as toggle to turn on/off the buffering of tlogs
