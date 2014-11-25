@@ -42,17 +42,17 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-//    this.doTestDeleteCreateSourceCollection();
-//    this.doTestTargetCollectionNotAvailable();
-//    this.doTestReplicationStartStop();
-//    this.doTestReplicationAfterRestart();
-//    this.doTestReplicationAfterLeaderChange();
-//    this.doTestUpdateLogSynchronisation();
-//    this.doTestBufferOnNonLeader();
-//    this.doTestQps();
-//    this.doTestBatchAddsWithDelete();
-//    this.doTestBatchBoundaries();
-    this.doTestDeleteByQueryOnTarget();
+    this.doTestDeleteCreateSourceCollection();
+    this.doTestTargetCollectionNotAvailable();
+    this.doTestReplicationStartStop();
+    this.doTestReplicationAfterRestart();
+    this.doTestReplicationAfterLeaderChange();
+    this.doTestUpdateLogSynchronisation();
+    this.doTestBufferOnNonLeader();
+    this.doTestQps();
+    this.doTestBatchAddsWithDelete();
+    this.doTestBatchBoundaries();
+    this.doTestResilienceWithDeleteByQueryOnTarget();
   }
 
   /**
@@ -511,7 +511,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   /**
    * Check resilience of replication with delete by query executed on targets
    */
-  public void doTestDeleteByQueryOnTarget() throws Exception {
+  public void doTestResilienceWithDeleteByQueryOnTarget() throws Exception {
     this.clearSourceCollection();
     this.clearTargetCollection();
 
