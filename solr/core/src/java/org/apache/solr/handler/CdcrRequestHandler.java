@@ -331,9 +331,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   }
 
   private NamedList getStatus() {
+    UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
     NamedList status = new NamedList();
     status.add(CdcrParams.ProcessState.getParam(), processStateManager.getState().toLower());
     status.add(CdcrParams.BufferState.getParam(), bufferStateManager.getState().toLower());
+    status.add(CdcrParams.TLOG__TOTAL_SIZE, updateLog.getTotalLogsSize());
+    status.add(CdcrParams.TLOG_TOTAL_COUNT, updateLog.getTotalLogsNumber());
     return status;
   }
 
