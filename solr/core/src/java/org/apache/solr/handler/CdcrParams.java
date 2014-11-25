@@ -86,6 +86,13 @@ public class CdcrParams {
   /** A list of the last errors encountered by a replicator thread **/
   public final static String LAST = "last";
 
+  /** Total size of transaction logs **/
+  public final static String TLOG__TOTAL_SIZE = "tlogTotalSize";
+
+  /** Total count of transaction logs **/
+  public final static String TLOG_TOTAL_COUNT = "tlogTotalCount";
+
+
   /**
    * The actions supported by the CDCR API
    */
