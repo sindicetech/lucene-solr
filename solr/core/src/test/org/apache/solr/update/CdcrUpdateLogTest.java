@@ -92,6 +92,10 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     createCore();
   }
 
+  private void deleteByQuery(String q) throws Exception {
+    deleteByQueryAndGetVersion(q, null);
+  }
+
   private void addDocs(int nDocs, int start, LinkedList<Long> versions) throws Exception {
     for (int i = 0; i < nDocs; i++) {
       versions.addFirst(addAndGetVersion(sdoc("id",Integer.toString(start + i)), null));
@@ -700,6 +704,51 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     // we should have reach the end of the new tlog
     assertNull(reader.next());
+  }
+
+  /**
+   * Check that the absolute version number is used for the update log index and for the last entry read
+   */
+  @Test
+  public void testAbsoluteLastVersion() throws Exception {
+    this.clearCore();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) h.getCore().getUpdateHandler().getUpdateLog();
+    File logDir = new File(h.getCore().getUpdateHandler().getUpdateLog().getLogDir());
+    CdcrUpdateLog.CdcrLogReader reader = ulog.newLogReader();
+
+    int start = 0;
+
+    LinkedList<Long> versions = new LinkedList<>();
+    addDocs(10, start, versions); start+=10;
+    deleteByQuery("*:*");
+    assertU(commit());
+
+    deleteByQuery("*:*");
+    addDocs(10, start, versions);  start+=10;
+    assertU(commit());
+
+    assertEquals(2, ulog.getLogList(logDir).length);
+
+    for (long version : ulog.getStartingVersions()) {
+      assertTrue(version > 0);
+    }
+
+    for (int i = 0; i < 10; i++) {
+      reader.next();
+    }
+
+    // first delete
+    Object o = reader.next();
+    assertTrue((Long) ((List) o).get(1) < 0);
+    assertTrue(reader.getLastVersion() > 0);
+
+    reader.next(); // commit
+
+    // second delete
+    o = reader.next();
+    assertTrue((Long) ((List) o).get(1) < 0);
+    assertTrue(reader.getLastVersion() > 0);
   }
 
 }
