@@ -42,16 +42,16 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-//    this.doTestDeleteCreateSourceCollection();
-//    this.doTestTargetCollectionNotAvailable();
-//    this.doTestReplicationStartStop();
-//    this.doTestReplicationAfterRestart();
-//    this.doTestReplicationAfterLeaderChange();
-//    this.doTestUpdateLogSynchronisation();
-//    this.doTestBufferOnNonLeader();
-//    this.doTestQps();
-//    this.doTestBatchAddsWithDelete();
-//    this.doTestBatchBoundaries();
+    this.doTestDeleteCreateSourceCollection();
+    this.doTestTargetCollectionNotAvailable();
+    this.doTestReplicationStartStop();
+    this.doTestReplicationAfterRestart();
+    this.doTestReplicationAfterLeaderChange();
+    this.doTestUpdateLogSynchronisation();
+    this.doTestBufferOnNonLeader();
+    this.doTestQps();
+    this.doTestBatchAddsWithDelete();
+    this.doTestBatchBoundaries();
     this.doTestResilienceWithDeleteByQueryOnTarget();
   }
 
