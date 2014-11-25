@@ -86,6 +86,9 @@ public class CdcrParams {
   /** A list of the last errors encountered by a replicator thread **/
   public final static String LAST = "last";
 
+  /** The state of the update log synchronizer **/
+  public final static String UPDATE_LOG_SYNCHRONIZER = "updateLogSynchronizer";
+
   /**
    * The actions supported by the CDCR API
    */

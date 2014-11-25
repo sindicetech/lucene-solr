@@ -81,7 +81,10 @@ class CdcrBufferStateManager extends CdcrStateManager {
   }
 
   void setState(CdcrParams.BufferState state) {
-    this.state = state;
+    if (this.state != state) {
+      this.state = state;
+      this.callback(); // notify the observers of a state change
+    }
   }
 
   CdcrParams.BufferState getState() {

@@ -317,6 +317,7 @@ public class CdcrUpdateLog extends UpdateLog {
         currentTlog = tlogs.peekLast();
       }
       assert this.tlogs.peekLast().id == subReader.tlogs.peekLast().id;
+      this.pointer.set(currentTlog.tlogFile);
       this.lastPositionInTLog = subReader.lastPositionInTLog;
       this.numRecordsReadInCurrentTlog = subReader.numRecordsReadInCurrentTlog;
       this.lastVersion = subReader.lastVersion;
@@ -488,10 +489,11 @@ public class CdcrUpdateLog extends UpdateLog {
     }
 
     /**
-     * Returns the absolute form of the version number of the last entry read
+     * Returns the absolute form of the version number of the last entry read. If the current version is equal
+     * to 0 (because of a commit), it will return the next to last version number.
      */
     public long getLastVersion() {
-      return lastVersion;
+      return lastVersion == 0 ? nextToLastVersion : lastVersion;
     }
   }
 

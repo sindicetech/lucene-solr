@@ -444,7 +444,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    * </p>
    */
   private void handleLastProcessedVersionAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+
     if (!leaderStateManager.amILeader()) {
+      log.warn("Action {} sent to non-leader replica @ {}:{}", CdcrParams.CdcrAction.LASTPROCESSEDVERSION, collectionName, shard);
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrParams.CdcrAction.LASTPROCESSEDVERSION +
           " sent to non-leader replica");
     }
@@ -489,8 +493,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
     }
 
-    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
-    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
     log.info("Returning the lowest last processed version {}  @ {}:{}", lastProcessedVersion, collectionName, shard);
     rsp.add(CdcrParams.LAST_PROCESSED_VERSION, lastProcessedVersion);
   }
@@ -516,6 +518,9 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
       collections.add(state.getTargetCollection(), queueStats);
     }
+
+    collections.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
+        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED : CdcrParams.ProcessState.STOPPED);
 
     rsp.add(CdcrParams.QUEUES, collections);
   }

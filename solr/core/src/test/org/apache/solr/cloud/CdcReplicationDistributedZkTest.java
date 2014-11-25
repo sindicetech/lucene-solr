@@ -341,26 +341,28 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     commit(TARGET_COLLECTION);
 
+    // Stop CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
+
     assertEquals(50, getNumDocs(SOURCE_COLLECTION));
     assertEquals(50, getNumDocs(TARGET_COLLECTION));
 
-    Thread.sleep(2000); // wait for the update log synchronisation to complete
+    index(SOURCE_COLLECTION, getDoc(id, Integer.toString(0))); // trigger update log cleaning on the non-leader nodes
 
-    // logs on replicas should be trimmed
-    assertUpdateLogs(SOURCE_COLLECTION, true);
-
-    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
+    // some of the tlogs should be trimmed, we must have less than 50 tlog files on both leader and non-leader no
+    assertUpdateLogs(SOURCE_COLLECTION, 50);
 
     for (int i = 50; i < 100; i++) {
       index(SOURCE_COLLECTION, getDoc(id, Integer.toString(i)));
     }
 
-    Thread.sleep(2000); // wait for the update log synchronisation to complete
+    index(SOURCE_COLLECTION, getDoc(id, Integer.toString(0))); // trigger update log cleaning on the non-leader nodes
 
     // at this stage, we should have created one tlog file per document, and some of them must have been cleaned on the
-    // leader since we are not buffering and replication is stopped
+    // leader since we are not buffering and replication is stopped, (we should have exactly 10 tlog files on the leader
+    // and 11 on the non-leader)
     // the non-leader must have synchronised its update log with its leader
-    assertUpdateLogs(SOURCE_COLLECTION, true);
+    assertUpdateLogs(SOURCE_COLLECTION, 50);
   }
 
   /**
@@ -562,14 +564,10 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(50, getNumDocs(SOURCE_COLLECTION));
     assertEquals(0, getNumDocs(TARGET_COLLECTION));
 
-    log.info("CDCR_DEBUG: Restart CDCR");
-
     // Restart CDCR
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
     Thread.sleep(500); // wait a bit for the state to synch
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
-
-    log.info("CDCR_DEBUG: Indexing documents");
 
     docs.clear();
     for (; start <150; start++) {
@@ -577,13 +575,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     }
     index(SOURCE_COLLECTION, docs);
 
-    log.info("CDCR_DEBUG: Waiting for replication");
-
     // wait a bit for the replication to complete
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
-
-    log.info("CDCR_DEBUG: SEnding commit to target");
 
     commit(TARGET_COLLECTION);
 
@@ -613,32 +607,33 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
    * if equals == true then checks that update logs contain the same number of files
    * otherwise asserts the numbers are different
    */
-  protected void assertUpdateLogs(String collection, boolean equals) throws Exception {
+  protected void assertUpdateLogs(String collection, int maxNumberOfTLogs) throws Exception {
     CollectionInfo info = collectInfo(collection);
     Map<String, List<CollectionInfo.CoreInfo>> shardToCoresMap = info.getShardToCoresMap();
     for (String shard : shardToCoresMap.keySet()) {
       CollectionInfo.CoreInfo leader = info.getLeader(shard);
       List<CollectionInfo.CoreInfo> replicas = info.getReplicas(shard);
-      assertUpdateLogs(leader, replicas, equals);
+      assertUpdateLogs(leader, replicas, maxNumberOfTLogs);
     }
   }
 
-  private void assertUpdateLogs(CollectionInfo.CoreInfo leader, List<CollectionInfo.CoreInfo> replicas, boolean equals) {
+  private void assertUpdateLogs(CollectionInfo.CoreInfo leader, List<CollectionInfo.CoreInfo> replicas, int maxNumberOfTLogs) {
     int leaderLogs = numberOfFiles(leader.ulogDir);
 
     for (CollectionInfo.CoreInfo replica : replicas) {
       int replicaLogs = numberOfFiles(replica.ulogDir);
       log.info("Number of logs in update log on leader {} {} {} and on replica {} {} {}",
           leader.shard, leader.collectionName, leaderLogs, replica.shard, replica.collectionName, replicaLogs);
-      if (equals) {
-        assertEquals(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is different than on leader: %d.",
-                replica.collectionName, replica.shard, replicaLogs, leaderLogs),
-            leaderLogs, replicaLogs);
-      } else {
-        assertTrue(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is the same as on leader: %d.",
-                replica.collectionName, replica.shard, replicaLogs, leaderLogs),
-            leaderLogs != replicaLogs);
-      }
+
+      // replica logs must be always equal or superior to leader logs
+      assertTrue(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is different than on leader: %d.",
+          replica.collectionName, replica.shard, replicaLogs, leaderLogs), leaderLogs <= replicaLogs);
+
+      assertTrue(String.format(Locale.ENGLISH,"Number of tlogs on leader %s %s: %d is superior to: %d.",
+          leader.collectionName, leader.shard, leaderLogs, maxNumberOfTLogs), maxNumberOfTLogs > leaderLogs);
+
+      assertTrue(String.format(Locale.ENGLISH,"Number of tlogs on replica %s %s: %d is superior to: %d.",
+          replica.collectionName, replica.shard, replicaLogs, maxNumberOfTLogs), maxNumberOfTLogs > replicaLogs);
     }
   }
 
