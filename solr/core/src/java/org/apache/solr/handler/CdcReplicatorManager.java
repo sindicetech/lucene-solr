@@ -68,7 +68,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
         try {
           CloudSolrServer client = new CloudSolrServer(zkHost, true);
           client.setDefaultCollection(targetCollection);
-          replicatorStates.add(new CdcReplicatorState(targetCollection, client));
+          replicatorStates.add(new CdcReplicatorState(targetCollection, zkHost, client));
         }
         catch (MalformedURLException e) {
           log.warn("Unable to instantiate the client for target collection " + targetCollection, e);
