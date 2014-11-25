@@ -100,6 +100,18 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
     expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
     assertEquals(expected, checkpoint2);
 
+    // send a delete by query
+    deleteByQuery(SOURCE_COLLECTION, "*:*");
+
+    // all the checkpoints must come from the DBQ
+    rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.COLLECTIONCHECKPOINT);
+    long checkpoint3 = (Long) rsp.get(CdcrParams.CHECKPOINT);
+    assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
+    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
+    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
+
     // replication never started, lastProcessedVersion should be -1 for both shards
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.LASTPROCESSEDVERSION);
     long lastVersion = (Long) rsp.get(CdcrParams.LAST_PROCESSED_VERSION);
