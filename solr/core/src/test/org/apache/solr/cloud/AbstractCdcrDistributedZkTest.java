@@ -193,6 +193,17 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     }
   }
 
+  protected void deleteByQuery(String collection, String q) throws IOException, SolrServerException {
+    CloudSolrServer client = createCloudClient(collection);
+    try {
+      client.deleteByQuery(q);
+      client.commit(true, true);
+    }
+    finally {
+      client.shutdown();
+    }
+  }
+
   /**
    * Invokes a commit on the given collection.
    */
