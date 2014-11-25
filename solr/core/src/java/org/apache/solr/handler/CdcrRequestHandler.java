@@ -406,7 +406,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
     UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates();
     List<Long> versions = recentUpdates.getVersions(1);
-    long lastVersion = versions.isEmpty() ? -1 : versions.get(0);
+    long lastVersion = versions.isEmpty() ? -1 : Math.abs(versions.get(0));
     rsp.add(CdcrParams.CHECKPOINT, lastVersion);
     recentUpdates.close();
   }
