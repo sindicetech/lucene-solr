@@ -169,7 +169,8 @@ public class CdcrUpdateLog extends UpdateLog {
   @Override
   protected void ensureLog(long startVersion) {
     if (tlog == null) {
-      super.ensureLog(startVersion);
+      long absoluteVersion = Math.abs(startVersion); // version is negative for deletes
+      super.ensureLog(absoluteVersion);
 
       // push the new tlog to the opened readers
       for (CdcrLogReader reader : logPointers.keySet()) {
@@ -375,6 +376,8 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     public boolean seek(long targetVersion) throws IOException, InterruptedException {
       Object o;
+      // version is negative for deletes - ensure that we are manipulating absolute version numbers.
+      targetVersion = Math.abs(targetVersion);
 
       if (tlogs.isEmpty() || !this.seekTLog(targetVersion)) {
         return false;
@@ -429,9 +432,13 @@ public class CdcrUpdateLog extends UpdateLog {
       return true;
     }
 
+    /**
+     * Extracts the version number and converts it to its absolute form.
+     */
     private long getVersion(Object o) {
       List entry = (List)o;
-      return (Long) entry.get(1);
+      // version is negative for delete, ensure that we are manipulating absolute version numbers
+      return Math.abs((Long) entry.get(1));
     }
 
     /**
@@ -480,6 +487,9 @@ public class CdcrUpdateLog extends UpdateLog {
       logPointers.remove(this);
     }
 
+    /**
+     * Returns the absolute form of the version number of the last entry read
+     */
     public long getLastVersion() {
       return lastVersion;
     }

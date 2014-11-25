@@ -562,10 +562,14 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     assertEquals(50, getNumDocs(SOURCE_COLLECTION));
     assertEquals(0, getNumDocs(TARGET_COLLECTION));
 
+    log.info("CDCR_DEBUG: Restart CDCR");
+
     // Restart CDCR
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
     Thread.sleep(500); // wait a bit for the state to synch
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    log.info("CDCR_DEBUG: Indexing documents");
 
     docs.clear();
     for (; start <150; start++) {
@@ -573,9 +577,13 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     }
     index(SOURCE_COLLECTION, docs);
 
+    log.info("CDCR_DEBUG: Waiting for replication");
+
     // wait a bit for the replication to complete
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    log.info("CDCR_DEBUG: SEnding commit to target");
 
     commit(TARGET_COLLECTION);
 
