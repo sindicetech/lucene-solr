@@ -66,7 +66,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
 
         CloudSolrServer client = new CloudSolrServer(zkHost, true);
         client.setDefaultCollection(targetCollection);
-        replicatorStates.add(new CdcReplicatorState(targetCollection, client));
+        replicatorStates.add(new CdcReplicatorState(targetCollection, zkHost, client));
       }
     }
 

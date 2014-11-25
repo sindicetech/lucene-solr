@@ -37,6 +37,7 @@ import org.apache.solr.update.UpdateLog;
 class CdcReplicatorState {
 
   private final String targetCollection;
+  private final String zkHost;
   private final CloudSolrServer targetClient;
 
   private CdcrUpdateLog.CdcrLogReader logReader;
@@ -47,9 +48,10 @@ class CdcReplicatorState {
 
   private BenchmarkTimer benchmarkTimer;
 
-  CdcReplicatorState(final String targetCollection, final CloudSolrServer targetClient) {
+  CdcReplicatorState(final String targetCollection, final String zkHost, final CloudSolrServer targetClient) {
     this.targetCollection = targetCollection;
     this.targetClient = targetClient;
+    this.zkHost = zkHost;
     this.benchmarkTimer = new BenchmarkTimer();
   }
 
@@ -74,6 +76,10 @@ class CdcReplicatorState {
 
   String getTargetCollection() {
     return targetCollection;
+  }
+
+  String getZkHost() {
+    return zkHost;
   }
 
   CloudSolrServer getClient() {
