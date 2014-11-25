@@ -17,6 +17,7 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -444,7 +445,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    * </p>
    */
   private void handleLastProcessedVersionAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+
     if (!leaderStateManager.amILeader()) {
+      log.warn("Action {} sent to non-leader replica @ {}:{}", new Object[] {CdcrParams.CdcrAction.LASTPROCESSEDVERSION, collectionName, shard});
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrParams.CdcrAction.LASTPROCESSEDVERSION +
           " sent to non-leader replica");
     }
@@ -489,8 +494,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
     }
 
-    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
-    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
     log.info("Returning the lowest last processed version {}  @ {}:{}", new Object[] {lastProcessedVersion, collectionName, shard});
     rsp.add(CdcrParams.LAST_PROCESSED_VERSION, lastProcessedVersion);
   }
@@ -516,10 +519,18 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       collections.add(state.getZkHost()+"/"+state.getTargetCollection(), queueStats);
     }
 
+    collections.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
+        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED : CdcrParams.ProcessState.STOPPED);
+
     rsp.add(CdcrParams.QUEUES, collections);
     UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
-    rsp.add(CdcrParams.TLOG__TOTAL_SIZE, updateLog.getTotalLogsSize());
-    rsp.add(CdcrParams.TLOG_TOTAL_COUNT, updateLog.getTotalLogsNumber());
+    String[] logList = updateLog.getLogList(new File(updateLog.getLogDir()));
+    long totalSize = 0;
+    for (String log : logList) {
+      totalSize = new File(log).length();
+    }
+    rsp.add(CdcrParams.TLOG__TOTAL_SIZE, totalSize);
+    rsp.add(CdcrParams.TLOG_TOTAL_COUNT, logList.length);
   }
 
   private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
