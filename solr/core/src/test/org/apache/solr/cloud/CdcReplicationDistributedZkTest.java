@@ -42,16 +42,17 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   @Override
   public void doTest() throws Exception {
-    this.doTestDeleteCreateSourceCollection();
-    this.doTestTargetCollectionNotAvailable();
-    this.doTestReplicationStartStop();
-    this.doTestReplicationAfterRestart();
-    this.doTestReplicationAfterLeaderChange();
-    this.doTestUpdateLogSynchronisation();
-    this.doTestBufferOnNonLeader();
-    this.doTestQps();
-    this.doTestBatchAddsWithDelete();
-    this.doTestBatchBoundaries();
+//    this.doTestDeleteCreateSourceCollection();
+//    this.doTestTargetCollectionNotAvailable();
+//    this.doTestReplicationStartStop();
+//    this.doTestReplicationAfterRestart();
+//    this.doTestReplicationAfterLeaderChange();
+//    this.doTestUpdateLogSynchronisation();
+//    this.doTestBufferOnNonLeader();
+//    this.doTestQps();
+//    this.doTestBatchAddsWithDelete();
+//    this.doTestBatchBoundaries();
+    this.doTestDeleteByQueryOnTarget();
   }
 
   /**
@@ -505,6 +506,81 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     assertEquals(128, getNumDocs(SOURCE_COLLECTION));
     assertEquals(128, getNumDocs(TARGET_COLLECTION));
+  }
+
+  /**
+   * Check resilience of replication with delete by query executed on targets
+   */
+  public void doTestDeleteByQueryOnTarget() throws Exception {
+    this.clearSourceCollection();
+    this.clearTargetCollection();
+
+    // Index 50 documents
+    int start = 0;
+    List<SolrInputDocument> docs = new ArrayList<>();
+    for (; start < 50; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // Start CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    // If the non-leader node were buffering updates, then the replication must be complete
+    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+
+    deleteByQuery(SOURCE_COLLECTION, "*:*");
+    deleteByQuery(TARGET_COLLECTION, "*:*");
+
+    assertEquals(0, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+
+    docs.clear();
+    for (; start <100; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+
+    deleteByQuery(TARGET_COLLECTION, "*:*");
+
+    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+
+    // Restart CDCR
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
+    Thread.sleep(500); // wait a bit for the state to synch
+    this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
+
+    docs.clear();
+    for (; start <150; start++) {
+      docs.add(getDoc(id, Integer.toString(start)));
+    }
+    index(SOURCE_COLLECTION, docs);
+
+    // wait a bit for the replication to complete
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
+    this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
+
+    commit(TARGET_COLLECTION);
+
+    assertEquals(100, getNumDocs(SOURCE_COLLECTION));
+    assertEquals(50, getNumDocs(TARGET_COLLECTION));
   }
 
   protected void waitForReplicationToComplete(String collectionName, String shardId) throws Exception {
