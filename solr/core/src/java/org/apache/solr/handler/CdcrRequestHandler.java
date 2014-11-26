@@ -529,7 +529,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     for (String log : logList) {
       totalSize = new File(log).length();
     }
-    rsp.add(CdcrParams.TLOG__TOTAL_SIZE, totalSize);
+    rsp.add(CdcrParams.TLOG_TOTAL_SIZE, totalSize);
     rsp.add(CdcrParams.TLOG_TOTAL_COUNT, logList.length);
   }
 
