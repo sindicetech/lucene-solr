@@ -87,7 +87,7 @@ public class CdcrParams {
   public final static String LAST = "last";
 
   /** Total size of transaction logs **/
-  public final static String TLOG__TOTAL_SIZE = "tlogTotalSize";
+  public final static String TLOG_TOTAL_SIZE = "tlogTotalSize";
 
   /** Total count of transaction logs **/
   public final static String TLOG_TOTAL_COUNT = "tlogTotalCount";
