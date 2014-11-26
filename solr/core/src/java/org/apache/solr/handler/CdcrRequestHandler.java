@@ -523,7 +523,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     rsp.add(CdcrParams.QUEUES, collections);
     UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
-    rsp.add(CdcrParams.TLOG__TOTAL_SIZE, updateLog.getTotalLogsSize());
+    rsp.add(CdcrParams.TLOG_TOTAL_SIZE, updateLog.getTotalLogsSize());
     rsp.add(CdcrParams.TLOG_TOTAL_COUNT, updateLog.getTotalLogsNumber());
   }
 
