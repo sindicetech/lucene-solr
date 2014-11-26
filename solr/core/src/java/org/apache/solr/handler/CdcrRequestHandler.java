@@ -519,9 +519,6 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       collections.add(state.getZkHost()+"/"+state.getTargetCollection(), queueStats);
     }
 
-    collections.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
-        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED : CdcrParams.ProcessState.STOPPED);
-
     rsp.add(CdcrParams.QUEUES, collections);
     UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
     String[] logList = updateLog.getLogList(new File(updateLog.getLogDir()));
@@ -531,6 +528,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
     rsp.add(CdcrParams.TLOG_TOTAL_SIZE, totalSize);
     rsp.add(CdcrParams.TLOG_TOTAL_COUNT, logList.length);
+    rsp.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
+        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED.toLower() : CdcrParams.ProcessState.STOPPED.toLower());
   }
 
   private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {

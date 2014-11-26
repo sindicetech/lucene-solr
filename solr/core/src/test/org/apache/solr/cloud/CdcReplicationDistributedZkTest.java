@@ -284,16 +284,24 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     commit(TARGET_COLLECTION);
     assertEquals(10, getNumDocs(TARGET_COLLECTION));
 
-    log.info("Restarting leaders");
+    log.info("Restarting target leaders");
+
+    // Close all the leaders, then restart them
+    this.restartServer(shardToLeaderJetty.get(TARGET_COLLECTION).get(SHARD1));
+    this.restartServer(shardToLeaderJetty.get(TARGET_COLLECTION).get(SHARD2));
+
+    log.info("Restarting source leaders");
 
     // Close all the leaders, then restart them
     this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1));
     this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2));
 
-    log.info("Checking queue size of new leaders");
+    log.info("Checking queue size of new source leaders");
 
     // If the log readers of the new leaders are initialised with the target's checkpoint, the
     // queue size must be inferior to the current number of documents indexed.
+    // The queue might be not completely empty since the new target checkpoint is probably not the
+    // last document received
     assertTrue(this.getQueueSize(SOURCE_COLLECTION, SHARD1) < 10);
     assertTrue(this.getQueueSize(SOURCE_COLLECTION, SHARD2) < 10);
 
@@ -602,7 +610,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   protected long getQueueSize(String collectionName, String shardId) throws Exception {
     NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUES);
-    NamedList status = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).get(TARGET_COLLECTION);
+    NamedList status = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).getVal(0);
     return (Long) status.get(CdcrParams.QUEUE_SIZE);
   }
 
