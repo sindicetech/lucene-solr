@@ -518,13 +518,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       collections.add(state.getZkHost()+"/"+state.getTargetCollection(), queueStats);
     }
 
-    collections.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
-        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED : CdcrParams.ProcessState.STOPPED);
-
     rsp.add(CdcrParams.QUEUES, collections);
     UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
     rsp.add(CdcrParams.TLOG_TOTAL_SIZE, updateLog.getTotalLogsSize());
     rsp.add(CdcrParams.TLOG_TOTAL_COUNT, updateLog.getTotalLogsNumber());
+    rsp.add(CdcrParams.UPDATE_LOG_SYNCHRONIZER,
+        updateLogSynchronizer.isStarted() ? CdcrParams.ProcessState.STARTED.toLower() : CdcrParams.ProcessState.STOPPED.toLower());
   }
 
   private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
