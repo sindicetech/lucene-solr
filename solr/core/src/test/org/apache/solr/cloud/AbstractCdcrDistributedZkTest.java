@@ -484,7 +484,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     System.setProperty("collection", temporaryCollection);
     for (int i = 1; i <= nServer; i++) {
       // give everyone there own solrhome
-      File jettyDir = createTempDir("jetty");
+      File jettyDir = createTempDir("jetty").toFile();
       jettyDir.mkdirs();
       setupJettySolrHome(jettyDir);
       JettySolrRunner jetty = createJetty(jettyDir, null, "shard" + i);
@@ -529,31 +529,6 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   /**
-<<<<<<< HEAD
-   *
-   * getLeader returns e.g. http://127.0.0.1:59803/b_k/myCollection_shard1_replica1/
-   * while getReplicaUrls returns e.g. http://127.0.0.1:59803/b_k
-   *
-   */
-  protected String getTruncatedLeaderUrl(String collection, String shard) throws Exception {
-    String leader = getLeaderUrl(collection, shard);
-
-    String tmp = leader.substring(0, leader.length()-1);
-    leader = tmp.substring(0, tmp.lastIndexOf('/'));
-
-    return leader;
-  }
-
-  /**
-   * Creates a non-smart client to a replica (non-leader).
-   */
-  protected SolrServer getReplicaClient(String collection, String shard) throws Exception {
-    List<String> replicas = getReplicaUrls(collection, shard);
-
-    replicas.remove(getTruncatedLeaderUrl(collection, shard));
-    return createNewSolrServer(collection, replicas.get(0));
-  }
-=======
    * Mapping from collection to jettys
    */
   protected Map<String, List<CloudJettyRunner>> cloudJettys = new HashMap<>();
@@ -562,7 +537,6 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * Mapping from collection/shard to jettys
    */
   protected Map<String, Map<String, List<CloudJettyRunner>>> shardToJetty = new HashMap<>();
->>>>>>> Fixed test framework. Fixed racing condition in leader state manager. Fixed bug in update log initialisation.
 
   /**
    * Mapping from collection/shard leader to jettys
