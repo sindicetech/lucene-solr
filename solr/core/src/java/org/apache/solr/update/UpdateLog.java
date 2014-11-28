@@ -17,9 +17,6 @@
 
 package org.apache.solr.update;
 
-import static org.apache.solr.update.processor.DistributedUpdateProcessor.DistribPhase.FROMLEADER;
-import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
-
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
@@ -65,10 +62,12 @@ import org.apache.solr.util.plugin.PluginInfoInitialized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.solr.update.processor.DistributedUpdateProcessor.DistribPhase.FROMLEADER;
+import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
 
 /** @lucene.experimental */
 public class UpdateLog implements PluginInfoInitialized {
-  public static String LOG_FILENAME_PATTERN = "%s.%019d";
+  public static String LOG_FILENAME_PATTERN = "%s.%019d.%1d";
   public static String TLOG_NAME="tlog";
 
   public static Logger log = LoggerFactory.getLogger(UpdateLog.class);
@@ -136,7 +135,7 @@ public class UpdateLog implements PluginInfoInitialized {
   protected Map<BytesRef,LogPtr> prevMap;  // used while committing/reopening is happening
   protected Map<BytesRef,LogPtr> prevMap2;  // used while committing/reopening is happening
   protected TransactionLog prevMapLog;  // the transaction log used to look up entries found in prevMap
-  protected TransactionLog prevMapLog2;  // the transaction log used to look up entries found in prevMap
+  protected TransactionLog prevMapLog2;  // the transaction log used to look up entries found in prevMap2
 
   protected final int numDeletesToKeep = 1000;
   protected final int numDeletesByQueryToKeep = 100;
@@ -240,12 +239,12 @@ public class UpdateLog implements PluginInfoInitialized {
     if (debug) {
       log.debug("UpdateHandler init: tlogDir=" + tlogDir + ", existing tlogs=" + Arrays.asList(tlogFiles) + ", next id=" + id);
     }
-    
+
     TransactionLog oldLog = null;
     for (String oldLogName : tlogFiles) {
       File f = new File(tlogDir, oldLogName);
       try {
-        oldLog = new TransactionLog( f, null, true );
+        oldLog = new CdcrTransactionLog( f, null, true );
         addOldLog(oldLog, false);  // don't remove old logs on startup since more than one may be uncapped.
       } catch (Exception e) {
         SolrException.log(log, "Failure to open existing log file (non fatal) " + f, e);
@@ -294,11 +293,11 @@ public class UpdateLog implements PluginInfoInitialized {
     }
 
   }
-  
+
   public String getLogDir() {
     return tlogDir.getAbsolutePath();
   }
-  
+
   public List<Long> getStartingVersions() {
     return startingVersions;
   }
@@ -340,7 +339,6 @@ public class UpdateLog implements PluginInfoInitialized {
     logs.addFirst(oldLog);
   }
 
-
   public String[] getLogList(File directory) {
     final String prefix = TLOG_NAME+'.';
     String[] names = directory.list(new FilenameFilter() {
@@ -356,19 +354,16 @@ public class UpdateLog implements PluginInfoInitialized {
     return names;
   }
 
-
   public long getLastLogId() {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
     String last = tlogFiles[tlogFiles.length-1];
-    return Long.parseLong(last.substring(TLOG_NAME.length()+1));
+    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
   }
-
 
   public void add(AddUpdateCommand cmd) {
     add(cmd, false);
   }
-
 
   public void add(AddUpdateCommand cmd, boolean clearCaches) {
     // don't log if we are replaying from another log
@@ -380,7 +375,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.write(cmd, operationFlags);
       }
 
@@ -431,7 +426,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.writeDelete(cmd, operationFlags);
       }
 
@@ -455,7 +450,7 @@ public class UpdateLog implements PluginInfoInitialized {
       long pos = -1;
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog();
+        ensureLog(cmd.getVersion());
         pos = tlog.writeDeleteByQuery(cmd, operationFlags);
       }
 
@@ -580,7 +575,7 @@ public class UpdateLog implements PluginInfoInitialized {
   public boolean hasUncommittedChanges() {
     return tlog != null;
   }
-  
+
   public void preCommit(CommitUpdateCommand cmd) {
     synchronized (this) {
       if (debug) {
@@ -676,13 +671,13 @@ public class UpdateLog implements PluginInfoInitialized {
       // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in map",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       if (entry == null && prevMap != null) {
         entry = prevMap.get(indexedId);
-        // something found in prevMap will always be found in preMapLog (which could be tlog or prevTlog)
+        // something found in prevMap will always be found in prevMapLog (which could be tlog or prevTlog)
         lookupLog = prevMapLog;
         // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in prevMap",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
       if (entry == null && prevMap2 != null) {
         entry = prevMap2.get(indexedId);
-        // something found in prevMap2 will always be found in preMapLog2 (which could be tlog or prevTlog)
+        // something found in prevMap2 will always be found in prevMapLog2 (which could be tlog or prevTlog)
         lookupLog = prevMapLog2;
         // SolrCore.verbose("TLOG: lookup: for id ",indexedId.utf8ToString(),"in prevMap2",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
@@ -716,13 +711,13 @@ public class UpdateLog implements PluginInfoInitialized {
       // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in map",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       if (entry == null && prevMap != null) {
         entry = prevMap.get(indexedId);
-        // something found in prevMap will always be found in preMapLog (which could be tlog or prevTlog)
+        // something found in prevMap will always be found in prevMapLog (which could be tlog or prevTlog)
         lookupLog = prevMapLog;
         // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in prevMap",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
       if (entry == null && prevMap2 != null) {
         entry = prevMap2.get(indexedId);
-        // something found in prevMap2 will always be found in preMapLog2 (which could be tlog or prevTlog)
+        // something found in prevMap2 will always be found in prevMapLog2 (which could be tlog or prevTlog)
         lookupLog = prevMapLog2;
         // SolrCore.verbose("TLOG: lookup ver: for id ",indexedId.utf8ToString(),"in prevMap2",System.identityHashCode(map),"got",entry,"lookupLog=",lookupLog);
       }
@@ -781,7 +776,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
     List<TransactionLog> recoverLogs = new ArrayList<TransactionLog>(1);
     for (TransactionLog ll : newestLogsOnStartup) {
-      if (!ll.try_incref()) continue;
+      ll.incref();
 
       try {
         if (ll.endsWithCommit()) {
@@ -815,10 +810,10 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  protected void ensureLog() {
+  protected void ensureLog(long startVersion) {
     if (tlog == null) {
-      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id);
-      tlog = new TransactionLog(new File(tlogDir, newLogName), globalStrings);
+      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, startVersion);
+      tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
     }
   }
 
@@ -837,11 +832,11 @@ public class UpdateLog implements PluginInfoInitialized {
       theLog.forceClose();
     }
   }
-  
+
   public void close(boolean committed) {
     close(committed, false);
   }
-  
+
   public void close(boolean committed, boolean deleteOnClose) {
     synchronized (this) {
       try {
@@ -881,7 +876,7 @@ public class UpdateLog implements PluginInfoInitialized {
       this.id = id;
     }
   }
-  
+
   public class RecentUpdates {
     Deque<TransactionLog> logList;    // newest first
     List<List<Update>> updateList;
@@ -892,17 +887,17 @@ public class UpdateLog implements PluginInfoInitialized {
 
     public List<Long> getVersions(int n) {
       List<Long> ret = new ArrayList(n);
-      
+
       for (List<Update> singleList : updateList) {
         for (Update ptr : singleList) {
           ret.add(ptr.version);
           if (--n <= 0) return ret;
         }
       }
-      
+
       return ret;
     }
-    
+
     public Object lookup(long version) {
       Update update = updates.get(version);
       if (update == null) return null;
@@ -946,7 +941,7 @@ public class UpdateLog implements PluginInfoInitialized {
             try {
               o = reader.next();
               if (o==null) break;
-              
+
               // should currently be a List<Oper,Ver,Doc/Id>
               List entry = (List)o;
 
@@ -969,13 +964,13 @@ public class UpdateLog implements PluginInfoInitialized {
 
                   updatesForLog.add(update);
                   updates.put(version, update);
-                  
+
                   if (oper == UpdateLog.DELETE_BY_QUERY) {
                     deleteByQueryList.add(update);
                   } else if (oper == UpdateLog.DELETE) {
                     deleteList.add(new DeleteUpdate(version, (byte[])entry.get(2)));
                   }
-                  
+
                   break;
 
                 case UpdateLog.COMMIT:
@@ -1005,7 +1000,7 @@ public class UpdateLog implements PluginInfoInitialized {
       }
 
     }
-    
+
     public void close() {
       for (TransactionLog log : logList) {
         log.decref();
@@ -1250,7 +1245,7 @@ public class UpdateLog implements PluginInfoInitialized {
         long commitVersion = 0;
         int operationAndFlags = 0;
 
-        for(;;) {
+        for (; ; ) {
           Object o = null;
           if (cancelApplyBufferUpdate) break;
           try {
@@ -1291,62 +1286,58 @@ public class UpdateLog implements PluginInfoInitialized {
           try {
 
             // should currently be a List<Oper,Ver,Doc/Id>
-            List entry = (List)o;
+            List entry = (List) o;
 
-            operationAndFlags = (Integer)entry.get(0);
+            operationAndFlags = (Integer) entry.get(0);
             int oper = operationAndFlags & OPERATION_MASK;
             long version = (Long) entry.get(1);
 
             switch (oper) {
-              case UpdateLog.ADD:
-              {
+              case UpdateLog.ADD: {
                 recoveryInfo.adds++;
                 // byte[] idBytes = (byte[]) entry.get(2);
-                SolrInputDocument sdoc = (SolrInputDocument)entry.get(entry.size()-1);
+                SolrInputDocument sdoc = (SolrInputDocument) entry.get(entry.size() - 1);
                 AddUpdateCommand cmd = new AddUpdateCommand(req);
                 // cmd.setIndexedId(new BytesRef(idBytes));
                 cmd.solrDoc = sdoc;
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("add " +  cmd);
+                if (debug) log.debug("add " + cmd);
 
                 proc.processAdd(cmd);
                 break;
               }
-              case UpdateLog.DELETE:
-              {
+              case UpdateLog.DELETE: {
                 recoveryInfo.deletes++;
                 byte[] idBytes = (byte[]) entry.get(2);
                 DeleteUpdateCommand cmd = new DeleteUpdateCommand(req);
                 cmd.setIndexedId(new BytesRef(idBytes));
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("delete " +  cmd);
+                if (debug) log.debug("delete " + cmd);
                 proc.processDelete(cmd);
                 break;
               }
 
-              case UpdateLog.DELETE_BY_QUERY:
-              {
+              case UpdateLog.DELETE_BY_QUERY: {
                 recoveryInfo.deleteByQuery++;
-                String query = (String)entry.get(2);
+                String query = (String) entry.get(2);
                 DeleteUpdateCommand cmd = new DeleteUpdateCommand(req);
                 cmd.query = query;
                 cmd.setVersion(version);
                 cmd.setFlags(UpdateCommand.REPLAY | UpdateCommand.IGNORE_AUTOCOMMIT);
-                if (debug) log.debug("deleteByQuery " +  cmd);
+                if (debug) log.debug("deleteByQuery " + cmd);
                 proc.processDelete(cmd);
                 break;
               }
 
-              case UpdateLog.COMMIT:
-              {
+              case UpdateLog.COMMIT: {
                 commitVersion = version;
                 break;
               }
 
               default:
-                throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,  "Unknown Operation! " + oper);
+                throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Unknown Operation! " + oper);
             }
 
             if (rsp.getException() != null) {
@@ -1361,7 +1352,7 @@ public class UpdateLog implements PluginInfoInitialized {
             recoveryInfo.errors++;
             loglog.warn("REPLAY_ERR: Unexpected log entry or corrupt log.  Entry=" + o, cl);
             // would be caused by a corrupt transaction log
-          }  catch (SolrException ex) {
+          } catch (SolrException ex) {
             if (ex.code() == ErrorCode.SERVICE_UNAVAILABLE.code) {
               throw ex;
             }
@@ -1381,7 +1372,7 @@ public class UpdateLog implements PluginInfoInitialized {
         cmd.waitSearcher = true;
         cmd.setFlags(UpdateCommand.REPLAY);
         try {
-          if (debug) log.debug("commit " +  cmd);
+          if (debug) log.debug("commit " + cmd);
           uhandler.commit(cmd);          // this should cause a commit to be added to the incomplete log and avoid it being replayed again after a restart.
         } catch (IOException ex) {
           recoveryInfo.errors++;
@@ -1439,25 +1430,25 @@ public class UpdateLog implements PluginInfoInitialized {
       }
     }
   }
-  
+
   protected String getTlogDir(SolrCore core, PluginInfo info) {
     String dataDir = (String) info.initArgs.get("dir");
-    
+
     String ulogDir = core.getCoreDescriptor().getUlogDir();
     if (ulogDir != null) {
       dataDir = ulogDir;
     }
-    
+
     if (dataDir == null || dataDir.length() == 0) {
       dataDir = core.getDataDir();
     }
 
     return dataDir + "/" + TLOG_NAME;
   }
-  
+
   /**
    * Clears the logs on the file system. Only call before init.
-   * 
+   *
    * @param core the SolrCore
    * @param ulogPluginInfo the init info for the UpdateHandler
    */
@@ -1475,6 +1466,6 @@ public class UpdateLog implements PluginInfoInitialized {
       }
     }
   }
-  
+
 }
 

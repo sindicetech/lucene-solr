@@ -41,7 +41,7 @@ import org.apache.solr.util.IOUtils;
 
 /** @lucene.experimental */
 public class HdfsUpdateLog extends UpdateLog {
-  
+
   private volatile FileSystem fs;
   private volatile Path tlogDir;
   private final String confDir;
@@ -49,11 +49,11 @@ public class HdfsUpdateLog extends UpdateLog {
   public HdfsUpdateLog() {
     this.confDir = null;
   }
-  
+
   public HdfsUpdateLog(String confDir) {
     this.confDir = confDir;
   }
-  
+
   // HACK
   // while waiting for HDFS-3107, instead of quickly
   // dropping, we slowly apply
@@ -73,14 +73,14 @@ public class HdfsUpdateLog extends UpdateLog {
     }
     return true;
   }
-  
+
   @Override
   public void init(PluginInfo info) {
     dataDir = (String) info.initArgs.get("dir");
-    
+
     defaultSyncLevel = SyncLevel.getSyncLevel((String) info.initArgs
         .get("syncLevel"));
-    
+
   }
 
   private Configuration getConf() {
@@ -88,13 +88,13 @@ public class HdfsUpdateLog extends UpdateLog {
     if (confDir != null) {
       HdfsUtil.addHdfsResources(conf, confDir);
     }
-    
+
     return conf;
   }
-  
+
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
-    
+
     // ulogDir from CoreDescriptor overrides
     String ulogDir = core.getCoreDescriptor().getUlogDir();
 
@@ -104,7 +104,7 @@ public class HdfsUpdateLog extends UpdateLog {
     if (dataDir == null || dataDir.length()==0) {
       dataDir = core.getDataDir();
     }
-    
+
     if (!core.getDirectoryFactory().isAbsolute(dataDir)) {
       try {
         dataDir = core.getDirectoryFactory().getDataHome(core.getCoreDescriptor());
@@ -126,17 +126,17 @@ public class HdfsUpdateLog extends UpdateLog {
     } catch (IOException e) {
       throw new SolrException(ErrorCode.SERVER_ERROR, e);
     }
-    
+
     this.uhandler = uhandler;
-    
+
     if (dataDir.equals(lastDataDir)) {
       if (debug) {
         log.debug("UpdateHandler init: tlogDir=" + tlogDir + ", next id=" + id,
             " this is a reopen... nothing else to do.");
       }
-      
+
       versionInfo.reload();
-      
+
       // on a normal reopen, we currently shouldn't have to do anything
       return;
     }
@@ -153,16 +153,16 @@ public class HdfsUpdateLog extends UpdateLog {
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
-    
+
     tlogFiles = getLogList(fs, tlogDir);
     id = getLastLogId() + 1; // add 1 since we will create a new log for the
                              // next update
-    
+
     if (debug) {
       log.debug("UpdateHandler init: tlogDir=" + tlogDir + ", existing tlogs="
           + Arrays.asList(tlogFiles) + ", next id=" + id);
     }
-    
+
     TransactionLog oldLog = null;
     for (String oldLogName : tlogFiles) {
       Path f = new Path(tlogDir, oldLogName);
@@ -180,7 +180,7 @@ public class HdfsUpdateLog extends UpdateLog {
         }
       }
     }
-    
+
     // Record first two logs (oldest first) at startup for potential tlog
     // recovery.
     // It's possible that at abnormal shutdown both "tlog" and "prevTlog" were
@@ -189,7 +189,7 @@ public class HdfsUpdateLog extends UpdateLog {
       newestLogsOnStartup.addFirst(ll);
       if (newestLogsOnStartup.size() >= 2) break;
     }
-    
+
     try {
       versionInfo = new VersionInfo(this, 256);
     } catch (SolrException e) {
@@ -197,21 +197,21 @@ public class HdfsUpdateLog extends UpdateLog {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Unable to use updateLog: " + e.getMessage(), e);
     }
-    
+
     // TODO: these startingVersions assume that we successfully recover from all
     // non-complete tlogs.
     HdfsUpdateLog.RecentUpdates startingUpdates = getRecentUpdates();
     try {
       startingVersions = startingUpdates.getVersions(numRecordsToKeep);
       startingOperation = startingUpdates.getLatestOperation();
-      
+
       // populate recent deletes list (since we can't get that info from the
       // index)
       for (int i = startingUpdates.deleteList.size() - 1; i >= 0; i--) {
         DeleteUpdate du = startingUpdates.deleteList.get(i);
         oldDeletes.put(new BytesRef(du.id), new LogPtr(-1, du.version));
       }
-      
+
       // populate recent deleteByQuery commands
       for (int i = startingUpdates.deleteByQueryList.size() - 1; i >= 0; i--) {
         Update update = startingUpdates.deleteByQueryList.get(i);
@@ -220,25 +220,25 @@ public class HdfsUpdateLog extends UpdateLog {
         String q = (String) dbq.get(2);
         trackDeleteByQuery(q, version);
       }
-      
+
     } finally {
       startingUpdates.close();
     }
-    
+
   }
-  
+
   @Override
   public String getLogDir() {
     return tlogDir.toUri().toString();
   }
-  
+
   public static String[] getLogList(FileSystem fs, Path tlogDir) {
     final String prefix = TLOG_NAME + '.';
     assert fs != null;
     FileStatus[] fileStatuses;
     try {
       fileStatuses = fs.listStatus(tlogDir, new PathFilter() {
-        
+
         @Override
         public boolean accept(Path path) {
           return path.getName().startsWith(prefix);
@@ -265,20 +265,20 @@ public class HdfsUpdateLog extends UpdateLog {
       IOUtils.closeQuietly(fs);
     }
   }
-  
+
   @Override
-  protected void ensureLog() {
+  protected void ensureLog(long startVersion) {
     if (tlog == null) {
       String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN,
-          TLOG_NAME, id);
+          TLOG_NAME, id, startVersion);
       tlog = new HdfsTransactionLog(fs, new Path(tlogDir, newLogName),
           globalStrings);
     }
   }
-  
+
   /**
    * Clears the logs on the file system. Only call before init.
-   * 
+   *
    * @param core the SolrCore
    * @param ulogPluginInfo the init info for the UpdateHandler
    */
@@ -301,11 +301,11 @@ public class HdfsUpdateLog extends UpdateLog {
       throw new RuntimeException(e);
     }
   }
-  
-  private String[] getLogList(Path tlogDir) throws FileNotFoundException, IOException {
+
+  private String[] getLogList(Path tlogDir) throws IOException {
     final String prefix = TLOG_NAME+'.';
     FileStatus[] files = fs.listStatus(tlogDir, new PathFilter() {
-      
+
       @Override
       public boolean accept(Path name) {
         return name.getName().startsWith(prefix);
@@ -350,9 +350,9 @@ public class HdfsUpdateLog extends UpdateLog {
   // }
   // return true;
   // }
-  
+
   public String toString() {
     return "HDFSUpdateLog{state=" + getState() + ", tlog=" + tlog + "}";
   }
-  
+
 }

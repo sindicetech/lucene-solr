@@ -7,9 +7,9 @@ package org.apache.solr.common.cloud;
  * licenses this file to You under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
  * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
@@ -17,6 +17,12 @@ package org.apache.solr.common.cloud;
  * the License.
  */
 
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Source;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.transform.stream.StreamSource;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
@@ -25,13 +31,6 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
-
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Source;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.transform.stream.StreamSource;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.solr.common.SolrException;
@@ -49,7 +48,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 
+ *
  * All Solr ZooKeeper interactions should go through this class rather than
  * ZooKeeper. This class handles synchronous connects and reconnections.
  *
@@ -58,7 +57,7 @@ public class SolrZkClient {
   // These should *only* be used for debugging or monitoring purposes
   public static final AtomicLong numOpens = new AtomicLong();
   public static final AtomicLong numCloses = new AtomicLong();
-  
+
   static final String NEWL = System.getProperty("line.separator");
 
   static final int DEFAULT_CLIENT_CONNECT_TIMEOUT = 30000;
@@ -69,13 +68,13 @@ public class SolrZkClient {
   private ConnectionManager connManager;
 
   private volatile SolrZooKeeper keeper;
-  
+
   private ZkCmdExecutor zkCmdExecutor;
 
   private volatile boolean isClosed = false;
   private ZkClientConnectionStrategy zkClientConnectionStrategy;
   private int zkClientTimeout;
-  
+
   public int getZkClientTimeout() {
     return zkClientTimeout;
   }
@@ -83,7 +82,7 @@ public class SolrZkClient {
   public SolrZkClient(String zkServerAddress, int zkClientTimeout) {
     this(zkServerAddress, zkClientTimeout, new DefaultConnectionStrategy(), null);
   }
-  
+
   public SolrZkClient(String zkServerAddress, int zkClientTimeout, int zkClientConnectTimeout, OnReconnect onReonnect) {
     this(zkServerAddress, zkClientTimeout, new DefaultConnectionStrategy(), onReonnect, zkClientConnectTimeout);
   }
@@ -129,7 +128,7 @@ public class SolrZkClient {
       }
       throw new RuntimeException(e);
     }
-    
+
     try {
       connManager.waitForConnected(clientConnectTimeout);
     } catch (Throwable e) {
@@ -147,7 +146,7 @@ public class SolrZkClient {
   public ConnectionManager getConnectionManager() {
     return connManager;
   }
-  
+
   public ZkClientConnectionStrategy getZkClientConnectionStrategy() {
     return zkClientConnectionStrategy;
   }
@@ -158,7 +157,7 @@ public class SolrZkClient {
   public boolean isConnected() {
     return keeper != null && keeper.getState() == ZooKeeper.States.CONNECTED;
   }
-  
+
   public void delete(final String path, final int version, boolean retryOnConnLoss)
       throws InterruptedException, KeeperException {
     if (retryOnConnLoss) {
@@ -172,6 +171,13 @@ public class SolrZkClient {
     } else {
       keeper.delete(path, version);
     }
+  }
+
+  /**
+   * CDCR Backport: Needed for compatibility as newer SolrZkClient wrap Zk watchers.
+   */
+  public Watcher wrapWatcher (final Watcher watcher) {
+    return watcher;
   }
 
   /**
@@ -204,7 +210,7 @@ public class SolrZkClient {
       return keeper.exists(path, watcher);
     }
   }
-  
+
   /**
    * Returns true if path exists
    */
@@ -289,7 +295,7 @@ public class SolrZkClient {
       return keeper.setData(path, data, version);
     }
   }
-  
+
   /**
    * Returns path of created node
    */
@@ -311,7 +317,7 @@ public class SolrZkClient {
 
   /**
    * Creates the path in ZooKeeper, creating each node as necessary.
-   * 
+   *
    * e.g. If <code>path=/solr/group/node</code> and none of the nodes, solr,
    * group, node exist, each will be created.
    */
@@ -319,23 +325,23 @@ public class SolrZkClient {
       InterruptedException {
     makePath(path, null, CreateMode.PERSISTENT, retryOnConnLoss);
   }
-  
+
   public void makePath(String path, boolean failOnExists, boolean retryOnConnLoss) throws KeeperException,
       InterruptedException {
     makePath(path, null, CreateMode.PERSISTENT, null, failOnExists, retryOnConnLoss);
   }
-  
+
   public void makePath(String path, File file, boolean failOnExists, boolean retryOnConnLoss)
       throws IOException, KeeperException, InterruptedException {
     makePath(path, FileUtils.readFileToByteArray(file),
         CreateMode.PERSISTENT, null, failOnExists, retryOnConnLoss);
   }
-  
+
   public void makePath(String path, File file, boolean retryOnConnLoss) throws IOException,
       KeeperException, InterruptedException {
     makePath(path, FileUtils.readFileToByteArray(file), retryOnConnLoss);
   }
-  
+
   public void makePath(String path, CreateMode createMode, boolean retryOnConnLoss) throws KeeperException,
       InterruptedException {
     makePath(path, null, createMode, retryOnConnLoss);
@@ -343,7 +349,7 @@ public class SolrZkClient {
 
   /**
    * Creates the path in ZooKeeper, creating each node as necessary.
-   * 
+   *
    * @param data to set on the last zkNode
    */
   public void makePath(String path, byte[] data, boolean retryOnConnLoss) throws KeeperException,
@@ -353,10 +359,10 @@ public class SolrZkClient {
 
   /**
    * Creates the path in ZooKeeper, creating each node as necessary.
-   * 
+   *
    * e.g. If <code>path=/solr/group/node</code> and none of the nodes, solr,
    * group, node exist, each will be created.
-   * 
+   *
    * @param data to set on the last zkNode
    */
   public void makePath(String path, byte[] data, CreateMode createMode, boolean retryOnConnLoss)
@@ -366,25 +372,25 @@ public class SolrZkClient {
 
   /**
    * Creates the path in ZooKeeper, creating each node as necessary.
-   * 
+   *
    * e.g. If <code>path=/solr/group/node</code> and none of the nodes, solr,
    * group, node exist, each will be created.
-   * 
+   *
    * @param data to set on the last zkNode
    */
   public void makePath(String path, byte[] data, CreateMode createMode,
       Watcher watcher, boolean retryOnConnLoss) throws KeeperException, InterruptedException {
     makePath(path, data, createMode, watcher, true, retryOnConnLoss);
   }
-  
+
 
 
   /**
    * Creates the path in ZooKeeper, creating each node as necessary.
-   * 
+   *
    * e.g. If <code>path=/solr/group/node</code> and none of the nodes, solr,
    * group, node exist, each will be created.
-   * 
+   *
    * Note: retryOnConnLoss is only respected for the final node - nodes
    * before that are always retried on connection loss.
    */
@@ -394,7 +400,7 @@ public class SolrZkClient {
       log.info("makePath: " + path);
     }
     boolean retry = true;
-    
+
     if (path.startsWith("/")) {
       path = path.substring(1, path.length());
     }
@@ -428,7 +434,7 @@ public class SolrZkClient {
             keeper.create(currentPath, bytes, ZooDefs.Ids.OPEN_ACL_UNSAFE, mode);
           }
         } catch (NodeExistsException e) {
-          
+
           if (!failOnExists) {
             // TODO: version ? for now, don't worry about race
             setData(currentPath, data, -1, retryOnConnLoss);
@@ -436,7 +442,7 @@ public class SolrZkClient {
             exists(currentPath, watcher, retryOnConnLoss);
             return;
           }
-          
+
           // ignore unless it's the last node in the path
           if (i == paths.length - 1) {
             throw e;
@@ -470,7 +476,7 @@ public class SolrZkClient {
 
   /**
    * Write file to ZooKeeper - default system encoding used.
-   * 
+   *
    * @param path path to upload file to e.g. /solr/conf/solrconfig.xml
    * @param file path to file to be uploaded
    */
@@ -485,8 +491,8 @@ public class SolrZkClient {
   }
 
   /**
-   * Returns the baseURL corrisponding to a given node's nodeName -- 
-   * NOTE: does not (currently) imply that the nodeName (or resulting 
+   * Returns the baseURL corrisponding to a given node's nodeName --
+   * NOTE: does not (currently) imply that the nodeName (or resulting
    * baseURL) exists in the cluster.
    * @lucene.experimental
    */
@@ -526,7 +532,7 @@ public class SolrZkClient {
             // this is the cluster state in xml format - lets pretty print
             dataString = prettyPrint(dataString);
           }
-          
+
           string.append(dent + "DATA:\n" + dent + "    "
               + dataString.replaceAll("\n", "\n" + dent + "    ") + NEWL);
         } else {
@@ -560,7 +566,7 @@ public class SolrZkClient {
     printLayout("/", 0, sb);
     System.out.println(sb.toString());
   }
-  
+
   public static String prettyPrint(String input, int indent) {
     try {
       Source xmlInput = new StreamSource(new StringReader(input));
@@ -576,7 +582,7 @@ public class SolrZkClient {
       throw new RuntimeException("Problem pretty printing XML", e);
     }
   }
-  
+
   private static String prettyPrint(String input) {
     return prettyPrint(input, 2);
   }
@@ -608,11 +614,11 @@ public class SolrZkClient {
    // we might have been closed already
    if (isClosed) this.keeper.close();
   }
-  
+
   public SolrZooKeeper getSolrZooKeeper() {
     return keeper;
   }
-  
+
   private void closeKeeper(SolrZooKeeper keeper) {
     if (keeper != null) {
       try {
