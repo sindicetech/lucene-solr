@@ -54,11 +54,11 @@ class CdcrLeaderStateManager extends CdcrStateManager {
     try {
       SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
       ClusterState clusterState = core.getCoreDescriptor().getCoreContainer().getZkController().getClusterState();
-      // if the node does not exist, it means that the leader was not yet registered and the call to
-      // checkIfIAmLeader will fail with a timeout. This can happen
+
+      watcher = this.initWatcher(zkClient);
+      // if the node does not exist, it means that the leader was not yet registered. This can happen
       // when the cluster is starting up. The core is not yet fully loaded, and the leader election process
       // is waiting for it.
-      watcher = this.initWatcher(zkClient);
       if (this.isLeaderRegistered(zkClient, clusterState)) {
         this.checkIfIAmLeader();
       }
@@ -74,24 +74,10 @@ class CdcrLeaderStateManager extends CdcrStateManager {
    * be notified when the leader is registered.
    */
   private boolean isLeaderRegistered(SolrZkClient zkClient, ClusterState clusterState)
-      throws KeeperException, InterruptedException {
+  throws KeeperException, InterruptedException {
     // First check if the znode exists, and register the watcher at the same time
     return zkClient.exists(this.getZnodePath(), watcher, true) != null;
   }
-//  private boolean isLeaderRegistered(SolrZkClient zkClient, ClusterState clusterState)
-//  throws KeeperException, InterruptedException {
-//    // First check if the znode exists, and register the watcher at the same time
-//    if (zkClient.exists(this.getZnodePath(), watcher, true) != null) {
-//      String myShardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
-//      String myCollection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
-//      Replica replica = clusterState.getLeader(myCollection, myShardId);
-//      if (replica != null && clusterState.liveNodesContain(replica.getNodeName())) {
-//        return true;
-//      }
-//    }
-//
-//    return false;
-//  }
 
   /**
    * SolrZkClient does not guarantee that a watch object will only be triggered once for a given notification
@@ -109,15 +95,6 @@ class CdcrLeaderStateManager extends CdcrStateManager {
       CdcrLeaderStateManager.this.setAmILeader(props.get("core").equals(core.getName()));
     }
   }
-//  private void checkIfIAmLeader() throws KeeperException, InterruptedException {
-//    String myShardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
-//    String myCollection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
-//    ZkStateReader zkStateReader = core.getCoreDescriptor().getCoreContainer().getZkController().getZkStateReader();
-//    zkStateReader.updateClusterState(true); // force a cluster state update
-//    core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient().printLayoutToStdOut();
-//    Replica myLeader = zkStateReader.getLeaderRetry(myCollection, myShardId, 4000);
-//    this.setAmILeader(myLeader.getName().equals(core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName()));
-//  }
 
   private String getZnodePath() {
     String myShardId = core.getCoreDescriptor().getCloudDescriptor().getShardId();
@@ -166,18 +143,11 @@ class CdcrLeaderStateManager extends CdcrStateManager {
 
       try {
         log.info("Received new leader state @ {}:{}", collectionName, shard);
-        // we will receive a NodeDeleted event during leader election,
-        // but checkIfIAmLeader will block until the node is created again
-        // CdcrLeaderStateManager.this.checkIfIAmLeader();
         SolrZkClient zkClient = core.getCoreDescriptor().getCoreContainer().getZkController().getZkClient();
         ClusterState clusterState = core.getCoreDescriptor().getCoreContainer().getZkController().getClusterState();
         if (CdcrLeaderStateManager.this.isLeaderRegistered(zkClient, clusterState)) {
           CdcrLeaderStateManager.this.checkIfIAmLeader();
         }
-//        ZkNodeProps props = ZkNodeProps.load(zkClient.getData(CdcrLeaderStateManager.this.getZnodePath(), watcher, null, true));
-//        if (props != null) {
-//          CdcrLeaderStateManager.this.setAmILeader(props.get("core").equals(core.getName()));
-//        }
       }
       catch (KeeperException | InterruptedException e) {
         log.warn("Failed updating leader state and setting watch @ " + collectionName + ":" + shard, e);

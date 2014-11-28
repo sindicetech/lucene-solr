@@ -130,6 +130,8 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     assertEquals(6, getNumDocs(SOURCE_COLLECTION));
 
+    Thread.sleep(1000); // wait a bit for the replicator thread to be triggered
+
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.ERRORS);
     NamedList errors = (NamedList) ((NamedList) rsp.get(CdcrParams.ERRORS)).get(TARGET_COLLECTION);
     assertTrue(0 < (Long) errors.get(CdcrParams.CONSECUTIVE_ERRORS));
