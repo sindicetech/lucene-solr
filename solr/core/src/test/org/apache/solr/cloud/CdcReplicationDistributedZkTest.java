@@ -432,7 +432,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
 
-    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.QPS);
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.OPS);
     NamedList qps = (NamedList) ((NamedList) rsp.get(CdcrParams.OPERATIONS_PER_SECOND)).get(TARGET_COLLECTION);
     double qpsAll = (Double) qps.get(CdcrParams.COUNTER_ALL);
     double qpsAdds = (Double) qps.get(CdcrParams.COUNTER_ADDS);

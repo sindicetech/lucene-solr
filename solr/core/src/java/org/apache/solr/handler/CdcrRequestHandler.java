@@ -184,7 +184,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleQueuesAction(req, rsp);
         break;
       }
-      case QPS: {
+      case OPS: {
         this.handleOpsAction(req, rsp);
         break;
       }
