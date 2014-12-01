@@ -108,7 +108,7 @@ public class CdcrParams {
     DISABLEBUFFER,
     LASTPROCESSEDVERSION,
     QUEUES,
-    QPS,
+    OPS,
     ERRORS;
 
     public static CdcrAction get(String p) {
