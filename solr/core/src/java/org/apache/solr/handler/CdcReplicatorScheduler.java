@@ -48,8 +48,8 @@ class CdcReplicatorScheduler {
   private int timeSchedule = DEFAULT_TIME_SCHEDULE;
   private int batchSize = DEFAULT_BATCH_SIZE;
 
-  private static final int DEFAULT_POOL_SIZE = 8;
-  private static final int DEFAULT_TIME_SCHEDULE = 1000;
+  private static final int DEFAULT_POOL_SIZE = 2;
+  private static final int DEFAULT_TIME_SCHEDULE = 10;
   private static final int DEFAULT_BATCH_SIZE = 128;
 
   protected static Logger log = LoggerFactory.getLogger(CdcReplicatorScheduler.class);
