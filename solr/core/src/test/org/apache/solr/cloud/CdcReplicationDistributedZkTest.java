@@ -50,7 +50,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.doTestReplicationAfterLeaderChange();
     this.doTestUpdateLogSynchronisation();
     this.doTestBufferOnNonLeader();
-    this.doTestQps();
+    this.doTestOps();
     this.doTestBatchAddsWithDelete();
     this.doTestBatchBoundaries();
     this.doTestResilienceWithDeleteByQueryOnTarget();
@@ -133,7 +133,8 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     Thread.sleep(1000); // wait a bit for the replicator thread to be triggered
 
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.ERRORS);
-    NamedList errors = (NamedList) ((NamedList) rsp.get(CdcrParams.ERRORS)).get(TARGET_COLLECTION);
+    NamedList collections = (NamedList) ((NamedList) rsp.get(CdcrParams.ERRORS)).getVal(0);
+    NamedList errors = (NamedList) collections.get(TARGET_COLLECTION);
     assertTrue(0 < (Long) errors.get(CdcrParams.CONSECUTIVE_ERRORS));
     NamedList lastErrors = (NamedList) errors.get(CdcrParams.LAST);
     assertNotNull(lastErrors);
@@ -412,9 +413,9 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   }
 
   /**
-   * Check the qps statistics.
+   * Check the ops statistics.
    */
-  public void doTestQps() throws Exception {
+  public void doTestOps() throws Exception {
     this.clearSourceCollection();
     this.clearTargetCollection();
 
@@ -432,15 +433,16 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
 
-    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.QPS);
-    NamedList qps = (NamedList) ((NamedList) rsp.get(CdcrParams.OPERATIONS_PER_SECOND)).get(TARGET_COLLECTION);
-    double qpsAll = (Double) qps.get(CdcrParams.COUNTER_ALL);
-    double qpsAdds = (Double) qps.get(CdcrParams.COUNTER_ADDS);
-    assertTrue(qpsAll > 0);
-    assertEquals(qpsAll, qpsAdds, 0);
+    NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.OPS);
+    NamedList collections = (NamedList) ((NamedList) rsp.get(CdcrParams.OPERATIONS_PER_SECOND)).getVal(0);
+    NamedList ops = (NamedList) collections.get(TARGET_COLLECTION);
+    double opsAll = (Double) ops.get(CdcrParams.COUNTER_ALL);
+    double opsAdds = (Double) ops.get(CdcrParams.COUNTER_ADDS);
+    assertTrue(opsAll > 0);
+    assertEquals(opsAll, opsAdds, 0);
 
-    double qpsDeletes = (Double) qps.get(CdcrParams.COUNTER_DELETES);
-    assertEquals(0, qpsDeletes, 0);
+    double opsDeletes = (Double) ops.get(CdcrParams.COUNTER_DELETES);
+    assertEquals(0, opsDeletes, 0);
   }
 
   /**
@@ -612,7 +614,8 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   protected long getQueueSize(String collectionName, String shardId) throws Exception {
     NamedList rsp = this.invokeCdcrAction(shardToLeaderJetty.get(collectionName).get(shardId), CdcrParams.CdcrAction.QUEUES);
-    NamedList status = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).getVal(0);
+    NamedList host = (NamedList) ((NamedList) rsp.get(CdcrParams.QUEUES)).getVal(0);
+    NamedList status = (NamedList) host.get(TARGET_COLLECTION);
     return (Long) status.get(CdcrParams.QUEUE_SIZE);
   }
 
