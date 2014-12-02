@@ -18,6 +18,7 @@ package org.apache.solr.handler;
  */
 
 import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.core.SolrCore;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
@@ -43,14 +44,18 @@ class CdcrBufferStateManager extends CdcrStateManager {
 
   protected static Logger log = LoggerFactory.getLogger(CdcrBufferStateManager.class);
 
-  CdcrBufferStateManager(final SolrCore core) {
+  CdcrBufferStateManager(final SolrCore core, SolrParams bufferConfiguration) {
     this.core = core;
 
     // Ensure that the state znode exists
     this.createStateNode();
 
     // set default state
-    this.setState(DEFAULT_STATE);
+    if (bufferConfiguration != null) {
+      byte[] defaultState = bufferConfiguration.get(CdcrParams.DEFAULT_STATE_PARAM, DEFAULT_STATE.toLower()).getBytes();
+      state = CdcrParams.BufferState.get(defaultState);
+    }
+    this.setState(state); // notify observers
 
     // Startup and register the watcher at startup
     try {

@@ -50,6 +50,12 @@ public class CdcrParams {
   /** The definition of the {@link org.apache.solr.handler.CdcrUpdateLogSynchronizer} configuration **/
   public static final String UPDATE_LOG_SYNCHRONIZER_PARAM = "updateLogSynchronizer";
 
+  /** The definition of the {@link org.apache.solr.handler.CdcrBufferManager} configuration **/
+  public static final String BUFFER_PARAM = "buffer";
+
+  /** The default state at startup of the buffer **/
+  public static final String DEFAULT_STATE_PARAM = "defaultState";
+
   /** The latest update checkpoint on a target cluster **/
   public final static String CHECKPOINT = "checkpoint";
 
@@ -108,7 +114,7 @@ public class CdcrParams {
     DISABLEBUFFER,
     LASTPROCESSEDVERSION,
     QUEUES,
-    QPS,
+    OPS,
     ERRORS;
 
     public static CdcrAction get(String p) {

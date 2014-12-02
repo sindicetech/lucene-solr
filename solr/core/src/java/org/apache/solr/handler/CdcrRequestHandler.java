@@ -92,6 +92,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private SolrParams updateLogSynchronizerConfiguration;
   private SolrParams replicatorConfiguration;
+  private SolrParams bufferConfiguration;
   private Map<String,List<SolrParams>> replicasConfiguration;
 
   private CdcrProcessStateManager processStateManager;
@@ -116,6 +117,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       Object replicatorParam = args.get(CdcrParams.REPLICATOR_PARAM);
       if (replicatorParam != null && replicatorParam instanceof NamedList) {
         replicatorConfiguration = SolrParams.toSolrParams((NamedList) replicatorParam);
+      }
+
+      // Configuration of the Buffer
+      Object bufferParam = args.get(CdcrParams.BUFFER_PARAM);
+      if (bufferParam != null && bufferParam instanceof NamedList) {
+        bufferConfiguration = SolrParams.toSolrParams((NamedList) bufferParam);
       }
 
       // Configuration of the Replicas
@@ -183,7 +190,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleQueuesAction(req, rsp);
         break;
       }
-      case QPS: {
+      case OPS: {
         this.handleOpsAction(req, rsp);
         break;
       }
@@ -241,7 +248,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     // in zookeeper.
 
     // Initialise the buffer state manager
-    bufferStateManager = new CdcrBufferStateManager(core);
+    bufferStateManager = new CdcrBufferStateManager(core, bufferConfiguration);
     // Initialise the process state manager
     processStateManager = new CdcrProcessStateManager(core);
     // Initialise the leader state manager
@@ -498,7 +505,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   }
 
   private void handleQueuesAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList collections = new NamedList();
+    NamedList hosts = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
       NamedList queueStats = new NamedList();
@@ -515,10 +522,14 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         queueStats.add(CdcrParams.QUEUE_SIZE, logReader.getNumberOfRemainingRecords());
       }
       queueStats.add(CdcrParams.LAST_TIMESTAMP, state.getTimestampOfLastProcessedOperation());
-      collections.add(state.getZkHost()+"/"+state.getTargetCollection(), queueStats);
+
+      if (hosts.get(state.getZkHost()) == null) {
+        hosts.add(state.getZkHost(), new NamedList());
+      }
+      ((NamedList) hosts.get(state.getZkHost())).add(state.getTargetCollection(), queueStats);
     }
 
-    rsp.add(CdcrParams.QUEUES, collections);
+    rsp.add(CdcrParams.QUEUES, hosts);
     UpdateLog updateLog = core.getUpdateHandler().getUpdateLog();
     rsp.add(CdcrParams.TLOG_TOTAL_SIZE, updateLog.getTotalLogsSize());
     rsp.add(CdcrParams.TLOG_TOTAL_COUNT, updateLog.getTotalLogsNumber());
@@ -527,21 +538,25 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   }
 
   private void handleOpsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList collections = new NamedList();
+    NamedList hosts = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
       NamedList ops = new NamedList();
       ops.add(CdcrParams.COUNTER_ALL, state.getBenchmarkTimer().getOperationsPerSecond());
       ops.add(CdcrParams.COUNTER_ADDS, state.getBenchmarkTimer().getAddsPerSecond());
       ops.add(CdcrParams.COUNTER_DELETES, state.getBenchmarkTimer().getDeletesPerSecond());
-      collections.add(state.getTargetCollection(), ops);
+
+      if (hosts.get(state.getZkHost()) == null) {
+        hosts.add(state.getZkHost(), new NamedList());
+      }
+      ((NamedList) hosts.get(state.getZkHost())).add(state.getTargetCollection(), ops);
     }
 
-    rsp.add(CdcrParams.OPERATIONS_PER_SECOND, collections);
+    rsp.add(CdcrParams.OPERATIONS_PER_SECOND, hosts);
   }
 
   private void handleErrorsAction(SolrQueryRequest req, SolrQueryResponse rsp) {
-    NamedList collections = new NamedList();
+    NamedList hosts = new NamedList();
 
     for (CdcReplicatorState state : replicatorManager.getReplicatorStates()) {
       NamedList errors = new NamedList();
@@ -556,10 +571,13 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
       errors.add(CdcrParams.LAST, lastErrors);
 
-      collections.add(state.getTargetCollection(), errors);
+      if (hosts.get(state.getZkHost()) == null) {
+        hosts.add(state.getZkHost(), new NamedList());
+      }
+      ((NamedList) hosts.get(state.getZkHost())).add(state.getTargetCollection(), errors);
     }
 
-    rsp.add(CdcrParams.ERRORS, collections);
+    rsp.add(CdcrParams.ERRORS, hosts);
   }
 
   @Override
