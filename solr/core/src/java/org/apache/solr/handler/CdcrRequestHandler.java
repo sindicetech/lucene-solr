@@ -93,6 +93,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private SolrParams updateLogSynchronizerConfiguration;
   private SolrParams replicatorConfiguration;
+  private SolrParams bufferConfiguration;
   private Map<String,List<SolrParams>> replicasConfiguration;
 
   private CdcrProcessStateManager processStateManager;
@@ -117,6 +118,12 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       Object replicatorParam = args.get(CdcrParams.REPLICATOR_PARAM);
       if (replicatorParam != null && replicatorParam instanceof NamedList) {
         replicatorConfiguration = SolrParams.toSolrParams((NamedList) replicatorParam);
+      }
+
+      // Configuration of the Buffer
+      Object bufferParam = args.get(CdcrParams.BUFFER_PARAM);
+      if (bufferParam != null && bufferParam instanceof NamedList) {
+        bufferConfiguration = SolrParams.toSolrParams((NamedList) bufferParam);
       }
 
       // Configuration of the Replicas
@@ -242,7 +249,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     // in zookeeper.
 
     // Initialise the buffer state manager
-    bufferStateManager = new CdcrBufferStateManager(core);
+    bufferStateManager = new CdcrBufferStateManager(core, bufferConfiguration);
     // Initialise the process state manager
     processStateManager = new CdcrProcessStateManager(core);
     // Initialise the leader state manager
