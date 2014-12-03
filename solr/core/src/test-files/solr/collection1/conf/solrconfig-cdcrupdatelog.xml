@@ -46,32 +46,7 @@
 
   <requestHandler name="/replication" class="solr.ReplicationHandler" startup="lazy" />
 
-  <requestHandler name="/update" class="solr.UpdateRequestHandler">
-    <lst name="defaults">
-      <str name="update.chain">cdcr-processor-chain</str>
-    </lst>
-  </requestHandler>
-
-  <updateRequestProcessorChain name="cdcr-processor-chain">
-    <processor class="solr.CdcrUpdateProcessorFactory" />
-    <processor class="solr.RunUpdateProcessorFactory" />
-  </updateRequestProcessorChain>
-
-  <requestHandler name="/cdcr" class="solr.CdcrRequestHandler">
-    <lst name="replica">
-      <str name="zkHost">${zkHost}</str>
-      <str name="source">source_collection</str>
-      <str name="target">target_collection</str>
-    </lst>
-    <lst name="replicator">
-      <str name="threadPoolSize">8</str>
-      <str name="schedule">1000</str>
-      <str name="batchSize">64</str>
-    </lst>
-    <lst name="updateLogSynchronizer">
-      <str name="schedule">1000</str>
-    </lst>
-  </requestHandler>
+  <requestHandler name="/update" class="solr.UpdateRequestHandler" />
 
   <updateHandler class="solr.DirectUpdateHandler2">
     <updateLog class="solr.CdcrUpdateLog">

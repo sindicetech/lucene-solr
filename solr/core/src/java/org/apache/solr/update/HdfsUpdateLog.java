@@ -47,17 +47,13 @@ public class HdfsUpdateLog extends UpdateLog {
   private final Object fsLock = new Object();
   private FileSystem fs;
   private volatile Path tlogDir;
-  private final String confDir;
+  private String confDir;
 
   // used internally by tests to track total count of failed tran log loads in init
   public static AtomicLong INIT_FAILED_LOGS_COUNT = new AtomicLong();
 
   public HdfsUpdateLog() {
     this.confDir = null;
-  }
-
-  public HdfsUpdateLog(String confDir) {
-    this.confDir = confDir;
   }
 
   // HACK
@@ -103,7 +99,6 @@ public class HdfsUpdateLog extends UpdateLog {
 
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
-
     // ulogDir from CoreDescriptor overrides
     String ulogDir = core.getCoreDescriptor().getUlogDir();
 
