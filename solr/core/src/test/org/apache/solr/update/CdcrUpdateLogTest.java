@@ -50,7 +50,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
   public static void beforeClass() throws Exception {
     savedFactory = System.getProperty("solr.DirectoryFactory");
     System.setProperty("solr.directoryFactory", "org.apache.solr.core.MockFSDirectoryFactory");
-    initCore("solrconfig-tlog.xml","schema15.xml");
+    initCore("solrconfig-cdcrupdatelog.xml","schema15.xml");
   }
 
   @AfterClass
@@ -67,7 +67,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
   @Override
   public void clearIndex() {
     try {
-      deleteByQueryAndGetVersion("*:*", params("_version_", Long.toString(-Long.MAX_VALUE), DISTRIB_UPDATE_PARAM,FROM_LEADER));
+      deleteByQueryAndGetVersion("*:*", params("_version_", Long.toString(-Long.MAX_VALUE), DISTRIB_UPDATE_PARAM, FROM_LEADER));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
