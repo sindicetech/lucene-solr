@@ -21,8 +21,6 @@ package org.apache.solr.update;
 import java.io.IOException;
 import java.util.Vector;
 
-import org.apache.solr.core.DirectoryFactory;
-import org.apache.solr.core.HdfsDirectoryFactory;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrEventListener;
@@ -103,29 +101,8 @@ public abstract class UpdateHandler implements SolrInfoMBean {
 
 
     if (updateLog == null && ulogPluginInfo != null && ulogPluginInfo.isEnabled()) {
-      String dataDir = (String)ulogPluginInfo.initArgs.get("dir");
-
-      String ulogDir = core.getCoreDescriptor().getUlogDir();
-      if (ulogDir != null) {
-        dataDir = ulogDir;
-      }
-      if (dataDir == null || dataDir.length()==0) {
-        dataDir = core.getDataDir();
-      }
-
-      if (dataDir != null && dataDir.startsWith("hdfs:/")) {
-        DirectoryFactory dirFactory = core.getDirectoryFactory();
-        if (dirFactory instanceof HdfsDirectoryFactory) {
-          ulog = new HdfsUpdateLog(((HdfsDirectoryFactory)dirFactory).getConfDir());
-        } else {
-          ulog = new HdfsUpdateLog();
-        }
-
-      } else {
-        // nocommit
-        // ulog = new UpdateLog();
-        ulog = new CdcrUpdateLog();
-      }
+      String className = ulogPluginInfo.className == null ? UpdateLog.class.getName() : ulogPluginInfo.className;
+      ulog = core.getResourceLoader().newInstance(className, UpdateLog.class);
 
       if (!core.isReloaded() && !core.getDirectoryFactory().isPersistent()) {
         ulog.clearLog(core, ulogPluginInfo);
