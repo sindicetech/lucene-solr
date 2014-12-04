@@ -19,7 +19,6 @@ package org.apache.solr.update;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -408,7 +407,7 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     private boolean seekTLog(long targetVersion) {
       // if the target version is lower than the oldest known entry, we have probably a gap.
-      if (targetVersion < tlogs.peekLast().startVersion) {
+      if (targetVersion < ((CdcrTransactionLog) tlogs.peekLast()).startVersion) {
         return false;
       }
 
@@ -418,7 +417,7 @@ public class CdcrUpdateLog extends UpdateLog {
       // iterates over the queue and removes old tlogs
       TransactionLog last = null;
       while (tlogs.size() > 1) {
-        if (tlogs.peekLast().startVersion >= targetVersion) {
+        if (((CdcrTransactionLog) tlogs.peekLast()).startVersion >= targetVersion) {
           break;
         }
         last = tlogs.pollLast();
