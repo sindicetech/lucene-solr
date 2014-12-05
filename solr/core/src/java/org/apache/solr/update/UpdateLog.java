@@ -326,6 +326,10 @@ public class UpdateLog implements PluginInfoInitialized {
 
   }
 
+  /**
+   * Returns a new {@link org.apache.solr.update.TransactionLog}. Sub-classes can override this method to
+   * change the implementation of the transaction log.
+   */
   public TransactionLog newTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     return new TransactionLog(tlogFile, globalStrings, openExisting);
   }
@@ -411,7 +415,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.write(cmd, operationFlags);
       }
 
@@ -462,7 +466,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDelete(cmd, operationFlags);
       }
 
@@ -486,7 +490,7 @@ public class UpdateLog implements PluginInfoInitialized {
       long pos = -1;
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDeleteByQuery(cmd, operationFlags);
       }
 
@@ -846,10 +850,10 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  protected void ensureLog(long startVersion) {
+  protected void ensureLog() {
     if (tlog == null) {
       String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id);
-      tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
+      tlog = newTransactionLog(new File(tlogDir, newLogName), globalStrings, false);
     }
   }
 
