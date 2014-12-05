@@ -172,6 +172,18 @@ public class CdcrTransactionLog extends TransactionLog {
     }
   }
 
+  /**
+   * Modified to act like {@link #incref()} in order to be compatible with {@link UpdateLog#recoverFromLog()}.
+   * Otherwise, we would have to duplicate the method {@link UpdateLog#recoverFromLog()} in
+   * {@link org.apache.solr.update.CdcrUpdateLog} and change the call
+   * {@code if (!ll.try_incref()) continue; } to {@code incref(); }.
+   */
+  @Override
+  public boolean try_incref() {
+    this.incref();
+    return true;
+  }
+
   @Override
   protected void close() {
     try {
