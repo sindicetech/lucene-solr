@@ -222,7 +222,6 @@ public class CdcrUpdateLog extends UpdateLog {
     return bufferToggle == null ? false : true;
   }
 
-  @Override
   protected void ensureLog(long startVersion) {
     if (tlog == null) {
       long absoluteVersion = Math.abs(startVersion); // version is negative for deletes
