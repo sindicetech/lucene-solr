@@ -294,10 +294,10 @@ public class HdfsUpdateLog extends UpdateLog {
   }
 
   @Override
-  protected void ensureLog(long startVersion) {
+  protected void ensureLog() {
     if (tlog == null) {
       String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN,
-          TLOG_NAME, id, startVersion);
+          TLOG_NAME, id);
       tlog = new HdfsTransactionLog(fs, new Path(tlogDir, newLogName),
           globalStrings);
     }
