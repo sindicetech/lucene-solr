@@ -34,8 +34,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -43,6 +41,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.cloud.hdfs.HdfsBasicDistributedZk2Test;
 import org.apache.solr.cloud.hdfs.HdfsTestUtil;
 import org.apache.solr.common.util.IOUtils;
 import org.apache.solr.request.SolrQueryRequest;
@@ -57,7 +56,8 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.noggit.ObjectBuilder;
 
-import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
 
 @ThreadLeakScope(Scope.NONE) // hdfs mini cluster currently leaks threads
 // TODO: longer term this should be combined with TestRecovery somehow ??
@@ -89,7 +89,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
 
     System.setProperty("solr.ulog.dir", hdfsUri + "/solr/shard1");
 
-    initCore("solrconfig-tlog-hdfs.xml","schema15.xml");
+    initCore("solrconfig-tlog.xml","schema15.xml");
   }
 
   @AfterClass
@@ -1030,12 +1030,10 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
 
       // WARNING... assumes format of .00000n where n is less than 9
       long logNumber = Long.parseLong(fname.substring(fname.lastIndexOf(".") + 1));
-      long startVersion = Long.parseLong(fname.substring(fname.lastIndexOf(".") + 1));
       String fname2 = String.format(Locale.ROOT,
           UpdateLog.LOG_FILENAME_PATTERN,
           UpdateLog.TLOG_NAME,
-          logNumber + 1, startVersion);
-
+          logNumber + 1);
       dos = fs.create(new Path(logDir, fname2), (short)1);
       dos.write(content);
       dos.close();
