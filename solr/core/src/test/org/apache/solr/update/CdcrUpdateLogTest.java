@@ -67,7 +67,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
   @Override
   public void clearIndex() {
     try {
-      deleteByQueryAndGetVersion("*:*", params("_version_", Long.toString(-Long.MAX_VALUE), DISTRIB_UPDATE_PARAM, FROM_LEADER));
+      deleteByQueryAndGetVersion("*:*", params("_version_", Long.toString(-Long.MAX_VALUE), DISTRIB_UPDATE_PARAM,FROM_LEADER));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
