@@ -35,8 +35,6 @@ import org.apache.hadoop.ipc.RemoteException;
 import org.apache.lucene.util.BytesRef;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
-import org.apache.solr.core.DirectoryFactory;
-import org.apache.solr.core.HdfsDirectoryFactory;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.util.HdfsUtil;
@@ -47,10 +45,14 @@ public class HdfsUpdateLog extends UpdateLog {
 
   private volatile FileSystem fs;
   private volatile Path tlogDir;
-  private String confDir;
+  private final String confDir;
 
   public HdfsUpdateLog() {
     this.confDir = null;
+  }
+
+  public HdfsUpdateLog(String confDir) {
+    this.confDir = confDir;
   }
 
   // HACK
@@ -79,6 +81,7 @@ public class HdfsUpdateLog extends UpdateLog {
 
     defaultSyncLevel = SyncLevel.getSyncLevel((String) info.initArgs
         .get("syncLevel"));
+
   }
 
   private Configuration getConf() {
@@ -92,6 +95,7 @@ public class HdfsUpdateLog extends UpdateLog {
 
   @Override
   public void init(UpdateHandler uhandler, SolrCore core) {
+
     // ulogDir from CoreDescriptor overrides
     String ulogDir = core.getCoreDescriptor().getUlogDir();
 
@@ -108,11 +112,6 @@ public class HdfsUpdateLog extends UpdateLog {
       } catch (IOException e) {
         throw new SolrException(ErrorCode.SERVER_ERROR, e);
       }
-    }
-
-    if (dataDir.startsWith("hdfs:/")) {
-      DirectoryFactory dirFactory = core.getDirectoryFactory();
-      confDir = ((HdfsDirectoryFactory) dirFactory).getConfDir();
     }
 
     FileSystem oldFs = fs;
