@@ -57,7 +57,7 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
     this.path = path;
 
     // create states
-    replicatorStates = new ArrayList<>();
+    replicatorStates = new ArrayList();
     String myCollection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
     List<SolrParams> targets = replicasConfiguration.get(myCollection);
     if (targets != null) {
@@ -134,7 +134,11 @@ class CdcReplicatorManager implements CdcrStateManager.CdcrStateObserver {
         reader.seek(checkpoint);
         state.init(reader);
       }
-      catch (IOException | SolrServerException | SolrException e) {
+      catch (IOException e) {
+        log.warn("Unable to instantiate the log reader for target collection " + state.getTargetCollection(), e);
+      } catch (SolrServerException e) {
+        log.warn("Unable to instantiate the log reader for target collection " + state.getTargetCollection(), e);
+      } catch (SolrException e) {
         log.warn("Unable to instantiate the log reader for target collection " + state.getTargetCollection(), e);
       }
       catch (InterruptedException e) {

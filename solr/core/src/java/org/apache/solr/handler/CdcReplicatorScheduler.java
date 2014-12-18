@@ -56,7 +56,7 @@ class CdcReplicatorScheduler {
 
   CdcReplicatorScheduler(final CdcReplicatorManager replicatorStatesManager, final SolrParams replicatorConfiguration) {
     this.replicatorManager = replicatorStatesManager;
-    this.statesQueue = new ConcurrentLinkedQueue<>(replicatorManager.getReplicatorStates());
+    this.statesQueue = new ConcurrentLinkedQueue(replicatorManager.getReplicatorStates());
     if (replicatorConfiguration != null) {
       poolSize = replicatorConfiguration.getInt(CdcrParams.THREAD_POOL_SIZE_PARAM, DEFAULT_POOL_SIZE);
       timeSchedule = replicatorConfiguration.getInt(CdcrParams.SCHEDULE_PARAM, DEFAULT_TIME_SCHEDULE);

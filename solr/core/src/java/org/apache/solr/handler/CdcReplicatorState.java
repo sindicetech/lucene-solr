@@ -43,8 +43,8 @@ class CdcReplicatorState {
   private CdcrUpdateLog.CdcrLogReader logReader;
 
   private long consecutiveErrors = 0;
-  private final Map<ErrorType, Long> errorCounters = new HashMap<>();
-  private final FixedQueue<ErrorQueueEntry> errorsQueue = new FixedQueue<>(100); // keep the last 100 errors
+  private final Map<ErrorType, Long> errorCounters = new HashMap();
+  private final FixedQueue<ErrorQueueEntry> errorsQueue = new FixedQueue(100); // keep the last 100 errors
 
   private BenchmarkTimer benchmarkTimer;
 
@@ -127,7 +127,7 @@ class CdcReplicatorState {
    * Gets the last errors ordered by timestamp (most recent first)
    */
   List<String[]> getLastErrors() {
-    List<String[]> lastErrors = new ArrayList<>();
+    List<String[]> lastErrors = new ArrayList();
     synchronized(errorsQueue) {
       Iterator<ErrorQueueEntry> it = errorsQueue.iterator();
       while (it.hasNext()) {
@@ -170,7 +170,7 @@ class CdcReplicatorState {
 
     private long startTime;
     private long runTime = 0;
-    private Map<Integer, Long> opCounters = new HashMap<>();
+    private Map<Integer, Long> opCounters = new HashMap();
 
     /**
      * Start recording time.

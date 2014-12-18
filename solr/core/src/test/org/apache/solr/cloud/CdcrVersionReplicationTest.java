@@ -125,10 +125,10 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit(SOURCE_COLLECTION);
 
     QueryResponse rsp = solrServer.query(params("qt","/get", "ids", "doc4"));
-    long version = (long) rsp.getResults().get(0).get(vfield);
+    long version = (long) ((Long)(rsp.getResults().get(0)).get(vfield)).longValue();
 
     // update accepted and a new version number was generated
-    assertTrue(version > 1_000_000_000_000l);
+    assertTrue(version > 1000000000000l);
 
     log.info("### STARTING doCdcrTestDocVersions - Delete commands");
 
@@ -255,7 +255,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
   void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
 
     List<String> strs = StrUtils.splitSmart(expectedDocs, ",", true);
-    Map<String, Object> expectedIds = new HashMap<>();
+    Map<String, Object> expectedIds = new HashMap();
     for (int i=0; i<strs.size(); i+=2) {
       String id = strs.get(i);
       String vS = strs.get(i+1);
@@ -264,7 +264,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     }
 
     QueryResponse rsp = ss.query(params(queryParams));
-    Map<String, Object> obtainedIds = new HashMap<>();
+    Map<String, Object> obtainedIds = new HashMap();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.put((String) doc.get("id"), doc.get(vfield));
     }
@@ -274,7 +274,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
 
   void doRealTimeGet(String ids, String versions) throws Exception {
-    Map<String, Object> expectedIds = new HashMap<>();
+    Map<String, Object> expectedIds = new HashMap();
     List<String> strs = StrUtils.splitSmart(ids, ",", true);
     List<String> verS = StrUtils.splitSmart(versions, ",", true);
     for (int i=0; i<strs.size(); i++) {
@@ -284,7 +284,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     }
 
     QueryResponse rsp = solrServer.query(params("qt","/get", "ids",ids));
-    Map<String, Object> obtainedIds = new HashMap<>();
+    Map<String, Object> obtainedIds = new HashMap();
     for (SolrDocument doc : rsp.getResults()) {
       obtainedIds.put((String) doc.get("id"), doc.get(vfield));
     }

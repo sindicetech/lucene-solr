@@ -144,7 +144,10 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
           log.debug("My leader {} says its last processed _version_ number is: {}. I am {}", new Object[] {leaderUrl, lastVersion,
               core.getCoreDescriptor().getCloudDescriptor().getCoreNodeName()});
         }
-        catch(IOException | SolrServerException e) {
+        catch(IOException e) {
+          log.warn("Couldn't get last processed version from leader {}: {}", leaderUrl, e.getMessage());
+          return;
+        } catch (SolrServerException e) {
           log.warn("Couldn't get last processed version from leader {}: {}", leaderUrl, e.getMessage());
           return;
         }
@@ -170,10 +173,9 @@ class CdcrUpdateLogSynchronizer implements CdcrStateManager.CdcrStateObserver {
         } catch (IOException e) {
           log.warn("Couldn't advance replica buffering tlog reader to {} (to remove old tlogs): {}", lastVersion, e.getMessage());
         }
-      }
-      catch (Throwable e) {
+      } catch (Throwable e) {
         log.warn("Caught unexpected exception", e);
-        throw e;
+        throw new RuntimeException(e);
       }
     }
   }

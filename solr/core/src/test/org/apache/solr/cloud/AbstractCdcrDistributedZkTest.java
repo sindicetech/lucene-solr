@@ -266,7 +266,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * A mapping between collection and node names. This is used when creating the collection in
    * {@link #createCollection(String)}.
    */
-  private Map<String, List<String>> collectionToNodeNames = new HashMap<>();
+  private Map<String, List<String>> collectionToNodeNames = new HashMap();
 
   /**
    * Starts the servers, saves and associates the node names to the source collection,
@@ -323,7 +323,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     CloudSolrServer client = createCloudClient(null);
     try {
       // Create the target collection
-      Map<String, List<Integer>> collectionInfos = new HashMap<>();
+      Map<String, List<Integer>> collectionInfos = new HashMap();
       int maxShardsPerNode = 1;
 
       StringBuilder sb = new StringBuilder();
@@ -376,7 +376,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       params.set("collection.configName", confSetName);
     }
 
-    List<Integer> list = new ArrayList<>();
+    List<Integer> list = new ArrayList();
     list.add(numShards);
     list.add(replicationFactor);
     if (collectionInfos != null) {
@@ -480,7 +480,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     }
   }
 
-  private List<JettySolrRunner> jettys = new ArrayList<>();
+  private List<JettySolrRunner> jettys = new ArrayList();
 
   /**
    * Creates and starts a given number of servers.
@@ -507,7 +507,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     }
 
     // store the node names
-    List<String> nodeNames = new ArrayList<>();
+    List<String> nodeNames = new ArrayList();
     for (Slice slice : zkStateReader.getClusterState().getCollection(temporaryCollection).getSlices()) {
       for (Replica replica : slice.getReplicas()) {
         nodeNames.add(replica.getNodeName());
@@ -542,25 +542,25 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   /**
    * Mapping from collection to jettys
    */
-  protected Map<String, List<CloudJettyRunner>> cloudJettys = new HashMap<>();
+  protected Map<String, List<CloudJettyRunner>> cloudJettys = new HashMap();
 
   /**
    * Mapping from collection/shard to jettys
    */
-  protected Map<String, Map<String, List<CloudJettyRunner>>> shardToJetty = new HashMap<>();
+  protected Map<String, Map<String, List<CloudJettyRunner>>> shardToJetty = new HashMap();
 
   /**
    * Mapping from collection/shard leader to jettys
    */
-  protected Map<String, Map<String, CloudJettyRunner>> shardToLeaderJetty = new HashMap<>();
+  protected Map<String, Map<String, CloudJettyRunner>> shardToLeaderJetty = new HashMap();
 
   /**
    * Updates the mappings between the jetty's instances and the zookeeper cluster state.
    */
   protected void updateMappingsFromZk(String collection) throws Exception {
-    List<CloudJettyRunner> cloudJettys = new ArrayList<>();
-    Map<String,List<CloudJettyRunner>> shardToJetty = new HashMap<>();
-    Map<String,CloudJettyRunner> shardToLeaderJetty = new HashMap<>();
+    List<CloudJettyRunner> cloudJettys = new ArrayList();
+    Map<String,List<CloudJettyRunner>> shardToJetty = new HashMap();
+    Map<String,CloudJettyRunner> shardToLeaderJetty = new HashMap();
 
     CloudSolrServer cloudClient = this.createCloudClient(null);
     try {

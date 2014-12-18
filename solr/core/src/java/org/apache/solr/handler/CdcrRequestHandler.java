@@ -127,7 +127,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       }
 
       // Configuration of the Replicas
-      replicasConfiguration = new HashMap<>();
+      replicasConfiguration = new HashMap();
       List replicas = args.getAll(CdcrParams.REPLICA_PARAM);
       for (Object replica : replicas) {
         if (replicas != null && replica instanceof NamedList) {
@@ -372,7 +372,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     long checkpoint = Long.MAX_VALUE;
     try {
-      List<Callable<Long>> callables = new ArrayList<>();
+      List<Callable<Long>> callables = new ArrayList();
       for (Slice slice : slices) {
         ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
         ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);

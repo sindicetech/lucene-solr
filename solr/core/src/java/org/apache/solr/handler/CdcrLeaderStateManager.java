@@ -63,7 +63,9 @@ class CdcrLeaderStateManager extends CdcrStateManager {
         this.checkIfIAmLeader();
       }
     }
-    catch (KeeperException | InterruptedException e) {
+    catch (KeeperException e) {
+      log.warn("Failed fetching initial leader state and setting watch", e);
+    } catch (InterruptedException e) {
       log.warn("Failed fetching initial leader state and setting watch", e);
     }
   }
@@ -149,7 +151,9 @@ class CdcrLeaderStateManager extends CdcrStateManager {
           CdcrLeaderStateManager.this.checkIfIAmLeader();
         }
       }
-      catch (KeeperException | InterruptedException e) {
+      catch (KeeperException e) {
+        log.warn("Failed updating leader state and setting watch @ " + collectionName + ":" + shard, e);
+      } catch (InterruptedException e) {
         log.warn("Failed updating leader state and setting watch @ " + collectionName + ":" + shard, e);
       }
     }

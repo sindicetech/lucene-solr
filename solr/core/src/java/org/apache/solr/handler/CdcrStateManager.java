@@ -26,7 +26,7 @@ import java.util.List;
  */
 abstract class CdcrStateManager {
 
-  private List<CdcrStateObserver> observers = new ArrayList<>();
+  private List<CdcrStateObserver> observers = new ArrayList();
 
   void register(CdcrStateObserver observer) {
     this.observers.add(observer);

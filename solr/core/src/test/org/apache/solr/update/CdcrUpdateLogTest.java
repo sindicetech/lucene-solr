@@ -135,7 +135,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
     CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader(); // test reader on empty updates log
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -191,7 +191,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     CdcrUpdateLog.CdcrLogReader reader2 = ((CdcrUpdateLog) ulog).newLogReader();
     CdcrUpdateLog.CdcrLogReader reader3 = ((CdcrUpdateLog) ulog).newLogReader();
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -246,7 +246,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     UpdateLog ulog = h.getCore().getUpdateHandler().getUpdateLog();
     CdcrUpdateLog.CdcrLogReader reader = ((CdcrUpdateLog) ulog).newLogReader();
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -280,7 +280,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     int start = 0;
     int maxReq = 50;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertJQ(req("qt","/get", "getVersions",""+maxReq), "/versions==" + versions.subList(0,Math.min(maxReq,start)));
     assertU(commit());
@@ -347,7 +347,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -426,7 +426,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
       }
     };
 
-    Deque<Long> versions = new ArrayDeque<>();
+    Deque<Long> versions = new ArrayDeque();
     versions.addFirst(addAndGetVersion(sdoc("id", "A11"), null));
     versions.addFirst(addAndGetVersion(sdoc("id", "A12"), null));
     versions.addFirst(addAndGetVersion(sdoc("id", "A13"), null));
@@ -474,7 +474,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -523,7 +523,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -594,7 +594,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     assertU(commit());
 
@@ -633,7 +633,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
       int start = 0;
 
-      LinkedList<Long> versions = new LinkedList<>();
+      LinkedList<Long> versions = new LinkedList();
       addDocs(10, start, versions);
       start += 10;
       assertU(commit());
@@ -686,7 +686,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
     int start = 0;
 
     // Start to index some documents to instantiate the new tlog
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
 
     // Create the reader after the instantiation of the new tlog
@@ -719,7 +719,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
 
     int start = 0;
 
-    LinkedList<Long> versions = new LinkedList<>();
+    LinkedList<Long> versions = new LinkedList();
     addDocs(10, start, versions); start+=10;
     deleteByQuery("*:*");
     assertU(commit());

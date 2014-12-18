@@ -63,7 +63,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
   public void doTestDeleteCreateSourceCollection() throws Exception {
     log.info("Indexing documents");
 
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (int i = 0; i < 10; i++) {
       docs.add(getDoc(id, Integer.toString(i)));
     }
@@ -146,7 +146,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.clearTargetCollection(); // this might log a warning to indicate he was not able to delete the collection (collection was deleted in the previous test)
 
     int start = 0;
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (; start < 10; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
@@ -203,7 +203,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     log.info("Indexing 10 documents");
 
     int start = 0;
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (; start < 10; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
@@ -267,7 +267,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     log.info("Indexing 10 documents");
 
     int start = 0;
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (; start < 10; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
@@ -420,7 +420,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     this.clearTargetCollection();
 
     // Index documents
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (int i = 0; i < 200; i++) {
       docs.add(getDoc(id, Integer.toString(i)));
     }
@@ -454,33 +454,33 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     // Index 50 documents
     int start = 0;
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (; start < 50; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
     index(SOURCE_COLLECTION, docs);
 
     // Delete 10 documents: 10-19
-    List<String> ids = new ArrayList<>();
+    List<String> ids = new ArrayList();
     for (int id = 10; id < 20; id++) {
       ids.add(Integer.toString(id));
     }
     deleteById(SOURCE_COLLECTION, ids);
 
     // Index 10 documents
-    docs = new ArrayList<>();
+    docs = new ArrayList();
     for (; start < 60; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
     index(SOURCE_COLLECTION, docs);
 
     // Delete 1 document: 50
-    ids = new ArrayList<>();
+    ids = new ArrayList();
     ids.add(Integer.toString(50));
     deleteById(SOURCE_COLLECTION, ids);
 
     // Index 10 documents
-    docs = new ArrayList<>();
+    docs = new ArrayList();
     for (; start < 70; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
@@ -509,7 +509,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     log.info("Indexing documents");
 
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (int i = 0; i < 128; i++) { // should create two full batches (default batch = 64)
       docs.add(getDoc(id, Integer.toString(i)));
     }
@@ -534,7 +534,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
     // Index 50 documents
     int start = 0;
-    List<SolrInputDocument> docs = new ArrayList<>();
+    List<SolrInputDocument> docs = new ArrayList();
     for (; start < 50; start++) {
       docs.add(getDoc(id, Integer.toString(start)));
     }
@@ -627,7 +627,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     Map<String, List<CollectionInfo.CoreInfo>> shardToCoresMap = info.getShardToCoresMap();
 
     int leaderLogs = 0;
-    ArrayList<Integer> replicasLogs = new ArrayList<>(Collections.nCopies(replicationFactor - 1, 0));
+    ArrayList<Integer> replicasLogs = new ArrayList(Collections.nCopies(replicationFactor - 1, 0));
 
     for (String shard : shardToCoresMap.keySet()) {
       leaderLogs += numberOfFiles(info.getLeader(shard).ulogDir);
@@ -677,7 +677,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
 
   private class CollectionInfo {
 
-    List<CoreInfo> coreInfos = new ArrayList<>();
+    List<CoreInfo> coreInfos = new ArrayList();
 
     String collection;
 
@@ -689,11 +689,11 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
      * @return Returns a map shard -> list of cores
      */
     Map<String, List<CoreInfo>> getShardToCoresMap() {
-      Map<String, List<CoreInfo>> map = new HashMap<>();
+      Map<String, List<CoreInfo>> map = new HashMap();
       for (CoreInfo info : coreInfos) {
         List<CoreInfo> list = map.get(info.shard);
         if (list == null) {
-          list = new ArrayList<>();
+          list = new ArrayList();
           map.put(info.shard, list);
         }
         list.add(info);

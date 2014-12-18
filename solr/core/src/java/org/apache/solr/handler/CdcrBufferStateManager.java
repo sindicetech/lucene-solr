@@ -63,7 +63,9 @@ class CdcrBufferStateManager extends CdcrStateManager {
       watcher = this.initWatcher(zkClient);
       this.setState(CdcrParams.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
     }
-    catch (KeeperException | InterruptedException e) {
+    catch (KeeperException e) {
+      log.warn("Failed fetching initial state", e);
+    } catch (InterruptedException e) {
       log.warn("Failed fetching initial state", e);
     }
   }
@@ -107,7 +109,9 @@ class CdcrBufferStateManager extends CdcrStateManager {
       // check if nobody changed it in the meantime, and set a new watcher
       this.setState(CdcrParams.BufferState.get(zkClient.getData(this.getZnodePath(), watcher, null, true)));
     }
-    catch (KeeperException | InterruptedException e) {
+    catch (KeeperException e) {
+      log.warn("Failed synchronising new state", e);
+    } catch ( InterruptedException e) {
       log.warn("Failed synchronising new state", e);
     }
   }
@@ -123,7 +127,9 @@ class CdcrBufferStateManager extends CdcrStateManager {
         log.info("Created znode {}", this.getZnodePath());
       }
     }
-    catch (KeeperException | InterruptedException e) {
+    catch (KeeperException e) {
+      log.warn("Failed to create CDCR buffer state node", e);
+    } catch (InterruptedException e) {
       log.warn("Failed to create CDCR buffer state node", e);
     }
   }
@@ -161,7 +167,9 @@ class CdcrBufferStateManager extends CdcrStateManager {
         log.info("Received new CDCR buffer state from watcher: {} @ {}:{}", new Object[] {state, collectionName, shard});
         CdcrBufferStateManager.this.setState(state);
       }
-      catch (KeeperException | InterruptedException e) {
+      catch (KeeperException e) {
+        log.warn("Failed synchronising new state @ " + collectionName + ":" + shard, e);
+      } catch (InterruptedException e) {
         log.warn("Failed synchronising new state @ " + collectionName + ":" + shard, e);
       }
     }

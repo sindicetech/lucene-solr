@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
  */
 public class CdcrUpdateLog extends UpdateLog {
 
-  protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new ConcurrentHashMap<>();
+  protected final Map<CdcrLogReader, CdcrLogPointer> logPointers = new ConcurrentHashMap();
 
   /**
    * A reader that will be used as toggle to turn on/off the buffering of tlogs
@@ -182,7 +182,8 @@ public class CdcrUpdateLog extends UpdateLog {
 
   @Override
   public void close(boolean committed, boolean deleteOnClose) {
-    for (CdcrLogReader reader : new ArrayList<>(logPointers.keySet())) {
+    List<CdcrLogReader> logReaders = new ArrayList(logPointers.keySet());
+    for (CdcrLogReader reader : logReaders) {
       reader.close();
     }
     super.close(committed, deleteOnClose);
@@ -241,7 +242,7 @@ public class CdcrUpdateLog extends UpdateLog {
     private long numRecordsReadInCurrentTlog = 0;
 
     private CdcrLogReader(List<TransactionLog> tlogs, TransactionLog tlog) {
-      this.tlogs = new LinkedBlockingDeque<>();
+      this.tlogs = new LinkedBlockingDeque();
       this.tlogs.addAll(tlogs);
       if (tlog != null) this.tlogs.push(tlog); // ensure that the tlog being written is pushed
 
