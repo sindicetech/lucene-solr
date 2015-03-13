@@ -94,7 +94,7 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  */
 public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTestBase {
 
-  protected int sliceCount = 2;
+  protected int sliceCount = 1;
   protected int replicationFactor = 2;
   protected boolean createTargetCollection = true;
 
