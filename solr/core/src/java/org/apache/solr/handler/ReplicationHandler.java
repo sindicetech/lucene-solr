@@ -75,8 +75,8 @@ import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.BinaryQueryResponseWriter;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.SolrIndexWriter;
-import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.NumberUtils;
 import org.apache.solr.util.PropertiesInputStream;
 import org.apache.solr.util.RefCounted;
@@ -454,14 +454,53 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     }
     rsp.add(CMD_GET_FILE_LIST, result);
 
+    // if we received this CDCR parameter, we need to fetch the tlog files
+    Long lastProcessedVersion = solrParams.getLong(CdcrParams.LAST_PROCESSED_VERSION);
+    if (lastProcessedVersion != null) {
+      fetchTlogFileList(lastProcessedVersion, rsp);
+    }
+
+    if (confFileNameAlias.size() < 1 || core.getCoreDescriptor().getCoreContainer().isZooKeeperAware())
+      return;
+    LOG.debug("Adding config files to list: " + includeConfFiles);
+    //if configuration files need to be included get their details
+    rsp.add(CONF_FILES, getConfFileInfoFromCache(confFileNameAlias, confFileInfoCache));
+  }
+
+  private void fetchTlogFileList(Long lastProcessedVersion, SolrQueryResponse rsp) {
     LOG.info("Adding tlog files to list");
-    UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
+
+    CdcrUpdateLog ulog = (CdcrUpdateLog) core.getUpdateHandler().getUpdateLog();
+    CdcrUpdateLog.CdcrLogReader logReader = ulog.newLogReader();
+    Long logId = null;
+    try {
+      if (logReader.seek(lastProcessedVersion)) {
+        logId = logReader.getCurrentLogId();
+      }
+    }
+    catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "Error while fetching the tlog file list", e);
+    }
+    catch (IOException e) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+          "Error while fetching the tlog file list", e);
+    }
+    finally {
+      logReader.close();
+    }
+
     LOG.info(ulog.getLogDir());
     String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
     LOG.info(Arrays.toString(logList));
 
     List<Map<String, Object>> tlogFiles = new ArrayList<>();
     for (String fileName : logList) {
+      if (ulog.getLogId(fileName) < logId) {
+        // skip tlog files until we reach our target
+        continue;
+      }
       Map<String,Object> fileMeta = new HashMap<>();
       fileMeta.put(NAME, fileName);
       fileMeta.put(SIZE, new File(ulog.getLogDir(), fileName).length());
@@ -469,12 +508,6 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
     rsp.add("tlogFiles", tlogFiles);
-
-    if (confFileNameAlias.size() < 1 || core.getCoreDescriptor().getCoreContainer().isZooKeeperAware())
-      return;
-    LOG.debug("Adding config files to list: " + includeConfFiles);
-    //if configuration files need to be included get their details
-    rsp.add(CONF_FILES, getConfFileInfoFromCache(confFileNameAlias, confFileInfoCache));
   }
 
   /**

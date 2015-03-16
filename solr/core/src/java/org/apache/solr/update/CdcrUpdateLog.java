@@ -141,7 +141,11 @@ public class CdcrUpdateLog extends UpdateLog {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
     String last = tlogFiles[tlogFiles.length-1];
-    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
+    return this.getLogId(last);
+  }
+
+  public long getLogId(String tlogFile) {
+    return Long.parseLong(tlogFile.substring(TLOG_NAME.length() + 1, tlogFile.lastIndexOf('.')));
   }
 
   @Override
@@ -553,6 +557,18 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     public long getLastVersion() {
       return lastVersion == 0 ? nextToLastVersion : lastVersion;
+    }
+
+    /**
+     * Returns the id of the tlog that is currently being read.
+     */
+    public Long getCurrentLogId() {
+      if (currentTlog == null) {
+        return null;
+      }
+      else {
+        return currentTlog.id;
+      }
     }
   }
 
