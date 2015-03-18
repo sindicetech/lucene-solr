@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -45,8 +46,8 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.MockDirectoryWrapper;
 import org.apache.lucene.store.MockDirectoryWrapper.Throttling;
+import org.apache.lucene.store.MockDirectoryWrapper;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
@@ -120,6 +121,9 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
 
       IndexWriterConfig iwc = getIndexWriterConfig();
       iwc.setMergePolicy(new ReindexingMergePolicy(iwc.getMergePolicy()));
+      if (DEBUG) {
+        System.out.println("TEST: use IWC:\n" + iwc);
+      }
       w = new IndexWriter(indexDir, iwc);
 
       w.getConfig().setMergedSegmentWarmer(new IndexWriter.IndexReaderWarmer() {
@@ -187,7 +191,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     }
 
     private class ParallelLeafDirectoryReader extends FilterDirectoryReader {
-      public ParallelLeafDirectoryReader(DirectoryReader in) {
+      public ParallelLeafDirectoryReader(DirectoryReader in) throws IOException {
         super(in, new FilterDirectoryReader.SubReaderWrapper() {
             final long currentSchemaGen = getCurrentSchemaGen();
             @Override
@@ -203,7 +207,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
       }
 
       @Override
-      protected DirectoryReader doWrapDirectoryReader(DirectoryReader in) {
+      protected DirectoryReader doWrapDirectoryReader(DirectoryReader in) throws IOException {
         return new ParallelLeafDirectoryReader(in);
       }
 
@@ -238,7 +242,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     @Override
     public void close() throws IOException {
       w.close();
-      if (DEBUG) System.out.println("TEST: after close writer index=" + SegmentInfos.readLatestCommit(indexDir).toString(indexDir));
+      if (DEBUG) System.out.println("TEST: after close writer index=" + SegmentInfos.readLatestCommit(indexDir));
 
       /*
       DirectoryReader r = mgr.acquire();
@@ -268,15 +272,13 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
       }
 
       boolean fail = false;
-      try (DirectoryStream<Path> stream = Files.newDirectoryStream(segsPath)) {
-          for (Path path : stream) {
-            SegmentIDAndGen segIDGen = new SegmentIDAndGen(path.getFileName().toString());
-            if (liveIDs.contains(segIDGen.segID) == false) {
-              if (DEBUG) System.out.println("TEST: fail seg=" + path.getFileName() + " is not live but still has a parallel index");
-              fail = true;
-            }
-          }
+      for(Path path : segSubDirs(segsPath)) {
+        SegmentIDAndGen segIDGen = new SegmentIDAndGen(path.getFileName().toString());
+        if (liveIDs.contains(segIDGen.segID) == false) {
+          if (DEBUG) System.out.println("TEST: fail seg=" + path.getFileName() + " is not live but still has a parallel index");
+          fail = true;
         }
+      }
       assertFalse(fail);
     }
 
@@ -483,24 +485,22 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
       long currentSchemaGen = getCurrentSchemaGen();
 
       if (Files.exists(segsPath)) {
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(segsPath)) {
-            for (Path path : stream) {
-              if (Files.isDirectory(path)) {
-                SegmentIDAndGen segIDGen = new SegmentIDAndGen(path.getFileName().toString());
-                assert segIDGen.schemaGen <= currentSchemaGen;
-                if (liveIDs.contains(segIDGen.segID) == false && (closedSegments.contains(segIDGen) || (removeOldGens && segIDGen.schemaGen < currentSchemaGen))) {
-                  if (DEBUG) System.out.println("TEST: remove " + segIDGen);
-                  try {
-                    IOUtils.rm(path);
-                    closedSegments.remove(segIDGen);
-                  } catch (IOException ioe) {
-                    // OK, we'll retry later
-                    if (DEBUG) System.out.println("TEST: ignore ioe during delete " + path + ":" + ioe);
-                  }
-                }
+        for (Path path : segSubDirs(segsPath)) {
+          if (Files.isDirectory(path)) {
+            SegmentIDAndGen segIDGen = new SegmentIDAndGen(path.getFileName().toString());
+            assert segIDGen.schemaGen <= currentSchemaGen;
+            if (liveIDs.contains(segIDGen.segID) == false && (closedSegments.contains(segIDGen) || (removeOldGens && segIDGen.schemaGen < currentSchemaGen))) {
+              if (DEBUG) System.out.println("TEST: remove " + segIDGen);
+              try {
+                IOUtils.rm(path);
+                closedSegments.remove(segIDGen);
+              } catch (IOException ioe) {
+                // OK, we'll retry later
+                if (DEBUG) System.out.println("TEST: ignore ioe during delete " + path + ":" + ioe);
               }
             }
           }
+        }
       }
     }
 
@@ -525,15 +525,20 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
         }
 
         @Override
-        public List<LeafReader> getMergeReaders() throws IOException {
+        public List<CodecReader> getMergeReaders() throws IOException {
           if (parallelReaders == null) {
             parallelReaders = new ArrayList<>();
-            for (LeafReader reader : super.getMergeReaders()) {
-              parallelReaders.add(getCurrentReader(reader, schemaGen));
+            for (CodecReader reader : super.getMergeReaders()) {
+              parallelReaders.add(getCurrentReader((SegmentReader)reader, schemaGen));
             }
           }
 
-          return parallelReaders;
+          // TODO: fix ParallelLeafReader, if this is a good use case
+          List<CodecReader> mergeReaders = new ArrayList<>();
+          for (LeafReader reader : parallelReaders) {
+            mergeReaders.add(SlowCodecReaderWrapper.wrap(reader));
+          }
+          return mergeReaders;
         }
 
         @Override
@@ -644,7 +649,12 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     return new ReindexingReader(root) {
       @Override
       protected IndexWriterConfig getIndexWriterConfig() throws IOException {
-        return newIndexWriterConfig();
+        IndexWriterConfig iwc = newIndexWriterConfig();
+        TieredMergePolicy tmp = new TieredMergePolicy();
+        // We write tiny docs, so we need tiny floor to avoid O(N^2) merging:
+        tmp.setFloorSegmentMB(.01);
+        iwc.setMergePolicy(tmp);
+        return iwc;
       }
 
       @Override
@@ -694,7 +704,12 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     return new ReindexingReader(root) {
       @Override
       protected IndexWriterConfig getIndexWriterConfig() throws IOException {
-        return newIndexWriterConfig();
+        IndexWriterConfig iwc = newIndexWriterConfig();
+        TieredMergePolicy tmp = new TieredMergePolicy();
+        // We write tiny docs, so we need tiny floor to avoid O(N^2) merging:
+        tmp.setFloorSegmentMB(.01);
+        iwc.setMergePolicy(tmp);
+        return iwc;
       }
 
       @Override
@@ -780,7 +795,16 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     return new ReindexingReader(root) {
       @Override
       protected IndexWriterConfig getIndexWriterConfig() throws IOException {
-        return newIndexWriterConfig();
+        IndexWriterConfig iwc = newIndexWriterConfig();
+        TieredMergePolicy tmp = new TieredMergePolicy();
+        // We write tiny docs, so we need tiny floor to avoid O(N^2) merging:
+        tmp.setFloorSegmentMB(.01);
+        iwc.setMergePolicy(tmp);
+        if (TEST_NIGHTLY) {
+          // during nightly tests, we might use too many files if we arent careful
+          iwc.setUseCompoundFile(true);
+        }
+        return iwc;
       }
 
       @Override
@@ -938,7 +962,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 2000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
     int maxID = 0;
     Path root = createTempDir();
     int refreshEveryNumDocs = 100;
@@ -1023,7 +1047,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 2000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
     int maxID = 0;
     Path root = createTempDir();
     int refreshEveryNumDocs = 100;
@@ -1199,9 +1223,10 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(3000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
     int maxID = 0;
     int refreshEveryNumDocs = 100;
+    int commitCloseNumDocs = 1000;
     for(int i=0;i<numDocs;i++) {
       if (reindexer == null) {
         reindexer = getReindexer(root);
@@ -1248,16 +1273,18 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
         reindexer.w.deleteDocuments(new Term("id", ""+random().nextInt(i)));
       }
 
-      if (random().nextInt(1000) == 17) {
+      if (random().nextInt(commitCloseNumDocs) == 17) {
         if (DEBUG) System.out.println("TEST: commit @ " + (i+1) + " docs");
         reindexer.commit();
+        commitCloseNumDocs = (int) (1.25 * commitCloseNumDocs);
       }
 
       // Sometimes close & reopen writer/manager, to confirm the parallel segments persist:
-      if (random().nextInt(1000) == 17) {
+      if (random().nextInt(commitCloseNumDocs) == 17) {
         if (DEBUG) System.out.println("TEST: close writer @ " + (i+1) + " docs");
         reindexer.close();
         reindexer = null;
+        commitCloseNumDocs = (int) (1.25 * commitCloseNumDocs);
       }
     }
     if (reindexer != null) {
@@ -1333,6 +1360,23 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
         assertEquals(value, numbers.get(scoreDoc.doc));
       }
     }
+  }
+
+  // TODO: maybe the leading id could be further restricted?  It's from StringHelper.idToString:
+  static final Pattern SEG_GEN_SUB_DIR_PATTERN = Pattern.compile("^[a-z0-9]+_([0-9]+)$");
+
+  private static List<Path> segSubDirs(Path segsPath) throws IOException {
+    List<Path> result = new ArrayList<>();
+    try (DirectoryStream<Path> stream = Files.newDirectoryStream(segsPath)) {
+      for (Path path : stream) {
+        // Must be form <segIDString>_<longGen>
+        if (Files.isDirectory(path) && SEG_GEN_SUB_DIR_PATTERN.matcher(path.getFileName().toString()).matches()) {
+          result.add(path);
+        }
+      }
+    }
+
+    return result;
   }
 
   // TODO: test exceptions

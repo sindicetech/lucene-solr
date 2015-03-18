@@ -95,7 +95,7 @@ def getHREFs(urlString):
 
   links = []
   try:
-    html = urllib.request.urlopen(urlString).read().decode('UTF-8')
+    html = load(urlString)
   except:
     print('\nFAILED to open url %s' % urlString)
     traceback.print_exc()
@@ -114,32 +114,44 @@ def download(name, urlString, tmpDir, quiet=False):
       print('    already done: %.1f MB' % (os.path.getsize(fileName)/1024./1024.))
     return
   try:
-    fIn = urllib.request.urlopen(urlString)
-    fOut = open(fileName, 'wb')
-    success = False
-    try:
-      while True:
-        s = fIn.read(65536)
-        if s == b'':
-          break
-        fOut.write(s)
-      fOut.close()
-      fIn.close()
-      success = True
-    finally:
-      fIn.close()
-      fOut.close()
-      if not success:
-        os.remove(fileName)
-    if not quiet and fileName.find('.asc') == -1:
-      t = time.time()-startTime
-      sizeMB = os.path.getsize(fileName)/1024./1024.
-      print('    %.1f MB in %.2f sec (%.1f MB/sec)' % (sizeMB, t, sizeMB/t))
+    attemptDownload(urlString, fileName)
   except Exception as e:
-    raise RuntimeError('failed to download url "%s"' % urlString) from e
+    print('Retrying download of url %s after exception: %s' % (urlString, e))
+    try:
+      attemptDownload(urlString, fileName)
+    except Exception as e:
+      raise RuntimeError('failed to download url "%s"' % urlString) from e
+  if not quiet and fileName.find('.asc') == -1:
+    t = time.time()-startTime
+    sizeMB = os.path.getsize(fileName)/1024./1024.
+    print('    %.1f MB in %.2f sec (%.1f MB/sec)' % (sizeMB, t, sizeMB/t))
   
+def attemptDownload(urlString, fileName):
+  fIn = urllib.request.urlopen(urlString)
+  fOut = open(fileName, 'wb')
+  success = False
+  try:
+    while True:
+      s = fIn.read(65536)
+      if s == b'':
+        break
+      fOut.write(s)
+    fOut.close()
+    fIn.close()
+    success = True
+  finally:
+    fIn.close()
+    fOut.close()
+    if not success:
+      os.remove(fileName)
+
 def load(urlString):
-  return urllib.request.urlopen(urlString).read().decode('utf-8')
+  try:
+    content = urllib.request.urlopen(urlString).read().decode('utf-8')
+  except Exception as e:
+    print('Retrying download of url %s after exception: %s' % (urlString, e))
+    content = urllib.request.urlopen(urlString).read().decode('utf-8')
+  return content
 
 def noJavaPackageClasses(desc, file):
   with zipfile.ZipFile(file) as z2:
@@ -402,7 +414,7 @@ def checkSigs(project, urlString, version, tmpDir, isSigned):
       logFile = '%s/%s.%s.gpg.verify.log' % (tmpDir, project, artifact)
       run('gpg --homedir %s --verify %s %s' % (gpgHomeDir, sigFile, artifactFile),
           logFile)
-      # Forward any GPG warnings, except the expected one (since its a clean world)
+      # Forward any GPG warnings, except the expected one (since it's a clean world)
       f = open(logFile, encoding='UTF-8')
       for line in f.readlines():
         if line.lower().find('warning') != -1 \
@@ -635,8 +647,6 @@ def verifyUnpacked(java, project, artifact, unpackPath, svnRevision, version, te
     textFiles.extend(('JRE_VERSION_MIGRATION', 'CHANGES', 'MIGRATE', 'SYSTEM_REQUIREMENTS'))
     if isSrc:
       textFiles.append('BUILD')
-  elif not isSrc:
-    textFiles.append('SYSTEM_REQUIREMENTS')
 
   for fileName in textFiles:
     fileName += '.txt'
@@ -686,8 +696,6 @@ def verifyUnpacked(java, project, artifact, unpackPath, svnRevision, version, te
   if project == 'lucene':
     if len(l) > 0:
       raise RuntimeError('%s: unexpected files/dirs in artifact %s: %s' % (project, artifact, l))
-  elif isSrc and not os.path.exists('%s/solr/SYSTEM_REQUIREMENTS.txt' % unpackPath):
-    raise RuntimeError('%s: solr/SYSTEM_REQUIREMENTS.txt does not exist in artifact %s' % (project, artifact))
 
   if isSrc:
     print('    make sure no JARs/WARs in src dist...')
@@ -890,14 +898,14 @@ def testSolrExample(unpackPath, javaPath, isSrc):
 
     print('      startup done')
     # Create the techproducts config (used to be collection1)
-    subprocess.call(['bin/solr','create_core','-n','techproducts','-c','sample_techproducts_configs'])
+    subprocess.call(['bin/solr','create_core','-c','techproducts','-d','sample_techproducts_configs'])
     os.chdir('example')
     print('      test utf8...')
     run('sh ./exampledocs/test_utf8.sh http://localhost:8983/solr/techproducts', 'utf8.log')
     print('      index example docs...')
     run('java -Durl=http://localhost:8983/solr/techproducts/update -jar ./exampledocs/post.jar ./exampledocs/*.xml', 'post-example-docs.log')
     print('      run query...')
-    s = urllib.request.urlopen('http://localhost:8983/solr/techproducts/select/?q=video').read().decode('UTF-8')
+    s = load('http://localhost:8983/solr/techproducts/select/?q=video')
     if s.find('<result name="response" numFound="3" start="0">') == -1:
       print('FAILED: response is:\n%s' % s)
       raise RuntimeError('query on solr example instance failed')
@@ -1166,7 +1174,7 @@ def verifyMavenSigs(baseURL, tmpDir, artifacts):
       logFile = '%s/%s.%s.gpg.verify.log' % (tmpDir, project, artifact)
       run('gpg --homedir %s --verify %s %s' % (gpgHomeDir, sigFile, artifactFile),
           logFile)
-      # Forward any GPG warnings, except the expected one (since its a clean world)
+      # Forward any GPG warnings, except the expected one (since it's a clean world)
       f = open(logFile, encoding='UTF-8')
       for line in f.readlines():
         if line.lower().find('warning') != -1 \
@@ -1371,7 +1379,7 @@ reVersion1 = re.compile(r'\>(\d+)\.(\d+)\.(\d+)(-alpha|-beta)?/\<', re.IGNORECAS
 reVersion2 = re.compile(r'-(\d+)\.(\d+)\.(\d+)(-alpha|-beta)?\.', re.IGNORECASE)
 
 def getAllLuceneReleases():
-  s = urllib.request.urlopen('https://archive.apache.org/dist/lucene/java').read().decode('UTF-8')
+  s = load('https://archive.apache.org/dist/lucene/java')
 
   releases = set()
   for r in reVersion1, reVersion2:

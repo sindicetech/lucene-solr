@@ -18,6 +18,7 @@
 package org.apache.solr.handler.component;
 
 import org.apache.lucene.index.ExitableDirectoryReader;
+import org.apache.lucene.util.Version;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrException;
@@ -34,6 +35,7 @@ import org.apache.solr.handler.RequestHandlerBase;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.SolrQueryTimeoutImpl;
+import org.apache.solr.search.facet.FacetModule;
 import org.apache.solr.util.RTimer;
 import org.apache.solr.util.SolrPluginUtils;
 import org.apache.solr.util.plugin.PluginInfoInitialized;
@@ -74,6 +76,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
     ArrayList<String> names = new ArrayList<>(6);
     names.add( QueryComponent.COMPONENT_NAME );
     names.add( FacetComponent.COMPONENT_NAME );
+    names.add( FacetModule.COMPONENT_NAME );
     names.add( MoreLikeThisComponent.COMPONENT_NAME );
     names.add( HighlightComponent.COMPONENT_NAME );
     names.add( StatsComponent.COMPONENT_NAME );
@@ -167,7 +170,6 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
   public List<SearchComponent> getComponents() {
     return components;
   }
-  
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception
@@ -189,8 +191,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
       SolrPluginUtils.getDebugInterests(req.getParams().getParams(CommonParams.DEBUG), rb);
     }
 
-    final RTimer timer = rb.isDebug() ? new RTimer() : null;
-
+    final RTimer timer = rb.isDebug() ? req.getRequestTimer() : null;
 
     ShardHandler shardHandler1 = shardHandlerFactory.getShardHandler();
     shardHandler1.checkDistributed(rb);
@@ -236,7 +237,6 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
             rb.getTimer().stop();
           }
           subt.stop();
-          timer.stop();
 
           // add the timing info
           if (rb.isDebugTimings()) {
@@ -299,16 +299,28 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
               params.remove("indent");
               params.remove(CommonParams.HEADER_ECHO_PARAMS);
               params.set(ShardParams.IS_SHARD, true);  // a sub (shard) request
+              params.set(ShardParams.SHARDS_PURPOSE, sreq.purpose);
               params.set(ShardParams.SHARD_URL, shard); // so the shard knows what was asked
               if (rb.requestInfo != null) {
                 // we could try and detect when this is needed, but it could be tricky
                 params.set("NOW", Long.toString(rb.requestInfo.getNOW().getTime()));
               }
               String shardQt = params.get(ShardParams.SHARDS_QT);
-              if (shardQt == null) {
-                params.remove(CommonParams.QT);
-              } else {
+              if (shardQt != null) {
                 params.set(CommonParams.QT, shardQt);
+              } else {
+                // for distributed queries that don't include shards.qt, use the original path
+                // as the default but operators need to update their luceneMatchVersion to enable
+                // this behavior since it did not work this way prior to 5.1
+                if (req.getCore().getSolrConfig().luceneMatchVersion.onOrAfter(Version.LUCENE_5_1_0)) {
+                  String reqPath = (String)req.getContext().get("path");
+                  if (!"/select".equals(reqPath)) {
+                    params.set(CommonParams.QT, reqPath);
+                  } // else if path is /select, then the qt gets passed thru if set
+                } else {
+                  // this is the pre-5.1 behavior, which translates to sending the shard request to /select
+                  params.remove(CommonParams.QT);
+                }
               }
               shardHandler1.submit(sreq, shard, params);
             }
@@ -382,7 +394,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
         nl.add("maxScore", rb.getResults().docList.maxScore());
       }
       nl.add("shardAddress", rb.shortCircuitedURL);
-      nl.add("time", rsp.getEndTime()-req.getStartTime()); // elapsed time of this request so far
+      nl.add("time", req.getRequestTimer().getTime()); // elapsed time of this request so far
       
       int pos = rb.shortCircuitedURL.indexOf("://");        
       String shardInfoName = pos != -1 ? rb.shortCircuitedURL.substring(pos+3) : rb.shortCircuitedURL;

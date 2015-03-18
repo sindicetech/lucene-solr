@@ -29,7 +29,7 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.BinaryDocValues;
-import org.apache.lucene.index.DocsAndPositionsEnum;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.Terms;
@@ -135,7 +135,27 @@ public class BlendedInfixSuggester extends AnalyzingInfixSuggester {
     this.blenderType = blenderType;
     this.numFactor = numFactor;
   }
-
+  
+  /**
+   * Create a new instance, loading from a previously built
+   * directory, if it exists.
+   *
+   * @param blenderType Type of blending strategy, see BlenderType for more precisions
+   * @param numFactor   Factor to multiply the number of searched elements before ponderate
+   * @param commitOnBuild Call commit after the index has finished building. This would persist the
+   *                      suggester index to disk and future instances of this suggester can use this pre-built dictionary.
+   * @param allTermsRequired All terms in the suggest query must be matched.
+   * @param highlight Highlight suggest query in suggestions.
+   * @throws IOException If there are problems opening the underlying Lucene index.
+   */
+  public BlendedInfixSuggester(Directory dir, Analyzer indexAnalyzer, Analyzer queryAnalyzer,
+                               int minPrefixChars, BlenderType blenderType, int numFactor, 
+                               boolean commitOnBuild, boolean allTermsRequired, boolean highlight) throws IOException {
+    super(dir, indexAnalyzer, queryAnalyzer, minPrefixChars, commitOnBuild, allTermsRequired, highlight);
+    this.blenderType = blenderType;
+    this.numFactor = numFactor;
+  }
+  
   @Override
   public List<Lookup.LookupResult> lookup(CharSequence key, Set<BytesRef> contexts, boolean onlyMorePopular, int num) throws IOException {
     // here we multiply the number of searched element by the defined factor
@@ -259,9 +279,9 @@ public class BlendedInfixSuggester extends AnalyzingInfixSuggester {
 
       String docTerm = term.utf8ToString();
 
-      if (matchedTokens.contains(docTerm) || docTerm.startsWith(prefixToken)) {
-
-        DocsAndPositionsEnum docPosEnum = it.docsAndPositions(null, null, DocsAndPositionsEnum.FLAG_OFFSETS);
+      if (matchedTokens.contains(docTerm) || (prefixToken != null && docTerm.startsWith(prefixToken))) {
+ 
+        PostingsEnum docPosEnum = it.postings(null, null, PostingsEnum.OFFSETS);
         docPosEnum.nextDoc();
 
         // use the first occurrence of the term

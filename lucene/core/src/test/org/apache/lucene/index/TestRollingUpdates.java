@@ -102,7 +102,13 @@ public class TestRollingUpdates extends LuceneTestCase {
       updateCount++;
 
       if (doUpdate) {
-        w.updateDocument(idTerm, doc);
+        if (random().nextBoolean()) {
+          w.updateDocument(idTerm, doc);
+        } else {
+          // It's OK to not be atomic for this test (no separate thread reopening readers):
+          w.deleteDocuments(new TermQuery(idTerm));
+          w.addDocument(doc);
+        }
       } else {
         w.addDocument(doc);
       }
@@ -149,8 +155,9 @@ public class TestRollingUpdates extends LuceneTestCase {
       totalBytes += sipc.sizeInBytes();
     }
     long totalBytes2 = 0;
+    
     for(String fileName : dir.listAll()) {
-      if (!fileName.startsWith(IndexFileNames.SEGMENTS)) {
+      if (IndexFileNames.CODEC_FILE_PATTERN.matcher(fileName).matches()) {
         totalBytes2 += dir.fileLength(fileName);
       }
     }

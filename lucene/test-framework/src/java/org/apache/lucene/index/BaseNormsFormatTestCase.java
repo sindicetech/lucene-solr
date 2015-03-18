@@ -44,7 +44,6 @@ import org.apache.lucene.util.TestUtil;
  * test passes, then all Lucene/Solr tests should also pass.  Ie,
  * if there is some bug in a given NormsFormat that this
  * test fails to catch then this test needs to be improved! */
-@Seed(value = "AD2222476BCB8800")
 public abstract class BaseNormsFormatTestCase extends BaseIndexFileFormatTestCase {
   
   public void testByteRange() throws Exception {
@@ -347,7 +346,7 @@ public abstract class BaseNormsFormatTestCase extends BaseIndexFileFormatTestCas
   
   // TODO: test thread safety (e.g. across different fields) explicitly here
 
-  /** 
+  /*
    * LUCENE-6006: Tests undead norms.
    *                                 .....            
    *                             C C  /            
@@ -389,6 +388,7 @@ public abstract class BaseNormsFormatTestCase extends BaseIndexFileFormatTestCas
     }
     w.forceMerge(1);
     IndexReader r = w.getReader();
+    assertFalse(r.hasDeletions());
 
     // Confusingly, norms should exist, and should all be 0, even though we deleted all docs that had the field "content".  They should not
     // be undead:

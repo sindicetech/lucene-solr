@@ -28,15 +28,22 @@ import java.util.Map;
 
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.params.CoreAdminParams;
 import org.apache.solr.common.util.StrUtils;
+import org.apache.solr.request.SolrRequestHandler;
 import org.noggit.CharArr;
 import org.noggit.JSONParser;
 import org.noggit.JSONWriter;
 import org.noggit.ObjectBuilder;
 
+/**This class encapsulates the config overlay json file. It is immutable
+ * and any edit operations performed on tbhis gives a new copy of the object
+ * with the changed value
+ *
+ */
 public class ConfigOverlay implements MapSerializable{
   private final int znodeVersion ;
-  private Map<String, Object> data;
+  private final Map<String, Object> data;
   private Map<String,Object> props;
   private Map<String,Object> userProps;
 
@@ -48,7 +55,6 @@ public class ConfigOverlay implements MapSerializable{
     if(props == null) props= Collections.EMPTY_MAP;
     userProps = (Map<String, Object>) data.get("userProps");
     if(userProps == null) userProps= Collections.EMPTY_MAP;
-
   }
   public Object getXPathProperty(String xpath){
     return getXPathProperty(xpath,true);
@@ -65,6 +71,7 @@ public class ConfigOverlay implements MapSerializable{
     for (int i = 0; i < hierarchy.size(); i++) {
       String s = hierarchy.get(i);
       if(i < hierarchy.size()-1){
+        if (!(obj.get(s) instanceof Map)) return null;
         obj = (Map) obj.get(s);
         if(obj == null) return null;
       } else {
@@ -128,7 +135,7 @@ public class ConfigOverlay implements MapSerializable{
   private List<String> checkEditable(String propName, boolean isXPath, boolean failOnError) {
     LinkedList<String> hierarchy = new LinkedList<>();
     if(!isEditableProp(propName, isXPath,hierarchy)) {
-      if(failOnError) throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, MessageFormat.format( NOT_EDITABLE,propName));
+      if(failOnError) throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, StrUtils.formatString( NOT_EDITABLE,propName));
       else return null;
     }
     return hierarchy;
@@ -251,8 +258,34 @@ public class ConfigOverlay implements MapSerializable{
   @Override
   public Map<String, Object> toMap() {
     Map result = new LinkedHashMap();
-    result.put("znodeVersion",znodeVersion);
+    result.put(ZNODEVER,znodeVersion);
     result.putAll(data);
     return result;
   }
+  public Map<String, Map> getNamedPlugins(String typ){
+    Map<String, Map> reqHandlers = (Map<String, Map>) data.get(typ);
+    if(reqHandlers == null) return Collections.EMPTY_MAP;
+    return Collections.unmodifiableMap(reqHandlers);
+  }
+
+
+  public ConfigOverlay addNamedPlugin(Map<String, Object> info, String typ) {
+    Map dataCopy =  RequestParams.getDeepCopy(data, 4);
+    Map reqHandler = (Map) dataCopy.get(typ);
+    if(reqHandler== null) dataCopy.put(typ, reqHandler = new LinkedHashMap());
+    reqHandler.put(info.get(CoreAdminParams.NAME) , info);
+    return new ConfigOverlay(dataCopy, this.znodeVersion);
+  }
+
+  public ConfigOverlay deleteNamedPlugin(String name, String typ) {
+    Map dataCopy =  RequestParams.getDeepCopy(data,4);
+    Map reqHandler = (Map) dataCopy.get(typ);
+    if(reqHandler==null) return this;
+    reqHandler.remove(name);
+    return new ConfigOverlay(dataCopy,this.znodeVersion);
+
+  }
+  public static final String ZNODEVER = "znodeVersion";
+  public static final String NAME = "overlay";
+
 }

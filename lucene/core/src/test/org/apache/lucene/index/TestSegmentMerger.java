@@ -19,11 +19,15 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.MergeInfo;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.InfoStream;
@@ -79,13 +83,14 @@ public class TestSegmentMerger extends LuceneTestCase {
 
   public void testMerge() throws IOException {
     final Codec codec = Codec.getDefault();
-    final SegmentInfo si = new SegmentInfo(mergedDir, Version.LATEST, mergedSegment, -1, false, codec, null, StringHelper.randomId());
+    final SegmentInfo si = new SegmentInfo(mergedDir, Version.LATEST, mergedSegment, -1, false, codec, Collections.<String,String>emptyMap(), StringHelper.randomId(), new HashMap<String,String>());
 
-    SegmentMerger merger = new SegmentMerger(Arrays.<LeafReader>asList(reader1, reader2),
-        si, InfoStream.getDefault(), mergedDir,
-        MergeState.CheckAbort.NONE, new FieldInfos.FieldNumbers(), newIOContext(random()));
+    SegmentMerger merger = new SegmentMerger(Arrays.<CodecReader>asList(reader1, reader2),
+                                             si, InfoStream.getDefault(), mergedDir,
+                                             new FieldInfos.FieldNumbers(),
+                                             newIOContext(random(), new IOContext(new MergeInfo(-1, -1, false, -1))));
     MergeState mergeState = merger.merge();
-    int docsMerged = mergeState.segmentInfo.getDocCount();
+    int docsMerged = mergeState.segmentInfo.maxDoc();
     assertTrue(docsMerged == 2);
     //Should be able to open a new SegmentReader against the new directory
     SegmentReader mergedReader = new SegmentReader(new SegmentCommitInfo(
@@ -102,7 +107,7 @@ public class TestSegmentMerger extends LuceneTestCase {
     assertTrue(newDoc2 != null);
     assertTrue(DocHelper.numFields(newDoc2) == DocHelper.numFields(doc2) - DocHelper.unstored.size());
 
-    DocsEnum termDocs = TestUtil.docs(random(), mergedReader,
+    PostingsEnum termDocs = TestUtil.docs(random(), mergedReader,
         DocHelper.TEXT_FIELD_2_KEY,
         new BytesRef("field"),
         MultiFields.getLiveDocs(mergedReader),

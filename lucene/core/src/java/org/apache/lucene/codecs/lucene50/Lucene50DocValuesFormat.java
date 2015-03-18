@@ -89,7 +89,7 @@ import org.apache.lucene.util.packed.MonotonicBlockPackedWriter;
  *   <li><tt>.dvm</tt>: DocValues metadata</li>
  * </ol>
  * <ol>
- *   <li><a name="dvm" id="dvm"></a>
+ *   <li><a name="dvm"></a>
  *   <p>The DocValues metadata or .dvm file.</p>
  *   <p>For DocValues field, this stores metadata, such as the offset into the 
  *      DocValues data (.dvd)</p>
@@ -131,7 +131,7 @@ import org.apache.lucene.util.packed.MonotonicBlockPackedWriter;
  *      <ul>
  *         <li>0 --&gt; delta-compressed. For each block of 16k integers, every integer is delta-encoded
  *             from the minimum value within the block. 
- *         <li>1 --&gt, gcd-compressed. When all integers share a common divisor, only quotients are stored
+ *         <li>1 --&gt; gcd-compressed. When all integers share a common divisor, only quotients are stored
  *             using blocks of delta-encoded ints.
  *         <li>2 --&gt; table-compressed. When the number of unique numeric values is small and it would save space,
  *             a lookup table of unique values is written, followed by the ordinal for each document.
@@ -141,7 +141,7 @@ import org.apache.lucene.util.packed.MonotonicBlockPackedWriter;
  *   <p>BinaryType indicates how Binary values will be stored:
  *      <ul>
  *         <li>0 --&gt; fixed-width. All values have the same length, addressing by multiplication. 
- *         <li>1 --&gt, variable-width. An address for each value is stored.
+ *         <li>1 --&gt; variable-width. An address for each value is stored.
  *         <li>2 --&gt; prefix-compressed. An address to the start of every interval'th value is stored.
  *      </ul>
  *   <p>MinLength and MaxLength represent the min and max byte[] value lengths for Binary values.
@@ -149,8 +149,8 @@ import org.apache.lucene.util.packed.MonotonicBlockPackedWriter;
  *      Otherwise, the binary values are of variable size, and packed integer metadata (PackedVersion,BlockSize)
  *      is written for the addresses.
  *   <p>MissingOffset points to a byte[] containing a bitset of all documents that had a value for the field.
- *      If its -1, then there are no missing values. If its -2, all values are missing.
- *   <li><a name="dvd" id="dvd"></a>
+ *      If it's -1, then there are no missing values. If it's -2, all values are missing.
+ *   <li><a name="dvd"></a>
  *   <p>The DocValues data or .dvd file.</p>
  *   <p>For DocValues field, this stores the actual per-document data (the heavy-lifting)</p>
  *   <p>DocValues data (.dvd) --&gt; Header,&lt;NumericData | BinaryData | SortedData&gt;<sup>NumFields</sup>,Footer</p>

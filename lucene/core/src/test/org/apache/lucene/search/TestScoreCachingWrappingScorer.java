@@ -57,7 +57,7 @@ public class TestScoreCachingWrappingScorer extends LuceneTestCase {
       doc = target;
       return doc < scores.length ? doc : NO_MORE_DOCS;
     }
-    
+
     @Override
     public long cost() {
       return scores.length;
@@ -91,7 +91,8 @@ public class TestScoreCachingWrappingScorer extends LuceneTestCase {
       this.scorer = new ScoreCachingWrappingScorer(scorer);
     }
     
-    @Override public boolean acceptsDocsOutOfOrder() {
+    @Override
+    public boolean needsScores() {
       return true;
     }
 
@@ -108,7 +109,7 @@ public class TestScoreCachingWrappingScorer extends LuceneTestCase {
     IndexReader ir = writer.getReader();
     writer.close();
     IndexSearcher searcher = newSearcher(ir);
-    Weight fake = new TermQuery(new Term("fake", "weight")).createWeight(searcher);
+    Weight fake = new TermQuery(new Term("fake", "weight")).createWeight(searcher, true);
     Scorer s = new SimpleScorer(fake);
     ScoreCachingCollector scc = new ScoreCachingCollector(scores.length);
     scc.setScorer(s);

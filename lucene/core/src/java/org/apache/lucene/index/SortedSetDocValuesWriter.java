@@ -92,7 +92,7 @@ class SortedSetDocValuesWriter extends DocValuesWriter {
     int count = 0;
     for (int i = 0; i < currentUpto; i++) {
       int termID = currentValues[i];
-      // if its not a duplicate
+      // if it's not a duplicate
       if (termID != lastValue) {
         pending.add(termID); // record the term id
         count++;
@@ -147,7 +147,7 @@ class SortedSetDocValuesWriter extends DocValuesWriter {
 
   @Override
   public void flush(SegmentWriteState state, DocValuesConsumer dvConsumer) throws IOException {
-    final int maxDoc = state.segmentInfo.getDocCount();
+    final int maxDoc = state.segmentInfo.maxDoc();
     final int maxCountPerDoc = maxCount;
     assert pendingCounts.size() == maxDoc;
     final int valueCount = hash.size();

@@ -29,7 +29,6 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.RandomIndexWriter;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.queries.TermFilter;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.ConstantScoreQuery;
@@ -40,8 +39,10 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryWrapperFilter;
 import org.apache.lucene.search.RegexpQuery;
 import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TermRangeQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.WildcardQuery;
@@ -91,7 +92,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = new WildcardQuery(new Term("body", "te*"));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -102,7 +103,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     BooleanQuery bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(new WildcardQuery(new Term("bogus", "te*")), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -143,7 +144,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = new PrefixQuery(new Term("body", "te"));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -154,7 +155,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     BooleanQuery bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(new PrefixQuery(new Term("bogus", "te")), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -195,7 +196,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = new RegexpQuery(new Term("body", "te.*"));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -206,7 +207,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     BooleanQuery bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(new RegexpQuery(new Term("bogus", "te.*")), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -247,7 +248,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = new FuzzyQuery(new Term("body", "tets"), 1);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -256,7 +257,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     
     // with prefix
     query = new FuzzyQuery(new Term("body", "tets"), 1, 2);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -267,7 +268,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     BooleanQuery bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(new FuzzyQuery(new Term("bogus", "tets"), 1), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -308,7 +309,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = TermRangeQuery.newStringRange("body", "ta", "tf", true, true);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -317,7 +318,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     
     // null start
     query = TermRangeQuery.newStringRange("body", null, "tf", true, true);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -326,7 +327,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     
     // null end
     query = TermRangeQuery.newStringRange("body", "ta", null, true, true);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -335,7 +336,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     
     // exact start inclusive
     query = TermRangeQuery.newStringRange("body", "test", "tf", true, true);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -344,7 +345,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     
     // exact end inclusive
     query = TermRangeQuery.newStringRange("body", "ta", "test", true, true);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -355,7 +356,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     BooleanQuery bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(TermRangeQuery.newStringRange("body", "test", "tf", false, true), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -366,7 +367,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(TermRangeQuery.newStringRange("body", "ta", "test", true, false), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -377,7 +378,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     bq = new BooleanQuery();
     bq.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     bq.add(TermRangeQuery.newStringRange("bogus", "ta", "tf", true, true), BooleanClause.Occur.SHOULD);
-    topDocs = searcher.search(bq, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(bq, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", bq, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -419,7 +420,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     BooleanQuery query = new BooleanQuery();
     query.add(new WildcardQuery(new Term("body", "te*")), BooleanClause.Occur.SHOULD);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -430,7 +431,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     query = new BooleanQuery();
     query.add(new MatchAllDocsQuery(), BooleanClause.Occur.SHOULD);
     query.add(new WildcardQuery(new Term("bogus", "te*")), BooleanClause.Occur.MUST_NOT);
-    topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     snippets = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -472,8 +473,8 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     FilteredQuery query = new FilteredQuery(
         new WildcardQuery(new Term("body", "te*")),
-        new TermFilter(new Term("body", "test")));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+        new QueryWrapperFilter(new TermQuery(new Term("body", "test"))));
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -514,7 +515,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     ConstantScoreQuery query = new ConstantScoreQuery(new WildcardQuery(new Term("body", "te*")));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -556,7 +557,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     DisjunctionMaxQuery query = new DisjunctionMaxQuery(0);
     query.add(new WildcardQuery(new Term("body", "te*")));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -597,7 +598,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
       }
     };
     Query query = new SpanMultiTermQueryWrapper<>(new WildcardQuery(new Term("body", "te*")));
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -639,7 +640,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     SpanQuery childQuery = new SpanMultiTermQueryWrapper<>(new WildcardQuery(new Term("body", "te*")));
     Query query = new SpanOrQuery(new SpanQuery[] { childQuery });
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -681,7 +682,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     SpanQuery childQuery = new SpanMultiTermQueryWrapper<>(new WildcardQuery(new Term("body", "te*")));
     Query query = new SpanNearQuery(new SpanQuery[] { childQuery }, 0, true);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -724,7 +725,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     SpanQuery include = new SpanMultiTermQueryWrapper<>(new WildcardQuery(new Term("body", "te*")));
     SpanQuery exclude = new SpanTermQuery(new Term("body", "bogus"));
     Query query = new SpanNotQuery(include, exclude);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -766,7 +767,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     };
     SpanQuery childQuery = new SpanMultiTermQueryWrapper<>(new WildcardQuery(new Term("body", "te*")));
     Query query = new SpanFirstQuery(childQuery, 1000000);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(2, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(2, snippets.length);
@@ -810,7 +811,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
     query.add(new WildcardQuery(new Term("body", "te*")), BooleanClause.Occur.SHOULD);
     query.add(new WildcardQuery(new Term("body", "one")), BooleanClause.Occur.SHOULD);
     query.add(new WildcardQuery(new Term("body", "se*")), BooleanClause.Occur.SHOULD);
-    TopDocs topDocs = searcher.search(query, null, 10, Sort.INDEXORDER);
+    TopDocs topDocs = searcher.search(query, 10, Sort.INDEXORDER);
     assertEquals(1, topDocs.totalHits);
     String snippets[] = highlighter.highlight("body", query, searcher, topDocs);
     assertEquals(1, snippets.length);
@@ -837,7 +838,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
             StringBuilder sb = new StringBuilder();
             int pos = 0;
             for (Passage passage : passages) {
-              // don't add ellipsis if its the first one, or if its connected.
+              // don't add ellipsis if it's the first one, or if it's connected.
               if (passage.startOffset > pos && pos > 0) {
                 sb.append("... ");
               }
@@ -845,7 +846,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
               for (int i = 0; i < passage.numMatches; i++) {
                 int start = passage.matchStarts[i];
                 int end = passage.matchEnds[i];
-                // its possible to have overlapping terms
+                // it's possible to have overlapping terms
                 if (start > pos) {
                   sb.append(content, pos, start);
                 }
@@ -859,7 +860,7 @@ public class TestMultiTermHighlighting extends LuceneTestCase {
                   pos = end;
                 }
               }
-              // its possible a "term" from the analyzer could span a sentence boundary.
+              // it's possible a "term" from the analyzer could span a sentence boundary.
               sb.append(content, pos, Math.max(pos, passage.endOffset));
               pos = passage.endOffset;
             }

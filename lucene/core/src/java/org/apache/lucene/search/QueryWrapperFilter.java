@@ -19,6 +19,7 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.util.Bits;
 
@@ -43,6 +44,13 @@ public class QueryWrapperFilter extends Filter {
     this.query = query;
   }
   
+  @Override
+  public Query rewrite(IndexReader reader) throws IOException {
+    ConstantScoreQuery rewritten = new ConstantScoreQuery(query);
+    rewritten.setBoost(0);
+    return rewritten;
+  }
+  
   /** returns the inner Query */
   public final Query getQuery() {
     return query;
@@ -52,7 +60,7 @@ public class QueryWrapperFilter extends Filter {
   public DocIdSet getDocIdSet(final LeafReaderContext context, final Bits acceptDocs) throws IOException {
     // get a private context that is used to rewrite, createWeight and score eventually
     final LeafReaderContext privateContext = context.reader().getContext();
-    final Weight weight = new IndexSearcher(privateContext).createNormalizedWeight(query);
+    final Weight weight = new IndexSearcher(privateContext).createNormalizedWeight(query, false);
     return new DocIdSet() {
       @Override
       public DocIdSetIterator iterator() throws IOException {
@@ -67,8 +75,8 @@ public class QueryWrapperFilter extends Filter {
   }
 
   @Override
-  public String toString() {
-    return "QueryWrapperFilter(" + query + ")";
+  public String toString(String field) {
+    return "QueryWrapperFilter(" + query.toString(field) + ")";
   }
 
   @Override

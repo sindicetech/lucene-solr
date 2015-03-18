@@ -26,6 +26,7 @@ import org.apache.lucene.facet.sortedset.SortedSetDocValuesFacetField;
 import org.apache.lucene.facet.sortedset.SortedSetDocValuesReaderState;
 import org.apache.lucene.facet.taxonomy.FastTaxonomyFacetCounts;
 import org.apache.lucene.facet.taxonomy.TaxonomyReader;
+import org.apache.lucene.search.FilterCollector;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
@@ -173,6 +174,16 @@ public class DrillSideways {
       drillDownQueries[i-startClause] = clauses[i].getQuery();
     }
     DrillSidewaysQuery dsq = new DrillSidewaysQuery(baseQuery, drillDownCollector, drillSidewaysCollectors, drillDownQueries, scoreSubDocsAtOnce());
+    if (hitCollector.needsScores() == false) {
+      // this is a borrible hack in order to make sure IndexSearcher will not
+      // attempt to cache the DrillSidewaysQuery
+      hitCollector = new FilterCollector(hitCollector) {
+        @Override
+        public boolean needsScores() {
+          return true;
+        }
+      };
+    }
     searcher.search(dsq, hitCollector);
 
     return new DrillSidewaysResult(buildFacetsResult(drillDownCollector, drillSidewaysCollectors, drillDownDims.keySet().toArray(new String[drillDownDims.size()])), null);
@@ -199,8 +210,7 @@ public class DrillSideways {
                                                                       after,
                                                                       true,
                                                                       doDocScores,
-                                                                      doMaxScore,
-                                                                      true);
+                                                                      doMaxScore);
       DrillSidewaysResult r = search(query, hitCollector);
       return new DrillSidewaysResult(r.facets, hitCollector.topDocs());
     } else {
@@ -227,7 +237,7 @@ public class DrillSideways {
       limit = 1; // the collector does not alow numHits = 0
     }
     topN = Math.min(topN, limit);
-    TopScoreDocCollector hitCollector = TopScoreDocCollector.create(topN, after, true);
+    TopScoreDocCollector hitCollector = TopScoreDocCollector.create(topN, after);
     DrillSidewaysResult r = search(query, hitCollector);
     return new DrillSidewaysResult(r.facets, hitCollector.topDocs());
   }
@@ -236,12 +246,7 @@ public class DrillSideways {
    *  (e.g., {@code ToParentBlockJoinCollector}) expects all
    *  sub-scorers to be positioned on the document being
    *  collected.  This will cause some performance loss;
-   *  default is false.  Note that if you return true from
-   *  this method (in a subclass) be sure your collector
-   *  also returns false from {@link
-   *  LeafCollector#acceptsDocsOutOfOrder}: this will trick
-   *  {@code BooleanQuery} into also scoring all subDocs at
-   *  once. */
+   *  default is false. */
   protected boolean scoreSubDocsAtOnce() {
     return false;
   }
@@ -249,7 +254,7 @@ public class DrillSideways {
   /** Result of a drill sideways search, including the
    *  {@link Facets} and {@link TopDocs}. */
   public static class DrillSidewaysResult {
-    /** Combined drill down & sideways results. */
+    /** Combined drill down and sideways results. */
     public final Facets facets;
 
     /** Hits. */

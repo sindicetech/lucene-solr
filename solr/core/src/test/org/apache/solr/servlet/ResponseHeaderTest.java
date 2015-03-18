@@ -17,13 +17,6 @@ package org.apache.solr.servlet;
  * limitations under the License.
  */
 
-import java.io.File;
-import java.io.IOException;
-import java.net.URI;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.Map.Entry;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
@@ -32,13 +25,20 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.solr.SolrJettyTestBase;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.handler.component.ResponseBuilder;
 import org.apache.solr.handler.component.SearchComponent;
 import org.apache.solr.response.SolrQueryResponse;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.Map.Entry;
 
 
 public class ResponseHeaderTest extends SolrJettyTestBase {
@@ -51,7 +51,7 @@ public class ResponseHeaderTest extends SolrJettyTestBase {
     setupJettyTestHome(solrHomeDirectory, "collection1");
     String top = SolrTestCaseJ4.TEST_HOME() + "/collection1/conf";
     FileUtils.copyFile(new File(top, "solrconfig-headers.xml"), new File(solrHomeDirectory + "/collection1/conf", "solrconfig.xml"));
-    createJetty(solrHomeDirectory.getAbsolutePath(), null, null);
+    createJetty(solrHomeDirectory.getAbsolutePath());
   }
   
   @AfterClass
@@ -61,7 +61,7 @@ public class ResponseHeaderTest extends SolrJettyTestBase {
   
   @Test
   public void testHttpResponse() throws SolrServerException, IOException {
-    HttpSolrServer client = (HttpSolrServer)getSolrServer();
+    HttpSolrClient client = (HttpSolrClient) getSolrClient();
     HttpClient httpClient = client.getHttpClient();
     URI uri = URI.create(client.getBaseURL() + "/withHeaders?q=*:*");
     HttpGet httpGet = new HttpGet(uri);

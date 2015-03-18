@@ -125,6 +125,7 @@
   <property name="tests.filterstacks" value="true"/>
   <property name="tests.luceneMatchVersion" value="${version.base}"/>
   <property name="tests.asserts" value="true" />
+  <property name="tests.policy" location="${common.dir}/tools/junit4/tests.policy"/>
 
   <condition property="tests.asserts.args" value="-ea -esa" else="">
     <istrue value="${tests.asserts}"/>
@@ -175,6 +176,10 @@
   <property name="javadoc.maxmemory" value="512m" />
   <property name="javadoc.noindex" value="true"/>
 
+  <!-- used only with Java 8: -->
+  <property name="javadoc.doclint.args" value="-Xdoclint:all -Xdoclint:-missing"/>
+  <property name="javac.doclint.args" value="-Xdoclint:all/protected -Xdoclint:-missing"/>
+  
   <!-- detect bootclasspath from given bootjdk path (including crazy AppleJDK special case) -->
   <first id="-boot-rt.jar">
     <fileset dir="${bootjdk}" erroronmissingdir="false" followsymlinks="true">
@@ -381,11 +386,12 @@
     <echo level="warning" message="WARN: Linting documentation HTML is not supported on this Java version (${build.java.runtime}) / JVM (${java.vm.name}). NOTHING DONE!"/>
   </target>
 
-  <!-- for now disable doclint on JDK 8+: -->
-  <condition property="javadoc.args" value="-Xdoclint:none" else="">
-    <not>
-      <equals arg1="${build.java.runtime}" arg2="1.7"/>
-    </not>
+  <!-- enable doclint only on JDK 8+ (disable on Java 7, so its inverse): -->
+  <condition property="-javadoc.doclint.args" value="" else="${javadoc.doclint.args}">
+    <equals arg1="${build.java.runtime}" arg2="1.7"/>
+  </condition>
+  <condition property="-javac.doclint.args" value="" else="${javac.doclint.args}">
+    <equals arg1="${build.java.runtime}" arg2="1.7"/>
   </condition>
 
   <!-- Import custom ANT tasks. -->
@@ -1025,11 +1031,12 @@
 
             <!-- Restrict access to certain Java features and install security manager: -->
             <sysproperty key="junit4.tempDir" file="@{workDir}/temp" />
+            <sysproperty key="common.dir" file="${common.dir}" />
             <sysproperty key="clover.db.dir" file="${clover.db.dir}" />
             <syspropertyset>
                 <propertyref prefix="java.security.manager"/>
             </syspropertyset>
-            <sysproperty key="java.security.policy" file="${common.dir}/tools/junit4/tests.policy" />
+            <sysproperty key="java.security.policy" file="${tests.policy}" />
 
             <sysproperty key="tests.LUCENE_VERSION" value="${version.base}"/>
 
@@ -1365,6 +1372,11 @@ ${tests-output}/junit4-*.suites     - per-JVM executed suites
 
   <!-- Beast the actual tests (must be wrapped with -init-totals, -check-totals) -->
   <target name="-beast" depends="resolve-groovy">
+    <fail message="The Beast only works inside of individual modules (where 'junit.classpath' is defined)">
+      <condition>
+        <not><isreference refid="junit.classpath"/></not>
+      </condition>
+    </fail>
     <groovy taskname="beaster"><![CDATA[
       import org.apache.tools.ant.BuildException;
       import org.apache.tools.ant.BuildLogger;
@@ -1480,7 +1492,7 @@ ${tests-output}/junit4-*.suites     - per-JVM executed suites
   
 ]]></fail>
     <echo>Code coverage with Atlassian Clover enabled.</echo>
-    <ivy:cachepath organisation="com.atlassian.clover" module="clover" revision="4.0.0"
+    <ivy:cachepath organisation="com.atlassian.clover" module="clover" revision="4.0.3"
       inline="true" conf="master" pathid="clover.classpath"/>
     <taskdef resource="cloverlib.xml" classpathref="clover.classpath" />
     <mkdir dir="${clover.db.dir}"/>
@@ -1873,6 +1885,7 @@ ${ant.project.name}.test.dependencies=${test.classpath.list}
         <compilerarg line="-Xmaxerrs 10000000"/> -->
         <!-- for generics in Java 1.5: -->
         <compilerarg line="${javac.args}"/>
+        <compilerarg line="${-javac.doclint.args}"/>
       </javac>
     </sequential>
   </macrodef>
@@ -1917,7 +1930,7 @@ ${ant.project.name}.test.dependencies=${test.classpath.list}
   </target>
   
   <target name="-ecj-resolve" unless="ecj.loaded" depends="ivy-availability-check,ivy-configure" if="ecj-javadoc-lint.supported">
-    <ivy:cachepath organisation="org.eclipse.jdt.core.compiler" module="ecj" revision="4.4"
+    <ivy:cachepath organisation="org.eclipse.jdt.core.compiler" module="ecj" revision="4.4.1"
      inline="true" conf="master" type="jar" pathid="ecj.classpath" />
     <componentdef classname="org.eclipse.jdt.core.JDTCompilerAdapter"
      classpathref="ecj.classpath" name="ecj-component"/>
@@ -1933,21 +1946,29 @@ ${ant.project.name}.test.dependencies=${test.classpath.list}
     <element name="nested" implicit="yes" optional="yes"/>
 
     <sequential>
+      <!-- hack: we can tell ECJ not to create classfiles, but it still creates
+           package-info.class files. so redirect output to a tempdir -->
+      <tempfile property="ecj.trash.out" destdir="${java.io.tmpdir}" prefix="ecj"/>
+      <mkdir dir="${ecj.trash.out}"/>
       <javac
         includeAntRuntime="@{includeantruntime}"
         encoding="${build.encoding}"
         srcdir="@{srcdir}"
+        destdir="${ecj.trash.out}"
         source="@{javac.source}"
         target="@{javac.source}"
         taskname="ecj-lint">
         <ecj-component/>
         <nested/>
+      <!-- hack: we can't disable classfile creation right now, because we need
+           to specify a destination for buggy package-info.class files
         <compilerarg value="-d"/>
-        <compilerarg value="none"/>
+        <compilerarg value="none"/> -->
         <compilerarg value="-enableJavadoc"/>
         <compilerarg value="-properties"/>
         <compilerarg value="@{configuration}"/>
       </javac>
+      <delete dir="${ecj.trash.out}"/>
     </sequential>
   </macrodef>
 
@@ -2031,7 +2052,7 @@ ${ant.project.name}.test.dependencies=${test.classpath.list}
       	<sources />
       	      	
         <classpath refid="javadoc.classpath"/>
-        <arg line="${javadoc.args}"/>
+        <arg line="${-javadoc.doclint.args}"/>
       </javadoc>
       <record name="@{destdir}/log_javadoc.txt" action="stop"/>
       
@@ -2330,7 +2351,7 @@ ${ant.project.name}.test.dependencies=${test.classpath.list}
 
   <!-- GROOVY scripting engine for ANT tasks -->
   <target name="resolve-groovy" unless="groovy.loaded" depends="ivy-availability-check,ivy-configure">
-    <ivy:cachepath organisation="org.codehaus.groovy" module="groovy-all" revision="2.3.6"
+    <ivy:cachepath organisation="org.codehaus.groovy" module="groovy-all" revision="2.3.10"
       inline="true" conf="default" type="jar" transitive="true" pathid="groovy.classpath"/>
     <taskdef name="groovy"
       classname="org.codehaus.groovy.ant.Groovy"
@@ -2567,7 +2588,7 @@ The following arguments can be provided to ant to alter its behaviour and target
 
         <junit4:pickseed property="pitest.seed" />
 
-        <property name="pitest.sysprops" value="-Dversion=${version},-Dtest.seed=${pitest.seed},-Djava.security.manager=org.apache.lucene.util.TestSecurityManager,-Djava.security.policy=${common.dir}/tools/junit4/tests.policy,-Djava.io.tmpdir=${tests.workDir},-Djunit4.childvm.cwd=${tests.workDir},-Djunit4.tempDir=${tests.workDir}" />
+        <property name="pitest.sysprops" value="-Dversion=${version},-Dtest.seed=${pitest.seed},-Djava.security.manager=org.apache.lucene.util.TestSecurityManager,-Djava.security.policy=${tests.policy},-Djava.io.tmpdir=${tests.workDir},-Djunit4.childvm.cwd=${tests.workDir},-Djunit4.tempDir=${tests.workDir}" />
 
         <pitest
             classPath="pitest.classpath"

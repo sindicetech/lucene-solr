@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.solr.client.solrj.SolrServer;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
@@ -36,14 +36,14 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
   private static final String vfield = DistributedUpdateProcessor.VERSION_FIELD;
-  SolrServer solrServer;
+  SolrClient solrServer;
 
   public CdcrVersionReplicationTest() {
     schemaString = "schema15.xml";      // we need a string id
     super.createTargetCollection = false;
   }
 
-  SolrServer createClientRandomly() throws Exception {
+  SolrClient createClientRandomly() throws Exception {
     int r = random().nextInt(100);
 
     // testing the smart cloud client (requests to leaders) is more important than testing the forwarding logic
@@ -60,7 +60,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    SolrServer client = createClientRandomly();
+    SolrClient client = createClientRandomly();
     try {
       handle.clear();
       handle.put("timestamp", SKIPVAL);
@@ -73,7 +73,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     }
   }
 
-  private void doTestCdcrDocVersions(SolrServer solrServer) throws Exception {
+  private void doTestCdcrDocVersions(SolrClient solrServer) throws Exception {
     this.solrServer = solrServer;
 
     log.info("### STARTING doCdcrTestDocVersions - Add commands, client: " + solrServer);
@@ -250,7 +250,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     assertTrue(failed);
   }
 
-  void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
+  void doQuery(SolrClient ss, String expectedDocs, String... queryParams) throws Exception {
 
     List<String> strs = StrUtils.splitSmart(expectedDocs, ",", true);
     Map<String, Object> expectedIds = new HashMap<>();

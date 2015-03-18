@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.lucene.analysis.MockAnalyzer;
+import org.apache.lucene.codecs.simpletext.SimpleTextCodec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
@@ -115,7 +116,7 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     // non-existent segment:
     copyFile(dir, "_0_1" + ext, "_188_1" + ext);
 
-    String cfsFiles0[] = si0.getCodec().compoundFormat().files(si0);
+    String cfsFiles0[] = si0.getCodec() instanceof SimpleTextCodec ? new String[] { "_0.scf" } : new String[] { "_0.cfs", "_0.cfe" };
     
     // Create a bogus segment file:
     copyFile(dir, cfsFiles0[0], "_188.cfs");
@@ -128,12 +129,12 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     // TODO: assert is bogus (relies upon codec-specific filenames)
     assertTrue(slowFileExists(dir, "_3.fdt") || slowFileExists(dir, "_3.fld"));
     
-    String cfsFiles3[] = si3.getCodec().compoundFormat().files(si3);
+    String cfsFiles3[] = si3.getCodec() instanceof SimpleTextCodec ? new String[] { "_3.scf" } : new String[] { "_3.cfs", "_3.cfe" };
     for (String f : cfsFiles3) {
       assertTrue(!slowFileExists(dir, f));
     }
     
-    String cfsFiles1[] = si1.getCodec().compoundFormat().files(si1);
+    String cfsFiles1[] = si1.getCodec() instanceof SimpleTextCodec ? new String[] { "_1.scf" } : new String[] { "_1.cfs", "_1.cfe" };
     copyFile(dir, cfsFiles1[0], "_3.cfs");
     
     String[] filesPre = dir.listAll();
@@ -263,7 +264,7 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     assertEquals(1, sis.getGeneration());
     
     // no inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(1, sis.getGeneration());
 
     dir.close();
@@ -283,12 +284,12 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     dir.createOutput(IndexFileNames.SEGMENTS + "_2", IOContext.DEFAULT).close();
     
     // ensure inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(2, sis.getGeneration());
     
     // add another trash commit
     dir.createOutput(IndexFileNames.SEGMENTS + "_4", IOContext.DEFAULT).close();
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(4, sis.getGeneration());
 
     dir.close();
@@ -304,19 +305,19 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     assertEquals(0, sis.counter);
     
     // no inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(0, sis.counter);
     
     // add trash per-segment file
     dir.createOutput(IndexFileNames.segmentFileName("_0", "", "foo"), IOContext.DEFAULT).close();
     
     // ensure inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(1, sis.counter);
     
     // add trash per-segment file
     dir.createOutput(IndexFileNames.segmentFileName("_3", "", "foo"), IOContext.DEFAULT).close();
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(4, sis.counter);
     
     // ensure we write _4 segment next
@@ -345,14 +346,14 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     assertEquals(1, sis.info(0).getNextDelGen());
     
     // no inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(1, sis.info(0).getNextDelGen());
     
     // add trash per-segment deletes file
     dir.createOutput(IndexFileNames.fileNameFromGeneration("_0", "del", 2), IOContext.DEFAULT).close();
     
     // ensure inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(3, sis.info(0).getNextDelGen());
     
     dir.close();
@@ -372,7 +373,7 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     dir.createOutput(IndexFileNames.SEGMENTS + "_", IOContext.DEFAULT).close();
     
     // no inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(1, sis.getGeneration());
 
     dir.close();
@@ -395,10 +396,24 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     dir.createOutput("_1_A", IOContext.DEFAULT).close();
     
     // no inflation
-    IndexFileDeleter.inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
+    inflateGens(sis, Arrays.asList(dir.listAll()), InfoStream.getDefault());
     assertEquals(1, sis.info(0).getNextDelGen());
 
     dir.close();
+  }
+  
+  // IFD's inflater is "raw" and expects to only see codec files, 
+  // and rightfully so, it filters them out.
+  static void inflateGens(SegmentInfos sis, Collection<String> files, InfoStream stream) {
+    List<String> filtered = new ArrayList<>();
+    for (String file : files) {
+      if (IndexFileNames.CODEC_FILE_PATTERN.matcher(file).matches() ||
+          file.startsWith(IndexFileNames.SEGMENTS) ||
+          file.startsWith(IndexFileNames.PENDING_SEGMENTS)) {
+        filtered.add(file);
+      }
+    }
+    IndexFileDeleter.inflateGens(sis, filtered, stream);
   }
 
   // LUCENE-5919
@@ -432,7 +447,7 @@ public class TestIndexFileDeleter extends LuceneTestCase {
     if (ms instanceof ConcurrentMergeScheduler) {
       final ConcurrentMergeScheduler suppressFakeFail = new ConcurrentMergeScheduler() {
           @Override
-          protected void handleMergeException(Throwable exc) {
+          protected void handleMergeException(Directory dir, Throwable exc) {
             // suppress only FakeIOException:
             if (exc instanceof RuntimeException && exc.getMessage().equals("fake fail")) {
               // ok to ignore
@@ -440,13 +455,12 @@ public class TestIndexFileDeleter extends LuceneTestCase {
                         && exc.getCause() != null && "fake fail".equals(exc.getCause().getMessage())) {
               // also ok to ignore
             } else {
-              super.handleMergeException(exc);
+              super.handleMergeException(dir, exc);
             }
           }
         };
       final ConcurrentMergeScheduler cms = (ConcurrentMergeScheduler) ms;
       suppressFakeFail.setMaxMergesAndThreads(cms.getMaxMergeCount(), cms.getMaxThreadCount());
-      suppressFakeFail.setMergeThreadPriority(cms.getMergeThreadPriority());
       iwc.setMergeScheduler(suppressFakeFail);
     }
 

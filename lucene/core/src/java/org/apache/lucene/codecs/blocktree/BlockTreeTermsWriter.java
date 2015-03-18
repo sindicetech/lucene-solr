@@ -93,7 +93,7 @@ import org.apache.lucene.util.packed.PackedInts;
  *   <li><tt>.tip</tt>: <a href="#Termindex">Term Index</a></li>
  * </ul>
  * <p>
- * <a name="Termdictionary" id="Termdictionary"></a>
+ * <a name="Termdictionary"></a>
  * <h3>Term Dictionary</h3>
  *
  * <p>The .tim file contains the list of terms in each
@@ -152,7 +152,7 @@ import org.apache.lucene.util.packed.PackedInts;
  *    <li>For inner nodes of the tree, every entry will steal one bit to mark whether it points
  *        to child nodes(sub-block). If so, the corresponding TermStats and TermMetaData are omitted </li>
  * </ul>
- * <a name="Termindex" id="Termindex"></a>
+ * <a name="Termindex"></a>
  * <h3>Term Index</h3>
  * <p>The .tip file contains an index into the term dictionary, so that it can be 
  * accessed randomly.  The index is also used to determine
@@ -255,20 +255,9 @@ public final class BlockTreeTermsWriter extends FieldsConsumer {
                               int maxItemsInBlock)
     throws IOException
   {
-    if (minItemsInBlock <= 1) {
-      throw new IllegalArgumentException("minItemsInBlock must be >= 2; got " + minItemsInBlock);
-    }
-    if (maxItemsInBlock <= 0) {
-      throw new IllegalArgumentException("maxItemsInBlock must be >= 1; got " + maxItemsInBlock);
-    }
-    if (minItemsInBlock > maxItemsInBlock) {
-      throw new IllegalArgumentException("maxItemsInBlock must be >= minItemsInBlock; got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
-    }
-    if (2*(minItemsInBlock-1) > maxItemsInBlock) {
-      throw new IllegalArgumentException("maxItemsInBlock must be at least 2*(minItemsInBlock-1); got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
-    }
+    validateSettings(minItemsInBlock, maxItemsInBlock);
 
-    this.maxDoc = state.segmentInfo.getDocCount();
+    this.maxDoc = state.segmentInfo.maxDoc();
     this.fieldInfos = state.fieldInfos;
     this.minItemsInBlock = minItemsInBlock;
     this.maxItemsInBlock = maxItemsInBlock;
@@ -306,6 +295,20 @@ public final class BlockTreeTermsWriter extends FieldsConsumer {
   /** Writes the index file trailer. */
   private void writeIndexTrailer(IndexOutput indexOut, long dirStart) throws IOException {
     indexOut.writeLong(dirStart);    
+  }
+
+  /** Throws {@code IllegalArgumentException} if any of these settings
+   *  is invalid. */
+  public static void validateSettings(int minItemsInBlock, int maxItemsInBlock) {
+    if (minItemsInBlock <= 1) {
+      throw new IllegalArgumentException("minItemsInBlock must be >= 2; got " + minItemsInBlock);
+    }
+    if (minItemsInBlock > maxItemsInBlock) {
+      throw new IllegalArgumentException("maxItemsInBlock must be >= minItemsInBlock; got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
+    }
+    if (2*(minItemsInBlock-1) > maxItemsInBlock) {
+      throw new IllegalArgumentException("maxItemsInBlock must be at least 2*(minItemsInBlock-1); got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
+    }
   }
 
   @Override
@@ -957,9 +960,15 @@ public final class BlockTreeTermsWriter extends FieldsConsumer {
     private final RAMOutputStream bytesWriter = new RAMOutputStream();
   }
 
+  private boolean closed;
+  
   @Override
   public void close() throws IOException {
-
+    if (closed) {
+      return;
+    }
+    closed = true;
+    
     boolean success = false;
     try {
       

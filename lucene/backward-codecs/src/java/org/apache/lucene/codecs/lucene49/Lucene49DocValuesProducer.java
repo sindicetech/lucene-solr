@@ -30,6 +30,7 @@ import static org.apache.lucene.codecs.lucene49.Lucene49DocValuesConsumer.TABLE_
 import java.io.Closeable; // javadocs
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -41,12 +42,11 @@ import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DocValues;
-import org.apache.lucene.index.DocsAndPositionsEnum;
-import org.apache.lucene.index.DocsEnum;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.RandomAccessOrds;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SortedDocValues;
@@ -111,7 +111,7 @@ class Lucene49DocValuesProducer extends DocValuesProducer implements Closeable {
   /** expert: instantiates a new reader */
   Lucene49DocValuesProducer(SegmentReadState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
     String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
-    this.maxDoc = state.segmentInfo.getDocCount();
+    this.maxDoc = state.segmentInfo.maxDoc();
     merging = false;
     
     int version = -1;
@@ -362,7 +362,7 @@ class Lucene49DocValuesProducer extends DocValuesProducer implements Closeable {
   }
   
   @Override
-  public synchronized Iterable<? extends Accountable> getChildResources() {
+  public synchronized Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     resources.addAll(Accountables.namedAccountables("addresses field", addressInstances));
     resources.addAll(Accountables.namedAccountables("ord index field", ordIndexInstances));
@@ -978,12 +978,7 @@ class Lucene49DocValuesProducer extends DocValuesProducer implements Closeable {
         }
 
         @Override
-        public DocsEnum docs(Bits liveDocs, DocsEnum reuse, int flags) throws IOException {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public DocsAndPositionsEnum docsAndPositions(Bits liveDocs, DocsAndPositionsEnum reuse, int flags) throws IOException {
+        public PostingsEnum postings(Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
           throw new UnsupportedOperationException();
         }
       };

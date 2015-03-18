@@ -17,20 +17,19 @@ package org.apache.lucene.search.spans;
  * limitations under the License.
  */
 
+import java.io.IOException;
+import java.util.Map;
+import java.util.Set;
+
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.DocsAndPositionsEnum;
 import org.apache.lucene.index.TermContext;
 import org.apache.lucene.index.TermState;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.ToStringUtils;
-
-import java.io.IOException;
-import java.util.Map;
-import java.util.Set;
 
 /** Matches spans containing a term. */
 public class SpanTermQuery extends SpanQuery {
@@ -92,7 +91,7 @@ public class SpanTermQuery extends SpanQuery {
     final TermState state;
     if (termContext == null) {
       // this happens with span-not query, as it doesn't include the NOT side in extractTerms()
-      // so we seek to the term now in this segment..., this sucks because its ugly mostly!
+      // so we seek to the term now in this segment..., this sucks because it's ugly mostly!
       final Terms terms = context.reader().terms(term.field());
       if (terms != null) {
         final TermsEnum termsEnum = terms.iterator(null);
@@ -115,7 +114,7 @@ public class SpanTermQuery extends SpanQuery {
     final TermsEnum termsEnum = context.reader().terms(term.field()).iterator(null);
     termsEnum.seekExact(term.bytes(), state);
     
-    final DocsAndPositionsEnum postings = termsEnum.docsAndPositions(acceptDocs, null, DocsAndPositionsEnum.FLAG_PAYLOADS);
+    final PostingsEnum postings = termsEnum.postings(acceptDocs, null, PostingsEnum.PAYLOADS);
 
     if (postings != null) {
       return new TermSpans(postings, term);

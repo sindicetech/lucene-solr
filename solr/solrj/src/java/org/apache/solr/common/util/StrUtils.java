@@ -17,6 +17,7 @@
 
 package org.apache.solr.common.util;
 
+import java.text.MessageFormat;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -78,7 +79,7 @@ public class StrUtils {
    * <p>
    * Current backslash escaping supported:
    * <br> \n \t \r \b \f are escaped the same as a Java String
-   * <br> Other characters following a backslash are produced verbatim (\c => c)
+   * <br> Other characters following a backslash are produced verbatim (\c =&gt; c)
    *
    * @param s  the string to split
    * @param separator the separator to split on
@@ -258,7 +259,6 @@ public class StrUtils {
    * <p>
    * Characters with a numeric value less than 32 are encoded.
    * &amp;,=,%,+,space are encoded.
-   * <p>
    */
   public static void partialURLEncodeVal(Appendable dest, String val) throws IOException {
     for (int i=0; i<val.length(); i++) {
@@ -306,5 +306,7 @@ public class StrUtils {
     }
   }
 
-
+  public static String formatString(String pattern, Object... args)  {
+    return new MessageFormat(pattern, Locale.ROOT).format(args);
+  }
 }

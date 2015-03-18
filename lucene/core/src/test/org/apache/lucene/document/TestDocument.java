@@ -24,11 +24,11 @@ import java.util.List;
 import org.apache.lucene.analysis.MockTokenizer;
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.DocsAndPositionsEnum;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.RandomIndexWriter;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
@@ -192,7 +192,7 @@ public class TestDocument extends LuceneTestCase {
     Query query = new TermQuery(new Term("keyword", "test1"));
     
     // ensure that queries return expected results without DateFilter first
-    ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+    ScoreDoc[] hits = searcher.search(query, 1000).scoreDocs;
     assertEquals(1, hits.length);
     
     doAssert(searcher.doc(hits[0].doc), true);
@@ -224,7 +224,7 @@ public class TestDocument extends LuceneTestCase {
     query.add(new Term("indexed_not_tokenized", "test1"));
     query.add(new Term("indexed_not_tokenized", "test2"));
     
-    ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+    ScoreDoc[] hits = searcher.search(query, 1000).scoreDocs;
     assertEquals(1, hits.length);
     
     doAssert(searcher.doc(hits[0].doc), true);
@@ -303,7 +303,7 @@ public class TestDocument extends LuceneTestCase {
     Query query = new TermQuery(new Term("keyword", "test"));
     
     // ensure that queries return expected results without DateFilter first
-    ScoreDoc[] hits = searcher.search(query, null, 1000).scoreDocs;
+    ScoreDoc[] hits = searcher.search(query, 1000).scoreDocs;
     assertEquals(3, hits.length);
     int result = 0;
     for (int i = 0; i < 3; i++) {
@@ -383,7 +383,7 @@ public class TestDocument extends LuceneTestCase {
       assertEquals(2, tvs.size());
       TermsEnum tvsEnum = tvs.iterator(null);
       assertEquals(new BytesRef("abc"), tvsEnum.next());
-      final DocsAndPositionsEnum dpEnum = tvsEnum.docsAndPositions(null, null);
+      final PostingsEnum dpEnum = tvsEnum.postings(null, null, PostingsEnum.ALL);
       if (field.equals("tv")) {
         assertNull(dpEnum);
       } else {

@@ -17,31 +17,33 @@ package org.apache.lucene.spatial.prefix;
  * limitations under the License.
  */
 
+import java.io.IOException;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.lucene.analysis.TokenStream;
+import com.spatial4j.core.shape.Point;
+import com.spatial4j.core.shape.Shape;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
-import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.index.IndexReaderContext;
 import org.apache.lucene.queries.function.ValueSource;
+import org.apache.lucene.search.Filter;
 import org.apache.lucene.spatial.SpatialStrategy;
 import org.apache.lucene.spatial.prefix.tree.Cell;
 import org.apache.lucene.spatial.prefix.tree.SpatialPrefixTree;
 import org.apache.lucene.spatial.query.SpatialArgs;
 import org.apache.lucene.spatial.util.ShapeFieldCacheDistanceValueSource;
-import com.spatial4j.core.shape.Point;
-import com.spatial4j.core.shape.Shape;
 
 /**
  * An abstract SpatialStrategy based on {@link SpatialPrefixTree}. The two
  * subclasses are {@link RecursivePrefixTreeStrategy} and {@link
  * TermQueryPrefixTreeStrategy}.  This strategy is most effective as a fast
  * approximate spatial search filter.
- *
- * <h4>Characteristics:</h4>
+ * <p>
+ * <b>Characteristics:</b>
+ * <br>
  * <ul>
  * <li>Can index any shape; however only {@link RecursivePrefixTreeStrategy}
  * can effectively search non-point shapes.</li>
@@ -64,8 +66,9 @@ import com.spatial4j.core.shape.Shape;
  * it doesn't scale to large numbers of points nor is it real-time-search
  * friendly.</li>
  * </ul>
- *
- * <h4>Implementation:</h4>
+ * <p>
+ * <b>Implementation:</b>
+ * <p>
  * The {@link SpatialPrefixTree} does most of the work, for example returning
  * a list of terms representing grids of various sizes for a supplied shape.
  * An important
@@ -79,10 +82,15 @@ public abstract class PrefixTreeStrategy extends SpatialStrategy {
   private final Map<String, PointPrefixTreeFieldCacheProvider> provider = new ConcurrentHashMap<>();
   protected int defaultFieldValuesArrayLen = 2;
   protected double distErrPct = SpatialArgs.DEFAULT_DISTERRPCT;// [ 0 TO 0.5 ]
+  protected boolean pointsOnly = false;//if true, there are no leaves
 
   public PrefixTreeStrategy(SpatialPrefixTree grid, String fieldName) {
     super(grid.getSpatialContext(), fieldName);
     this.grid = grid;
+  }
+
+  public SpatialPrefixTree getGrid() {
+    return grid;
   }
 
   /**
@@ -114,6 +122,16 @@ public abstract class PrefixTreeStrategy extends SpatialStrategy {
     this.distErrPct = distErrPct;
   }
 
+  public boolean isPointsOnly() {
+    return pointsOnly;
+  }
+
+  /** True if only indexed points shall be supported. There are no "leafs" in such a case, except those
+   * at maximum precision. */
+  public void setPointsOnly(boolean pointsOnly) {
+    this.pointsOnly = pointsOnly;
+  }
+
   @Override
   public Field[] createIndexableFields(Shape shape) {
     double distErr = SpatialArgs.calcDistanceFromErrPct(shape, distErrPct, ctx);
@@ -123,20 +141,33 @@ public abstract class PrefixTreeStrategy extends SpatialStrategy {
   /**
    * Turns {@link SpatialPrefixTree#getTreeCellIterator(Shape, int)} into a
    * {@link org.apache.lucene.analysis.TokenStream}.
-   * {@code simplifyIndexedCells} is an optional hint affecting non-point shapes: it will
-   * simply/aggregate sets of complete leaves in a cell to its parent, resulting in ~20-25%
-   * fewer cells. It will likely be removed in the future.
    */
   public Field[] createIndexableFields(Shape shape, double distErr) {
     int detailLevel = grid.getLevelForDistance(distErr);
-    TokenStream tokenStream = createTokenStream(shape, detailLevel);
+    return createIndexableFields(shape, detailLevel);
+  }
+
+  public Field[] createIndexableFields(Shape shape, int detailLevel) {
+    //TODO re-use TokenStream LUCENE-5776: Subclass Field, put cell iterator there, override tokenStream()
+    Iterator<Cell> cells = createCellIteratorToIndex(shape, detailLevel, null);
+    CellToBytesRefIterator cellToBytesRefIterator = newCellToBytesRefIterator();
+    cellToBytesRefIterator.reset(cells);
+    BytesRefIteratorTokenStream tokenStream = new BytesRefIteratorTokenStream();
+    tokenStream.setBytesRefIterator(cellToBytesRefIterator);
     Field field = new Field(getFieldName(), tokenStream, FIELD_TYPE);
     return new Field[]{field};
   }
 
-  protected TokenStream createTokenStream(Shape shape, int detailLevel) {
-    Iterator<Cell> cells = grid.getTreeCellIterator(shape, detailLevel);
-    return new CellTokenStream().setCells(cells);
+  protected CellToBytesRefIterator newCellToBytesRefIterator() {
+    //subclasses could return one that never emits leaves, or does both, or who knows.
+    return new CellToBytesRefIterator();
+  }
+
+  protected Iterator<Cell> createCellIteratorToIndex(Shape shape, int detailLevel, Iterator<Cell> reuse) {
+    if (pointsOnly && !(shape instanceof Point)) {
+      throw new IllegalArgumentException("pointsOnly is true yet a " + shape.getClass() + " is given for indexing");
+    }
+    return grid.getTreeCellIterator(shape, detailLevel);//TODO should take a re-use iterator
   }
 
   /* Indexed, tokenized, not stored. */
@@ -165,7 +196,14 @@ public abstract class PrefixTreeStrategy extends SpatialStrategy {
     return new ShapeFieldCacheDistanceValueSource(ctx, p, queryPoint, multiplier);
   }
 
-  public SpatialPrefixTree getGrid() {
-    return grid;
+  /**
+   * Computes spatial facets in two dimensions as a grid of numbers.  The data is often visualized as a so-called
+   * "heatmap".
+   *
+   * @see org.apache.lucene.spatial.prefix.HeatmapFacetCounter#calcFacets(PrefixTreeStrategy, org.apache.lucene.index.IndexReaderContext, org.apache.lucene.search.Filter, com.spatial4j.core.shape.Shape, int, int)
+   */
+  public HeatmapFacetCounter.Heatmap calcFacets(IndexReaderContext context, Filter filter,
+                                   Shape inputShape, final int facetLevel, int maxCells) throws IOException {
+    return HeatmapFacetCounter.calcFacets(this, context, filter, inputShape, facetLevel, maxCells);
   }
 }

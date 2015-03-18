@@ -17,17 +17,14 @@
 
 package org.apache.solr.client.solrj.request;
 
-import java.io.IOException;
-import java.util.Collection;
-import java.util.concurrent.TimeUnit;
-
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.apache.solr.client.solrj.util.ClientUtils;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.ContentStream;
+
+import java.util.Collection;
 
 /**
  * Send arbitrary XML to a request handler
@@ -35,8 +32,8 @@ import org.apache.solr.common.util.ContentStream;
  *
  * @since solr 1.3
  */
-public class DirectXmlRequest extends SolrRequest implements IsUpdateRequest
-{
+public class DirectXmlRequest extends SolrRequest<UpdateResponse> implements IsUpdateRequest {
+
   final String xml;
   private SolrParams params;
   
@@ -52,6 +49,11 @@ public class DirectXmlRequest extends SolrRequest implements IsUpdateRequest
   }
 
   @Override
+  protected UpdateResponse createResponse(SolrClient client) {
+    return new UpdateResponse();
+  }
+
+  @Override
   public SolrParams getParams() {
     return params;
   }
@@ -61,13 +63,4 @@ public class DirectXmlRequest extends SolrRequest implements IsUpdateRequest
     this.params = params;
   }
 
-  @Override
-  public UpdateResponse process( SolrServer server ) throws SolrServerException, IOException
-  {
-    long startTime = TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
-    UpdateResponse res = new UpdateResponse();
-    res.setResponse( server.request( this ) );
-    res.setElapsedTime( TimeUnit.MILLISECONDS.convert(System.nanoTime()-startTime, TimeUnit.NANOSECONDS) );
-    return res;
-  }
 }

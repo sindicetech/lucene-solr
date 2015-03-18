@@ -17,11 +17,8 @@ package org.apache.lucene.analysis.util;
  * limitations under the License.
  */
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,14 +26,12 @@ import java.nio.file.Path;
 
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
-import org.apache.lucene.util.TestUtil;
-import org.apache.lucene.util.TestUtil;
 
 public class TestFilesystemResourceLoader extends LuceneTestCase {
   
   private void assertNotFound(ResourceLoader rl) throws Exception {
     try {
-      IOUtils.closeWhileHandlingException(rl.openResource("/this-directory-really-really-really-should-not-exist/foo/bar.txt"));
+      IOUtils.closeWhileHandlingException(rl.openResource("this-directory-really-really-really-should-not-exist/foo/bar.txt"));
       fail("The resource does not exist, should fail!");
     } catch (IOException ioe) {
       // pass

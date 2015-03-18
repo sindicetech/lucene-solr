@@ -26,10 +26,12 @@ import java.io.PrintStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.CharBuffer;
-import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -42,6 +44,9 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+
+import com.carrotsearch.randomizedtesting.generators.RandomInts;
+import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.DocValuesFormat;
@@ -66,9 +71,11 @@ import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.index.CheckIndex;
 import org.apache.lucene.index.ConcurrentMergeScheduler;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.DocValuesType;
-import org.apache.lucene.index.DocsAndPositionsEnum;
-import org.apache.lucene.index.DocsEnum;
+import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
@@ -78,26 +85,24 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.LogMergePolicy;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MergeScheduler;
+import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.index.SegmentReader;
+import org.apache.lucene.index.SlowCodecReaderWrapper;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.index.TieredMergePolicy;
-import org.apache.lucene.mockfile.FilterFileSystem;
-import org.apache.lucene.mockfile.WindowsFS;
 import org.apache.lucene.search.FieldDoc;
-import org.apache.lucene.search.FilteredQuery.FilterStrategy;
 import org.apache.lucene.search.FilteredQuery;
+import org.apache.lucene.search.FilteredQuery.FilterStrategy;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.FilterDirectory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.NoLockFactory;
+import org.apache.lucene.store.RAMDirectory;
 import org.junit.Assert;
 
-import com.carrotsearch.randomizedtesting.generators.RandomInts;
-import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 
 /**
  * General utility methods for Lucene unit tests. 
@@ -198,7 +203,48 @@ public final class TestUtil {
       // ok
     }
   }
-  
+
+  /**
+   * Checks that the provided collection is read-only.
+   * @see #checkIterator(Iterator)
+   */
+  public static <T> void checkReadOnly(Collection<T> coll) {
+    int size = 0;
+    for (Iterator<?> it = coll.iterator(); it.hasNext(); ) {
+      it.next();
+      size += 1;
+    }
+    if (size != coll.size()) {
+      throw new AssertionError("broken collection, reported size is "
+          + coll.size() + " but iterator has " + size + " elements: " + coll);
+    }
+
+    if (coll.isEmpty() == false) {
+      try {
+        coll.remove(coll.iterator().next());
+        throw new AssertionError("broken collection (supports remove): " + coll);
+      } catch (UnsupportedOperationException e) {
+        // ok
+      }
+    }
+
+    try {
+      coll.add(null);
+      throw new AssertionError("broken collection (supports add): " + coll);
+    } catch (UnsupportedOperationException e) {
+      // ok
+    }
+
+    try {
+      coll.addAll(Collections.<T>singleton(null));
+      throw new AssertionError("broken collection (supports addAll): " + coll);
+    } catch (UnsupportedOperationException e) {
+      // ok
+    }
+
+    checkIterator(coll.iterator());
+  }
+
   public static void syncConcurrentMerges(IndexWriter writer) {
     syncConcurrentMerges(writer.getConfig().getMergeScheduler());
   }
@@ -256,14 +302,23 @@ public final class TestUtil {
     ByteArrayOutputStream bos = new ByteArrayOutputStream(1024);
     PrintStream infoStream = new PrintStream(bos, false, IOUtils.UTF_8);
 
-    reader.checkIntegrity();
-    CheckIndex.testLiveDocs(reader, infoStream, true);
-    CheckIndex.testFieldInfos(reader, infoStream, true);
-    CheckIndex.testFieldNorms(reader, infoStream, true);
-    CheckIndex.testPostings(reader, infoStream, false, true);
-    CheckIndex.testStoredFields(reader, infoStream, true);
-    CheckIndex.testTermVectors(reader, infoStream, false, crossCheckTermVectors, true);
-    CheckIndex.testDocValues(reader, infoStream, true);
+    final CodecReader codecReader;
+    if (reader instanceof CodecReader) {
+      codecReader = (CodecReader) reader;
+      reader.checkIntegrity();
+    } else {
+      codecReader = SlowCodecReaderWrapper.wrap(reader);
+    }
+    CheckIndex.testLiveDocs(codecReader, infoStream, true);
+    CheckIndex.testFieldInfos(codecReader, infoStream, true);
+    CheckIndex.testFieldNorms(codecReader, infoStream, true);
+    CheckIndex.testPostings(codecReader, infoStream, false, true);
+    CheckIndex.testStoredFields(codecReader, infoStream, true);
+    CheckIndex.testTermVectors(codecReader, infoStream, false, crossCheckTermVectors, true);
+    CheckIndex.testDocValues(codecReader, infoStream, true);
+    
+    // some checks really against the reader API
+    checkReaderSanity(reader);
     
     if (LuceneTestCase.INFOSTREAM) {
       System.out.println(bos.toString(IOUtils.UTF_8));
@@ -277,6 +332,76 @@ public final class TestUtil {
         throw new IllegalStateException("invalid ramBytesUsed for reader: " + bytesUsed);
       }
       assert Accountables.toString(sr) != null;
+    }
+  }
+  
+  // used by TestUtil.checkReader to check some things really unrelated to the index,
+  // just looking for bugs in indexreader implementations.
+  private static void checkReaderSanity(LeafReader reader) throws IOException {
+    for (FieldInfo info : reader.getFieldInfos()) {
+      
+      // reader shouldn't return normValues if the field does not have them
+      if (!info.hasNorms()) {
+        if (reader.getNormValues(info.name) != null) {
+          throw new RuntimeException("field: " + info.name + " should omit norms but has them!");
+        }
+      }
+      
+      // reader shouldn't return docValues if the field does not have them
+      // reader shouldn't return multiple docvalues types for the same field.
+      switch(info.getDocValuesType()) {
+        case NONE:
+          if (reader.getBinaryDocValues(info.name) != null ||
+              reader.getNumericDocValues(info.name) != null ||
+              reader.getSortedDocValues(info.name) != null || 
+              reader.getSortedSetDocValues(info.name) != null || 
+              reader.getDocsWithField(info.name) != null) {
+            throw new RuntimeException("field: " + info.name + " has docvalues but should omit them!");
+          }
+          break;
+        case SORTED:
+          if (reader.getBinaryDocValues(info.name) != null ||
+              reader.getNumericDocValues(info.name) != null ||
+              reader.getSortedNumericDocValues(info.name) != null ||
+              reader.getSortedSetDocValues(info.name) != null) {
+            throw new RuntimeException(info.name + " returns multiple docvalues types!");
+          }
+          break;
+        case SORTED_NUMERIC:
+          if (reader.getBinaryDocValues(info.name) != null ||
+              reader.getNumericDocValues(info.name) != null ||
+              reader.getSortedSetDocValues(info.name) != null ||
+              reader.getSortedDocValues(info.name) != null) {
+            throw new RuntimeException(info.name + " returns multiple docvalues types!");
+          }
+          break;
+        case SORTED_SET:
+          if (reader.getBinaryDocValues(info.name) != null ||
+              reader.getNumericDocValues(info.name) != null ||
+              reader.getSortedNumericDocValues(info.name) != null ||
+              reader.getSortedDocValues(info.name) != null) {
+            throw new RuntimeException(info.name + " returns multiple docvalues types!");
+          }
+          break;
+        case BINARY:
+          if (reader.getNumericDocValues(info.name) != null ||
+              reader.getSortedDocValues(info.name) != null ||
+              reader.getSortedNumericDocValues(info.name) != null ||
+              reader.getSortedSetDocValues(info.name) != null) {
+            throw new RuntimeException(info.name + " returns multiple docvalues types!");
+          }
+          break;
+        case NUMERIC:
+          if (reader.getBinaryDocValues(info.name) != null ||
+              reader.getSortedDocValues(info.name) != null ||
+              reader.getSortedNumericDocValues(info.name) != null ||
+              reader.getSortedSetDocValues(info.name) != null) {
+            throw new RuntimeException(info.name + " returns multiple docvalues types!");
+          }
+          break;
+        default:
+          throw new AssertionError();
+      }
     }
   }
 
@@ -829,6 +954,16 @@ public final class TestUtil {
       return false;
     }
   }
+  
+  public static void addIndexesSlowly(IndexWriter writer, DirectoryReader... readers) throws IOException {
+    List<CodecReader> leaves = new ArrayList<>();
+    for (DirectoryReader reader : readers) {
+      for (LeafReaderContext context : reader.leaves()) {
+        leaves.add(SlowCodecReaderWrapper.wrap(context.reader()));
+      }
+    }
+    writer.addIndexes(leaves.toArray(new CodecReader[leaves.size()]));
+  }
 
   /** just tries to configure things to keep the open file
    * count lowish */
@@ -847,7 +982,7 @@ public final class TestUtil {
     }
     MergeScheduler ms = w.getConfig().getMergeScheduler();
     if (ms instanceof ConcurrentMergeScheduler) {
-      // wtf... shouldnt it be even lower since its 1 by default?!?!
+      // wtf... shouldnt it be even lower since it's 1 by default?!?!
       ((ConcurrentMergeScheduler) ms).setMaxMergesAndThreads(3, 2);
     }
   }
@@ -940,7 +1075,7 @@ public final class TestUtil {
   // Returns a DocsEnum, but randomly sometimes uses a
   // DocsAndFreqsEnum, DocsAndPositionsEnum.  Returns null
   // if field/term doesn't exist:
-  public static DocsEnum docs(Random random, IndexReader r, String field, BytesRef term, Bits liveDocs, DocsEnum reuse, int flags) throws IOException {
+  public static PostingsEnum docs(Random random, IndexReader r, String field, BytesRef term, Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
     final Terms terms = MultiFields.getTerms(r, field);
     if (terms == null) {
       return null;
@@ -954,25 +1089,24 @@ public final class TestUtil {
 
   // Returns a DocsEnum from a positioned TermsEnum, but
   // randomly sometimes uses a DocsAndFreqsEnum, DocsAndPositionsEnum.
-  public static DocsEnum docs(Random random, TermsEnum termsEnum, Bits liveDocs, DocsEnum reuse, int flags) throws IOException {
+  public static PostingsEnum docs(Random random, TermsEnum termsEnum, Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
     if (random.nextBoolean()) {
       if (random.nextBoolean()) {
         final int posFlags;
         switch (random.nextInt(4)) {
-          case 0: posFlags = 0; break;
-          case 1: posFlags = DocsAndPositionsEnum.FLAG_OFFSETS; break;
-          case 2: posFlags = DocsAndPositionsEnum.FLAG_PAYLOADS; break;
-          default: posFlags = DocsAndPositionsEnum.FLAG_OFFSETS | DocsAndPositionsEnum.FLAG_PAYLOADS; break;
+          case 0: posFlags = PostingsEnum.POSITIONS; break;
+          case 1: posFlags = PostingsEnum.OFFSETS; break;
+          case 2: posFlags = PostingsEnum.PAYLOADS; break;
+          default: posFlags = PostingsEnum.ALL; break;
         }
-        // TODO: cast to DocsAndPositionsEnum?
-        DocsAndPositionsEnum docsAndPositions = termsEnum.docsAndPositions(liveDocs, null, posFlags);
+        PostingsEnum docsAndPositions = termsEnum.postings(liveDocs, null, posFlags);
         if (docsAndPositions != null) {
           return docsAndPositions;
         }
       }
-      flags |= DocsEnum.FLAG_FREQS;
+      flags |= PostingsEnum.FREQS;
     }
-    return termsEnum.docs(liveDocs, reuse, flags);
+    return termsEnum.postings(liveDocs, reuse, flags);
   }
   
   public static CharSequence stringToCharSequence(String string, Random random) {
@@ -1150,34 +1284,16 @@ public final class TestUtil {
       return sb.toString();
     }
   }
-
-  /** Returns true if this is an FSDirectory backed by {@link WindowsFS}. */
-  public static boolean isWindowsFS(Directory dir) {
-    // First unwrap directory to see if there is an FSDir:
-    while (true) {
-      if (dir instanceof FSDirectory) {
-        return isWindowsFS(((FSDirectory) dir).getDirectory());
-      } else if (dir instanceof FilterDirectory) {
-        dir = ((FilterDirectory) dir).getDelegate();
-      } else {
-        return false;
+  
+  /** Returns a copy of directory, entirely in RAM */
+  public static RAMDirectory ramCopyOf(Directory dir) throws IOException {
+    RAMDirectory ram = new RAMDirectory();
+    for (String file : dir.listAll()) {
+      if (file.startsWith(IndexFileNames.SEGMENTS) || IndexFileNames.CODEC_FILE_PATTERN.matcher(file).matches()) {
+        ram.copyFrom(dir, file, file, IOContext.DEFAULT);
       }
     }
-  }
-
-  /** Returns true if this Path is backed by {@link WindowsFS}. */
-  public static boolean isWindowsFS(Path path) {
-    FileSystem fs = path.getFileSystem();
-    while (true) {
-      if (fs instanceof FilterFileSystem) {
-        if (((FilterFileSystem) fs).getParent() instanceof WindowsFS) {
-          return true;
-        }
-        fs = ((FilterFileSystem) fs).getDelegate();
-      } else {
-        return false;
-      }
-    }
+    return ram;
   }
   
   /** List of characters that match {@link Character#isWhitespace} */

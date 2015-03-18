@@ -25,9 +25,11 @@ import java.nio.channels.FileChannel.MapMode;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.security.PrivilegedExceptionAction;
 import java.security.PrivilegedActionException;
 import java.util.Locale;
+import java.util.concurrent.Future;
 import java.lang.reflect.Method;
 
 import org.apache.lucene.store.ByteBufferIndexInput.BufferCleaner;
@@ -66,15 +68,19 @@ import org.apache.lucene.util.Constants;
  * <p>This class supplies the workaround mentioned in the bug report
  * (see {@link #setUseUnmap}), which may fail on
  * non-Sun JVMs. It forcefully unmaps the buffer on close by using
- * an undocumented internal cleanup functionality.
- * {@link #UNMAP_SUPPORTED} is <code>true</code>, if the workaround
- * can be enabled (with no guarantees).
+ * an undocumented internal cleanup functionality. If
+ * {@link #UNMAP_SUPPORTED} is <code>true</code>, the workaround
+ * will be automatically enabled (with no guarantees; if you discover
+ * any problems, you can disable it).
  * <p>
  * <b>NOTE:</b> Accessing this class either directly or
  * indirectly from a thread while it's interrupted can close the
  * underlying channel immediately if at the same time the thread is
  * blocked on IO. The channel will remain closed and subsequent access
- * to {@link MMapDirectory} will throw a {@link ClosedChannelException}. 
+ * to {@link MMapDirectory} will throw a {@link ClosedChannelException}. If
+ * your application uses either {@link Thread#interrupt()} or
+ * {@link Future#cancel(boolean)} you should use the legacy {@code RAFDirectory}
+ * from the Lucene {@code misc} module in favor of {@link MMapDirectory}.
  * </p>
  * @see <a href="http://blog.thetaphi.de/2012/07/use-lucenes-mmapdirectory-on-64bit.html">Blog post about MMapDirectory</a>
  */
@@ -88,6 +94,7 @@ public class MMapDirectory extends FSDirectory {
   final int chunkSizePower;
 
   /** Create a new MMapDirectory for the named location.
+   *  The directory is created at the named location if it does not yet exist.
    *
    * @param path the path of the directory
    * @param lockFactory the lock factory to use
@@ -98,6 +105,7 @@ public class MMapDirectory extends FSDirectory {
   }
 
   /** Create a new MMapDirectory for the named location and {@link FSLockFactory#getDefault()}.
+   *  The directory is created at the named location if it does not yet exist.
   *
   * @param path the path of the directory
   * @throws IOException if there is a low-level I/O error
@@ -107,6 +115,7 @@ public class MMapDirectory extends FSDirectory {
   }
   
   /** Create a new MMapDirectory for the named location and {@link FSLockFactory#getDefault()}.
+   *  The directory is created at the named location if it does not yet exist.
   *
   * @param path the path of the directory
   * @param maxChunkSize maximum chunk size (default is 1 GiBytes for
@@ -120,6 +129,7 @@ public class MMapDirectory extends FSDirectory {
   /**
    * Create a new MMapDirectory for the named location, specifying the 
    * maximum chunk size used for memory mapping.
+   *  The directory is created at the named location if it does not yet exist.
    * 
    * @param path the path of the directory
    * @param lockFactory the lock factory to use, or null for the default
@@ -149,19 +159,17 @@ public class MMapDirectory extends FSDirectory {
   /**
    * <code>true</code>, if this platform supports unmapping mmapped files.
    */
-  public static final boolean UNMAP_SUPPORTED;
-  static {
-    boolean v;
-    try {
-      Class.forName("sun.misc.Cleaner");
-      Class.forName("java.nio.DirectByteBuffer")
-        .getMethod("cleaner");
-      v = true;
-    } catch (Exception e) {
-      v = false;
+  public static final boolean UNMAP_SUPPORTED = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
+    @Override
+    public Boolean run() {
+      try {
+        Class.forName("java.nio.DirectByteBuffer").getMethod("cleaner");
+        return true;
+      } catch (Exception e) {
+        return false;
+      }
     }
-    UNMAP_SUPPORTED = v;
-  }
+  });
   
   /**
    * This method enables the workaround for unmapping the buffers
@@ -244,7 +252,7 @@ public class MMapDirectory extends FSDirectory {
     final String originalMessage;
     final Throwable originalCause;
     if (ioe.getCause() instanceof OutOfMemoryError) {
-      // nested OOM confuses users, because its "incorrect", just print a plain message:
+      // nested OOM confuses users, because it's "incorrect", just print a plain message:
       originalMessage = "Map failed";
       originalCause = null;
     } else {

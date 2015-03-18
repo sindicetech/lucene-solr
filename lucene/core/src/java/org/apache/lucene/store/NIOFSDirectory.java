@@ -41,19 +41,20 @@ import java.util.concurrent.Future; // javadoc
  * for details.
  * </p>
  * <p>
- * <font color="red"><b>NOTE:</b> Accessing this class either directly or
+ * <b>NOTE:</b> Accessing this class either directly or
  * indirectly from a thread while it's interrupted can close the
  * underlying file descriptor immediately if at the same time the thread is
  * blocked on IO. The file descriptor will remain closed and subsequent access
  * to {@link NIOFSDirectory} will throw a {@link ClosedChannelException}. If
  * your application uses either {@link Thread#interrupt()} or
- * {@link Future#cancel(boolean)} you should use {@code RAFDirectory} in
- * favor of {@link NIOFSDirectory}.</font>
+ * {@link Future#cancel(boolean)} you should use the legacy {@code RAFDirectory}
+ * from the Lucene {@code misc} module in favor of {@link NIOFSDirectory}.
  * </p>
  */
 public class NIOFSDirectory extends FSDirectory {
 
   /** Create a new NIOFSDirectory for the named location.
+   *  The directory is created at the named location if it does not yet exist.
    * 
    * @param path the path of the directory
    * @param lockFactory the lock factory to use
@@ -64,6 +65,7 @@ public class NIOFSDirectory extends FSDirectory {
   }
 
   /** Create a new NIOFSDirectory for the named location and {@link FSLockFactory#getDefault()}.
+   *  The directory is created at the named location if it does not yet exist.
    *
    * @param path the path of the directory
    * @throws IOException if there is a low-level I/O error
@@ -135,7 +137,7 @@ public class NIOFSDirectory extends FSDirectory {
       if (offset < 0 || length < 0 || offset + length > this.length()) {
         throw new IllegalArgumentException("slice() " + sliceDescription + " out of bounds: "  + this);
       }
-      return new NIOFSIndexInput(sliceDescription, channel, off + offset, length, getBufferSize());
+      return new NIOFSIndexInput(getFullSliceDescription(sliceDescription), channel, off + offset, length, getBufferSize());
     }
 
     @Override

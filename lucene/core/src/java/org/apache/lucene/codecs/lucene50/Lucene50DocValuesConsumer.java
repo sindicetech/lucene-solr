@@ -81,10 +81,10 @@ class Lucene50DocValuesConsumer extends DocValuesConsumer implements Closeable {
   public static final int BINARY_PREFIX_COMPRESSED = 2;
 
   /** Standard storage for sorted set values with 1 level of indirection:
-   *  docId -> address -> ord. */
+   *  {@code docId -> address -> ord}. */
   public static final int SORTED_WITH_ADDRESSES = 0;
   /** Single-valued sorted set values, encoded as sorted values, so no level
-   *  of indirection: docId -> ord. */
+   *  of indirection: {@code docId -> ord}. */
   public static final int SORTED_SINGLE_VALUED = 1;
   
   /** placeholder for missing offset that means there are no missing values */
@@ -105,7 +105,7 @@ class Lucene50DocValuesConsumer extends DocValuesConsumer implements Closeable {
       String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
       meta = state.directory.createOutput(metaName, state.context);
       CodecUtil.writeIndexHeader(meta, metaCodec, Lucene50DocValuesFormat.VERSION_CURRENT, state.segmentInfo.getId(), state.segmentSuffix);
-      maxDoc = state.segmentInfo.getDocCount();
+      maxDoc = state.segmentInfo.maxDoc();
       success = true;
     } finally {
       if (!success) {
@@ -324,7 +324,7 @@ class Lucene50DocValuesConsumer extends DocValuesConsumer implements Closeable {
     meta.writeVLong(count);
     meta.writeLong(startFP);
     
-    // if minLength == maxLength, its a fixed-length byte[], we are done (the addresses are implicit)
+    // if minLength == maxLength, it's a fixed-length byte[], we are done (the addresses are implicit)
     // otherwise, we need to record the length fields...
     if (minLength != maxLength) {
       meta.writeLong(data.getFilePointer());
@@ -346,7 +346,7 @@ class Lucene50DocValuesConsumer extends DocValuesConsumer implements Closeable {
   
   /** expert: writes a value dictionary for a sorted/sortedset field */
   private void addTermsDict(FieldInfo field, final Iterable<BytesRef> values) throws IOException {
-    // first check if its a "fixed-length" terms dict
+    // first check if it's a "fixed-length" terms dict
     int minLength = Integer.MAX_VALUE;
     int maxLength = Integer.MIN_VALUE;
     long numValues = 0;
@@ -371,7 +371,7 @@ class Lucene50DocValuesConsumer extends DocValuesConsumer implements Closeable {
       // now write the bytes: sharing prefixes within a block
       final long startFP = data.getFilePointer();
       // currently, we have to store the delta from expected for every 1/nth term
-      // we could avoid this, but its not much and less overall RAM than the previous approach!
+      // we could avoid this, but it's not much and less overall RAM than the previous approach!
       RAMOutputStream addressBuffer = new RAMOutputStream();
       MonotonicBlockPackedWriter termAddresses = new MonotonicBlockPackedWriter(addressBuffer, BLOCK_SIZE);
       // buffers up 16 terms

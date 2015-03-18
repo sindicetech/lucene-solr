@@ -17,12 +17,12 @@ package org.apache.lucene.queries.function;
  * limitations under the License.
  */
 
+import java.io.IOException;
+
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.util.Bits;
-
-import java.io.IOException;
 
 /**
  * {@link Scorer} which returns the result of {@link FunctionValues#floatVal(int)} as

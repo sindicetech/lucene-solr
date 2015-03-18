@@ -17,31 +17,30 @@ package org.apache.solr.cloud;
  * the License.
  */
 
-import java.io.File;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.apache.solr.SolrJettyTestBase;
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.cloud.ZkConfigManager;
+import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.cloud.ZkStateReader;
-import org.apache.solr.core.ConfigSolr;
+import org.apache.solr.core.CloudConfig;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.CoreDescriptor;
-import org.apache.solr.core.CoresLocator;
 import org.apache.solr.handler.admin.CoreAdminHandler;
 import org.apache.solr.handler.component.HttpShardHandlerFactory;
-import org.apache.solr.handler.component.ShardHandlerFactory;
 import org.apache.solr.update.UpdateShardHandler;
-import org.apache.solr.util.ExternalPaths;
+import org.apache.solr.update.UpdateShardHandlerConfig;
 import org.apache.zookeeper.CreateMode;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Slow
 public class ZkControllerTest extends SolrTestCaseJ4 {
@@ -168,7 +167,7 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
       SolrZkClient zkClient = new SolrZkClient(server.getZkAddress(), TIMEOUT);
       String actualConfigName = "firstConfig";
 
-      zkClient.makePath(ZkController.CONFIGS_ZKNODE + "/" + actualConfigName, true);
+      zkClient.makePath(ZkConfigManager.CONFIGS_ZKNODE + "/" + actualConfigName, true);
       
       Map<String,Object> props = new HashMap<>();
       props.put("configName", actualConfigName);
@@ -183,9 +182,10 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
       zkClient.close();
       
       cc = getCoreContainer();
-      
-      ZkController zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, 10000,
-          "127.0.0.1", "8983", "solr", 0, 60000, true, new CurrentCoreDescriptorProvider() {
+
+      CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
+      ZkController zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig,
+          new CurrentCoreDescriptorProvider() {
             
             @Override
             public List<CoreDescriptor> getCurrentDescriptors() {
@@ -208,61 +208,6 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
 
   }
 
-  @Test
-  public void testUploadToCloud() throws Exception {
-    String zkDir = createTempDir("zkData").toFile().getAbsolutePath();
-
-    ZkTestServer server = new ZkTestServer(zkDir);
-    ZkController zkController = null;
-    boolean testFinished = false;
-    CoreContainer cc = null;
-    try {
-      server.run();
-
-      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
-
-      cc = getCoreContainer();
-      
-      zkController = new ZkController(cc, server.getZkAddress(),
-          TIMEOUT, 10000, "127.0.0.1", "8983", "solr", 0, 60000, true, new CurrentCoreDescriptorProvider() {
-            
-            @Override
-            public List<CoreDescriptor> getCurrentDescriptors() {
-              // do nothing
-              return null;
-            }
-          });
-
-      String solrHome = SolrJettyTestBase.legacyExampleCollection1SolrHome();
-
-      zkController.uploadToZK(new File(solrHome + "/collection1/conf"),
-          ZkController.CONFIGS_ZKNODE + "/config1");
-      
-      // uploading again should overwrite, not error...
-      zkController.uploadToZK(new File(solrHome + "/collection1/conf"),
-          ZkController.CONFIGS_ZKNODE + "/config1");
-
-      if (DEBUG) {
-        zkController.printLayoutToStdOut();
-      }
-      testFinished = true;
-    } finally {
-      if (!testFinished & zkController != null) {
-        zkController.getZkClient().printLayoutToStdOut();
-      }
-      
-      if (zkController != null) {
-        zkController.close();
-      }
-      if (cc != null) {
-        cc.shutdown();
-      }
-      server.shutdown();
-    }
-
-  }
-
-  @Test
   public void testGetHostName() throws Exception {
     String zkDir = createTempDir("zkData").toFile().getAbsolutePath();
     CoreContainer cc = null;
@@ -278,8 +223,8 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
       ZkController zkController = null;
 
       try {
-        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, 10000,
-            "http://127.0.0.1", "8983", "solr", 0, 60000, true, new CurrentCoreDescriptorProvider() {
+        CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
+        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, new CurrentCoreDescriptorProvider() {
 
           @Override
           public List<CoreDescriptor> getCurrentDescriptors() {
@@ -301,6 +246,65 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
     }
   }
 
+  public void testEnsureReplicaInLeaderInitiatedRecovery() throws Exception  {
+    String zkDir = createTempDir("testEnsureReplicaInLeaderInitiatedRecovery").toFile().getAbsolutePath();
+    CoreContainer cc = null;
+
+    ZkTestServer server = new ZkTestServer(zkDir);
+    try {
+      server.run();
+
+      AbstractZkTestCase.tryCleanSolrZkNode(server.getZkHost());
+      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
+
+      cc = getCoreContainer();
+      ZkController zkController = null;
+
+      try {
+        CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
+        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, new CurrentCoreDescriptorProvider() {
+
+          @Override
+          public List<CoreDescriptor> getCurrentDescriptors() {
+            // do nothing
+            return null;
+          }
+        });
+        HashMap<String, Object> propMap = new HashMap<>();
+        propMap.put(ZkStateReader.BASE_URL_PROP, "http://127.0.0.1:8983/solr");
+        propMap.put(ZkStateReader.CORE_NAME_PROP, "replica1");
+        propMap.put(ZkStateReader.NODE_NAME_PROP, "127.0.0.1:8983_solr");
+        Replica replica = new Replica("replica1", propMap);
+        try {
+          // this method doesn't throw exception when node isn't leader
+          zkController.ensureReplicaInLeaderInitiatedRecovery("c1", "shard1",
+              new ZkCoreNodeProps(replica), false, "non_existent_leader");
+          fail("ZkController should not write LIR state for node which is not leader");
+        } catch (Exception e) {
+          assertNull("ZkController should not write LIR state for node which is not leader",
+              zkController.getLeaderInitiatedRecoveryState("c1", "shard1", "replica1"));
+        }
+      } finally {
+        if (zkController != null)
+          zkController.close();
+      }
+    } finally {
+      if (cc != null) {
+        cc.shutdown();
+      }
+      server.shutdown();
+    }
+  }
+
+  /*
+  Test that:
+  1) LIR state to 'down' is not set unless publishing node is a leader
+    1a) Test that leader can publish when LIR node already exists in zk
+    1b) Test that leader can publish when LIR node does not exist
+  2) LIR state to 'active' or 'recovery' can be set regardless of whether publishing
+    node is leader or not
+   */
+
   private CoreContainer getCoreContainer() {
     return new MockCoreContainer();
   }
@@ -319,36 +323,11 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
     }
     
     @Override
-    public void load() {};
-    
-    @Override
-    public ConfigSolr getConfig() {
-      return new ConfigSolr() {
-
-        @Override
-        public CoresLocator getCoresLocator() {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        protected String getShardHandlerFactoryConfigPath() {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public boolean isPersistent() {
-          throw new UnsupportedOperationException();
-        }};
-    }
+    public void load() {}
     
     @Override
     public UpdateShardHandler getUpdateShardHandler() {
-      return new UpdateShardHandler(null);
-    }
-    
-    @Override
-    public String getAdminPath() {
-      return "/admin/cores";
+      return new UpdateShardHandler(UpdateShardHandlerConfig.DEFAULT);
     }
 
   }

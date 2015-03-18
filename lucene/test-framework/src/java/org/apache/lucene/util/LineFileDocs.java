@@ -73,10 +73,8 @@ public class LineFileDocs implements Closeable {
 
   @Override
   public synchronized void close() throws IOException {
-    if (reader != null) {
-      reader.close();
-      reader = null;
-    }
+    IOUtils.close(reader, threadDocs);
+    reader = null;
   }
   
   private long randomSeekPos(Random random, long size) {
@@ -90,7 +88,7 @@ public class LineFileDocs implements Closeable {
     boolean needSkip = true;
     long size = 0L, seekTo = 0L;
     if (is == null) {
-      // if its not in classpath, we load it as absolute filesystem path (e.g. Hudson's home dir)
+      // if it's not in classpath, we load it as absolute filesystem path (e.g. Hudson's home dir)
       Path file = Paths.get(path);
       size = Files.size(file);
       if (path.endsWith(".gz")) {
@@ -205,7 +203,7 @@ public class LineFileDocs implements Closeable {
     }
   }
 
-  private final ThreadLocal<DocState> threadDocs = new ThreadLocal<>();
+  private final CloseableThreadLocal<DocState> threadDocs = new CloseableThreadLocal<>();
 
   /** Note: Document instance is re-used per-thread */
   public Document nextDoc() throws IOException {

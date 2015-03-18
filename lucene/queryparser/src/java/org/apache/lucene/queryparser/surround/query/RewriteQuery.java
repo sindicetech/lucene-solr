@@ -38,14 +38,9 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
   abstract public Query rewrite(IndexReader reader) throws IOException;
 
   @Override
-  public String toString() {
-    return toString(null);
-  }
-
-  @Override
   public String toString(String field) {
     return getClass().getName()
-    + (field == null ? "" : "(unused: " + field + ")")
+    + (field.isEmpty() ? "" : "(unused: " + field + ")")
     + "(" + fieldName
     + ", " + srndQuery.toString()
     + ", " + qf.toString()
@@ -54,7 +49,7 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
 
   @Override
   public int hashCode() {
-    return getClass().hashCode()
+    return super.hashCode()
     ^ fieldName.hashCode()
     ^ qf.hashCode()
     ^ srndQuery.hashCode();
@@ -67,9 +62,10 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
     if (! getClass().equals(obj.getClass()))
       return false;
     RewriteQuery other = (RewriteQuery)obj;
-    return fieldName.equals(other.fieldName)
-  && qf.equals(other.qf)
-  && srndQuery.equals(other.srndQuery);
+    return super.equals(obj)
+      && fieldName.equals(other.fieldName)
+      && qf.equals(other.qf)
+      && srndQuery.equals(other.srndQuery);
   }
 
   /** 

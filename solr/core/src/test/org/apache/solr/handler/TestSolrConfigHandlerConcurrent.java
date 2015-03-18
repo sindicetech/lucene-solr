@@ -17,7 +17,10 @@ package org.apache.solr.handler;
  * limitations under the License.
  */
 
-import java.io.IOException;
+import static java.util.Arrays.asList;
+import static org.apache.solr.core.ConfigOverlay.getObjectByPath;
+import static org.noggit.ObjectBuilder.getVal;
+
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
@@ -31,26 +34,25 @@ import java.util.concurrent.TimeUnit;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.util.EntityUtils;
+import org.apache.lucene.queryparser.xml.ParserException;
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
+import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.impl.CloudSolrClient;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.cloud.AbstractFullDistribZkTestBase;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.core.ConfigOverlay;
 import org.apache.solr.util.RESTfulServerProvider;
 import org.apache.solr.util.RestTestHarness;
+import org.junit.Test;
 import org.noggit.JSONParser;
 import org.noggit.ObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static java.util.Arrays.asList;
-import static org.apache.solr.core.ConfigOverlay.getObjectByPath;
-import static org.apache.solr.rest.schema.TestBulkSchemaAPI.getAsMap;
-import static org.noggit.ObjectBuilder.getVal;
 
 
 public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBase {
@@ -60,11 +62,11 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
   private List<RestTestHarness> restTestHarnesses = new ArrayList<>();
 
   private void setupHarnesses() {
-    for (final SolrServer client : clients) {
+    for (final SolrClient client : clients) {
       RestTestHarness harness = new RestTestHarness(new RESTfulServerProvider() {
         @Override
         public String getBaseURL() {
-          return ((HttpSolrServer)client).getBaseURL();
+          return ((HttpSolrClient)client).getBaseURL();
         }
       });
       restTestHarnesses.add(harness);
@@ -72,7 +74,15 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
   }
 
   @Override
-  public void doTest() throws Exception {
+  public void distribTearDown() throws Exception {
+    super.distribTearDown();
+    for (RestTestHarness h : restTestHarnesses) {
+      h.close();
+    }
+  }
+
+  @Test
+  public void test() throws Exception {
     Map editable_prop_map = (Map) new ObjectBuilder(new JSONParser(new StringReader(
         ConfigOverlay.MAPPING))).getObject();
     Map caches = (Map) editable_prop_map.get("query");
@@ -90,8 +100,6 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
             ArrayList errs = new ArrayList();
             collectErrors.add(errs);
             invokeBulkCall((String)e.getKey() , errs, (Map) e.getValue());
-          } catch (IOException e) {
-            e.printStackTrace();
           } catch (Exception e) {
             e.printStackTrace();
           }
@@ -132,15 +140,24 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
     Set<String> errmessages = new HashSet<>();
     for(int i =1;i<2;i++){//make it  ahigher number
       RestTestHarness publisher = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
-      payload = payload.replaceAll("CACHENAME" , cacheName);
-      String val1 = String.valueOf(10 * i + 1);
-      payload = payload.replace("CACHEVAL1", val1);
-      String val2 = String.valueOf(10 * i + 2);
-      payload = payload.replace("CACHEVAL2", val2);
-      String val3 = String.valueOf(10 * i + 3);
-      payload = payload.replace("CACHEVAL3", val3);
-
-      String response = publisher.post("/config?wt=json", SolrTestCaseJ4.json(payload));
+      String response;
+      String val1;
+      String val2;
+      String val3;
+      try {
+        payload = payload.replaceAll("CACHENAME" , cacheName);
+        val1 = String.valueOf(10 * i + 1);
+        payload = payload.replace("CACHEVAL1", val1);
+        val2 = String.valueOf(10 * i + 2);
+        payload = payload.replace("CACHEVAL2", val2);
+        val3 = String.valueOf(10 * i + 3);
+        payload = payload.replace("CACHEVAL3", val3);
+  
+        response = publisher.post("/config?wt=json", SolrTestCaseJ4.json(payload));
+      } finally {
+        publisher.close();
+      }
+      
       Map map = (Map) getVal(new JSONParser(new StringReader(response)));
       Object errors = map.get("errors");
       if(errors!= null){
@@ -164,23 +181,23 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
       while ( TimeUnit.SECONDS.convert(System.nanoTime() - startTime, TimeUnit.NANOSECONDS) < maxTimeoutSeconds) {
         Thread.sleep(100);
         errmessages.clear();
-        Map respMap = getAsMap(url+"/config/overlay?wt=json");
+        Map respMap = getAsMap(url+"/config/overlay?wt=json", cloudClient);
         Map m = (Map) respMap.get("overlay");
         if(m!= null) m = (Map) m.get("props");
         if(m == null) {
-          errmessages.add(MessageFormat.format( "overlay does not exist for cache: {0} , iteration: {1} response {2} ", cacheName, i, respMap.toString()));
+          errmessages.add(StrUtils.formatString("overlay does not exist for cache: {0} , iteration: {1} response {2} ", cacheName, i, respMap.toString()));
           continue;
         }
 
 
         Object o = getObjectByPath(m, true, asList("query", cacheName, "size"));
-        if(!val1.equals(o)) errmessages.add(MessageFormat.format("'size' property not set, expected = {0}, actual {1}", val1,o));
+        if(!val1.equals(o)) errmessages.add(StrUtils.formatString("'size' property not set, expected = {0}, actual {1}", val1, o));
 
         o = getObjectByPath(m, true, asList("query", cacheName, "initialSize"));
-        if(!val2.equals(o)) errmessages.add(MessageFormat.format("'initialSize' property not set, expected = {0}, actual {1}", val2,o));
+        if(!val2.equals(o)) errmessages.add(StrUtils.formatString("'initialSize' property not set, expected = {0}, actual {1}", val2, o));
 
         o = getObjectByPath(m, true, asList("query", cacheName, "autowarmCount"));
-        if(!val3.equals(o)) errmessages.add(MessageFormat.format("'autowarmCount' property not set, expected = {0}, actual {1}", val3,o));
+        if(!val3.equals(o)) errmessages.add(StrUtils.formatString("'autowarmCount' property not set, expected = {0}, actual {1}", val3, o));
         if(errmessages.isEmpty()) break;
       }
       if(!errmessages.isEmpty()) {
@@ -191,15 +208,21 @@ public class TestSolrConfigHandlerConcurrent extends AbstractFullDistribZkTestBa
 
   }
 
-  private  Map getAsMap(String uri) throws Exception {
+  public static Map getAsMap(String uri, CloudSolrClient cloudClient) throws Exception {
     HttpGet get = new HttpGet(uri) ;
     HttpEntity entity = null;
     try {
-      entity = cloudClient.getLbServer().getHttpClient().execute(get).getEntity();
+      entity = cloudClient.getLbClient().getHttpClient().execute(get).getEntity();
       String response = EntityUtils.toString(entity, StandardCharsets.UTF_8);
-      return (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+      try {
+        return (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+      } catch (JSONParser.ParseException e) {
+        log.error(response,e);
+        throw e;
+      }
     } finally {
       EntityUtils.consumeQuietly(entity);
+      get.releaseConnection();
     }
   }
 }

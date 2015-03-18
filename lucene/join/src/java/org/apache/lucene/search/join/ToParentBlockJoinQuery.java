@@ -119,8 +119,8 @@ public class ToParentBlockJoinQuery extends Query {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher) throws IOException {
-    return new BlockJoinWeight(this, childQuery.createWeight(searcher), parentsFilter, scoreMode);
+  public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
+    return new BlockJoinWeight(this, childQuery.createWeight(searcher, needsScores), parentsFilter, scoreMode);
   }
   
   /** Return our child query. */
@@ -135,16 +135,11 @@ public class ToParentBlockJoinQuery extends Query {
     private final ScoreMode scoreMode;
 
     public BlockJoinWeight(Query joinQuery, Weight childWeight, BitDocIdSetFilter parentsFilter, ScoreMode scoreMode) {
-      super();
+      super(joinQuery);
       this.joinQuery = joinQuery;
       this.childWeight = childWeight;
       this.parentsFilter = parentsFilter;
       this.scoreMode = scoreMode;
-    }
-
-    @Override
-    public Query getQuery() {
-      return joinQuery;
     }
 
     @Override
@@ -193,11 +188,6 @@ public class ToParentBlockJoinQuery extends Query {
         return scorer.explain(context.docBase);
       }
       return new ComplexExplanation(false, 0.0f, "Not a match");
-    }
-
-    @Override
-    public boolean scoresDocsOutOfOrder() {
-      return false;
     }
   }
 

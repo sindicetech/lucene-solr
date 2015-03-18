@@ -17,11 +17,14 @@ package org.apache.lucene.spatial.prefix;
  * limitations under the License.
  */
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.spatial4j.core.shape.Point;
 import com.spatial4j.core.shape.Shape;
-
-import org.apache.lucene.queries.TermsFilter;
+import org.apache.lucene.queries.TermsQuery;
 import org.apache.lucene.search.Filter;
+import org.apache.lucene.search.QueryWrapperFilter;
 import org.apache.lucene.spatial.prefix.tree.Cell;
 import org.apache.lucene.spatial.prefix.tree.CellIterator;
 import org.apache.lucene.spatial.prefix.tree.SpatialPrefixTree;
@@ -31,15 +34,12 @@ import org.apache.lucene.spatial.query.UnsupportedSpatialOperation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * A basic implementation of {@link PrefixTreeStrategy} using a large
- * {@link TermsFilter} of all the cells from
+ * {@link TermsQuery} of all the cells from
  * {@link SpatialPrefixTree#getTreeCellIterator(com.spatial4j.core.shape.Shape, int)}.
  * It only supports the search of indexed Point shapes.
- * <p/>
+ * <p>
  * The precision of query shapes (distErrPct) is an important factor in using
  * this Strategy. If the precision is too precise then it will result in many
  * terms which will amount to a slower query.
@@ -52,6 +52,20 @@ public class TermQueryPrefixTreeStrategy extends PrefixTreeStrategy {
 
   public TermQueryPrefixTreeStrategy(SpatialPrefixTree grid, String fieldName) {
     super(grid, fieldName);
+  }
+
+  @Override
+  protected CellToBytesRefIterator newCellToBytesRefIterator() {
+    //Ensure we don't have leaves, as this strategy doesn't handle them.
+    return new CellToBytesRefIterator() {
+      @Override
+      public BytesRef next() {
+        if (!cellIter.hasNext()) {
+          return null;
+        }
+        return cellIter.next().getTokenBytesNoLeaf(bytesRef);
+      }
+    };
   }
 
   @Override
@@ -91,8 +105,9 @@ public class TermQueryPrefixTreeStrategy extends PrefixTreeStrategy {
     for (BytesRef byteRef : terms) {
       byteRef.bytes = masterBytes.bytes();
     }
-    //unfortunately TermsFilter will needlessly sort & dedupe
-    return new TermsFilter(getFieldName(), terms);
+    //unfortunately TermsQuery will needlessly sort & dedupe
+    //TODO an automatonQuery might be faster?
+    return new QueryWrapperFilter(new TermsQuery(getFieldName(), terms));
   }
 
 }

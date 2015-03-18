@@ -17,14 +17,14 @@ package org.apache.lucene.search;
  * limitations under the License.
  */
 
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.Term;
-import org.apache.lucene.util.ToStringUtils;
-import org.apache.lucene.util.Bits;
-
-import java.util.Set;
 import java.io.IOException;
+import java.util.Set;
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.ToStringUtils;
 
 /**
  * A query that matches all documents.
@@ -56,7 +56,7 @@ public class MatchAllDocsQuery extends Query {
       while(liveDocs != null && doc < maxDoc && !liveDocs.get(doc)) {
         doc++;
       }
-      if (doc == maxDoc) {
+      if (doc >= maxDoc) { // can be > maxDoc when called from advance()
         doc = NO_MORE_DOCS;
       }
       return doc;
@@ -89,16 +89,12 @@ public class MatchAllDocsQuery extends Query {
     private float queryNorm;
 
     public MatchAllDocsWeight(IndexSearcher searcher) {
+      super(MatchAllDocsQuery.this);
     }
 
     @Override
     public String toString() {
       return "weight(" + MatchAllDocsQuery.this + ")";
-    }
-
-    @Override
-    public Query getQuery() {
-      return MatchAllDocsQuery.this;
     }
 
     @Override
@@ -133,7 +129,7 @@ public class MatchAllDocsQuery extends Query {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher) {
+  public Weight createWeight(IndexSearcher searcher, boolean needsScores) {
     return new MatchAllDocsWeight(searcher);
   }
 
@@ -147,18 +143,5 @@ public class MatchAllDocsQuery extends Query {
     buffer.append("*:*");
     buffer.append(ToStringUtils.boost(getBoost()));
     return buffer.toString();
-  }
-
-  @Override
-  public boolean equals(Object o) {
-    if (!(o instanceof MatchAllDocsQuery))
-      return false;
-    MatchAllDocsQuery other = (MatchAllDocsQuery) o;
-    return this.getBoost() == other.getBoost();
-  }
-
-  @Override
-  public int hashCode() {
-    return Float.floatToIntBits(getBoost()) ^ 0x1AA71190;
   }
 }

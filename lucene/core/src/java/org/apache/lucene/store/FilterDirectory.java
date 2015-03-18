@@ -23,13 +23,22 @@ import java.util.Collection;
 /** Directory implementation that delegates calls to another directory.
  *  This class can be used to add limitations on top of an existing
  *  {@link Directory} implementation such as
- *  {@link RateLimitedDirectoryWrapper rate limiting} or to add additional
+ *  {@link NRTCachingDirectory} or to add additional
  *  sanity checks for tests. However, if you plan to write your own
  *  {@link Directory} implementation, you should consider extending directly
  *  {@link Directory} or {@link BaseDirectory} rather than try to reuse
  *  functionality of existing {@link Directory}s by extending this class.
  *  @lucene.internal */
 public class FilterDirectory extends Directory {
+
+  /** Get the wrapped instance by <code>dir</code> as long as this reader is
+   *  an instance of {@link FilterDirectory}.  */
+  public static Directory unwrap(Directory dir) {
+    while (dir instanceof FilterDirectory) {
+      dir = ((FilterDirectory) dir).in;
+    }
+    return dir;
+  }
 
   protected final Directory in;
 

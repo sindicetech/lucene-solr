@@ -3,29 +3,28 @@ package org.apache.solr.cloud;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.OptionBuilder;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.solr.common.cloud.OnReconnect;
 import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.cloud.ZkConfigManager;
 import org.apache.solr.core.CoreContainer;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooDefs;
-import org.apache.zookeeper.data.ACL;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.ParserConfigurationException;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
@@ -166,7 +165,7 @@ public class ZkCLI {
       SolrZkServer zkServer = null;
       if (solrPort != null) {
         zkServer = new SolrZkServer("true", null, solrHome + "/zoo_data",
-            solrHome, solrPort);
+            solrHome, Integer.parseInt(solrPort));
         zkServer.parseConfig();
         zkServer.start();
       }
@@ -210,8 +209,8 @@ public class ZkCLI {
             System.out.println("A chroot was specified in zkHost but the znode doesn't exist. ");
             System.exit(1);
           }
-          
-          ZkController.uploadConfigDir(zkClient, new File(confDir), confName);
+          ZkConfigManager configManager = new ZkConfigManager(zkClient);
+          configManager.uploadConfigDir(Paths.get(confDir), confName);
         } else if (line.getOptionValue(CMD).equals(DOWNCONFIG)) {
           if (!line.hasOption(CONFDIR) || !line.hasOption(CONFNAME)) {
             System.out.println("-" + CONFDIR + " and -" + CONFNAME
@@ -220,8 +219,8 @@ public class ZkCLI {
           }
           String confDir = line.getOptionValue(CONFDIR);
           String confName = line.getOptionValue(CONFNAME);
-          
-          ZkController.downloadConfigDir(zkClient, confName, new File(confDir));
+          ZkConfigManager configManager = new ZkConfigManager(zkClient);
+          configManager.downloadConfigDir(confName, Paths.get(confDir));
         } else if (line.getOptionValue(CMD).equals(LINKCONFIG)) {
           if (!line.hasOption(COLLECTION) || !line.hasOption(CONFNAME)) {
             System.out.println("-" + COLLECTION + " and -" + CONFNAME
@@ -254,16 +253,27 @@ public class ZkCLI {
             System.out.println("-" + PUT + " requires two args - the path to create and the data string");
             System.exit(1);
           }
-          zkClient.create(arglist.get(0).toString(), arglist.get(1).toString().getBytes(StandardCharsets.UTF_8), CreateMode.PERSISTENT, true);
+          String path = arglist.get(0).toString();
+          if (zkClient.exists(path, true)) {
+            zkClient.setData(path, arglist.get(1).toString().getBytes(StandardCharsets.UTF_8), true);
+          } else {
+            zkClient.create(path, arglist.get(1).toString().getBytes(StandardCharsets.UTF_8), CreateMode.PERSISTENT, true);
+          }
         } else if (line.getOptionValue(CMD).equals(PUT_FILE)) {
           List arglist = line.getArgList();
           if (arglist.size() != 2) {
             System.out.println("-" + PUT_FILE + " requires two args - the path to create in ZK and the path to the local file");
             System.exit(1);
           }
+
+          String path = arglist.get(0).toString();
           InputStream is = new FileInputStream(arglist.get(1).toString());
           try {
-            zkClient.create(arglist.get(0).toString(), IOUtils.toByteArray(is), CreateMode.PERSISTENT, true);
+            if (zkClient.exists(path, true)) {
+              zkClient.setData(path, IOUtils.toByteArray(is), true);
+            } else {
+              zkClient.create(path, IOUtils.toByteArray(is), CreateMode.PERSISTENT, true);
+            }
           } finally {
             IOUtils.closeQuietly(is);
           }

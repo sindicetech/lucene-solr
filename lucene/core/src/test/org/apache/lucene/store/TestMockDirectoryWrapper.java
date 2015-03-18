@@ -19,8 +19,11 @@ package org.apache.lucene.store;
 
 import java.io.IOException;
 
+import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.RandomIndexWriter;
+import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 
 public class TestMockDirectoryWrapper extends LuceneTestCase {
@@ -33,9 +36,9 @@ public class TestMockDirectoryWrapper extends LuceneTestCase {
       fail();
     } catch (Exception expected) {
       assertTrue(expected.getMessage().contains("there are still open locks"));
+    } finally {
+      IOUtils.closeWhileHandlingException(iw);
     }
-    iw.close();
-    dir.close();
   }
   
   public void testFailIfIndexWriterNotClosedChangeLockFactory() throws IOException {
@@ -46,9 +49,9 @@ public class TestMockDirectoryWrapper extends LuceneTestCase {
       fail();
     } catch (Exception expected) {
       assertTrue(expected.getMessage().contains("there are still open locks"));
+    } finally {
+      IOUtils.closeWhileHandlingException(iw);
     }
-    iw.close();
-    dir.close();
   }
   
   public void testDiskFull() throws IOException {
@@ -87,6 +90,18 @@ public class TestMockDirectoryWrapper extends LuceneTestCase {
       // expected
     }
     out.close();
+    dir.close();
+  }
+  
+  public void testMDWinsideOfMDW() throws Exception {
+    // add MDW inside another MDW
+    Directory dir = new MockDirectoryWrapper(random(), newMockDirectory());
+    RandomIndexWriter iw = new RandomIndexWriter(random(), dir);
+    for (int i = 0; i < 20; i++) {
+      iw.addDocument(new Document());
+    }
+    iw.commit();
+    iw.close();
     dir.close();
   }
   

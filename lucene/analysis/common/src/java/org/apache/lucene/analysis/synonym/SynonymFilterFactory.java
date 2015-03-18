@@ -73,7 +73,6 @@ import org.apache.lucene.util.Version;
  *   <li><code>boolean expand</code> - true if conflation groups should be expanded, false if they are one-directional</li>
  *   <li><code>{@link Analyzer} analyzer</code> - an analyzer used for each raw synonym</li>
  * </ul>
- * </p>
  * @see SolrSynonymParser SolrSynonymParser: default format
  */
 public class SynonymFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
@@ -102,7 +101,6 @@ public class SynonymFilterFactory extends TokenFilterFactory implements Resource
     }
 
     if (tokenizerFactory != null) {
-      assureMatchVersion();
       tokArgs.put("luceneMatchVersion", getLuceneMatchVersion().toString());
       for (Iterator<String> itr = args.keySet().iterator(); itr.hasNext();) {
         String key = itr.next();
@@ -140,7 +138,7 @@ public class SynonymFilterFactory extends TokenFilterFactory implements Resource
       };
     }
 
-    try {
+    try (Analyzer a = analyzer) {
       String formatClass = format;
       if (format == null || format.equals("solr")) {
         formatClass = SolrSynonymParser.class.getName();
@@ -148,7 +146,7 @@ public class SynonymFilterFactory extends TokenFilterFactory implements Resource
         formatClass = WordnetSynonymParser.class.getName();
       }
       // TODO: expose dedup as a parameter?
-      map = loadSynonyms(loader, formatClass, true, analyzer);
+      map = loadSynonyms(loader, formatClass, true, a);
     } catch (ParseException e) {
       throw new IOException("Error parsing synonyms file:", e);
     }

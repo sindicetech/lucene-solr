@@ -18,9 +18,6 @@ package org.apache.lucene.search;
  */
 
 import java.io.IOException;
-import java.util.Collection;
-
-import org.apache.lucene.util.AttributeSource;
 
 /** 
  * A {@code FilterScorer} contains another {@code Scorer}, which it
@@ -32,11 +29,25 @@ import org.apache.lucene.util.AttributeSource;
  * further override some of these methods and may also provide additional
  * methods and fields.
  */
-abstract class FilterScorer extends Scorer {
+public abstract class FilterScorer extends Scorer {
   protected final Scorer in;
-  
+
+  /**
+   * Create a new FilterScorer
+   * @param in the {@link Scorer} to wrap
+   */
   public FilterScorer(Scorer in) {
     super(in.weight);
+    this.in = in;
+  }
+
+  /**
+   * Create a new FilterScorer with a specific weight
+   * @param in the {@link Scorer} to wrap
+   * @param weight a {@link Weight}
+   */
+  public FilterScorer(Scorer in, Weight weight) {
+    super(weight);
     this.in = in;
   }
   
@@ -51,17 +62,17 @@ abstract class FilterScorer extends Scorer {
   }
 
   @Override
-  public int docID() {
+  public final int docID() {
     return in.docID();
   }
 
   @Override
-  public int nextDoc() throws IOException {
+  public final int nextDoc() throws IOException {
     return in.nextDoc();
   }
 
   @Override
-  public int advance(int target) throws IOException {
+  public final int advance(int target) throws IOException {
     return in.advance(target);
   }
 
@@ -69,9 +80,9 @@ abstract class FilterScorer extends Scorer {
   public long cost() {
     return in.cost();
   }
-
+  
   @Override
-  public AttributeSource attributes() {
-    return in.attributes();
+  public final TwoPhaseIterator asTwoPhaseIterator() {
+    return in.asTwoPhaseIterator();
   }
 }

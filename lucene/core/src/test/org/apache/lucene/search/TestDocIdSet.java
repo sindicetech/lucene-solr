@@ -127,9 +127,13 @@ public class TestDocIdSet extends LuceneTestCase {
       public DocIdSet getDocIdSet(LeafReaderContext context, Bits acceptDocs) {
         return null;
       }
+      @Override
+      public String toString(String field) {
+        return "nullDocIdSetFilter";
+      }
     };
     
-    Assert.assertEquals(0, searcher.search(new MatchAllDocsQuery(), f, 10).totalHits);
+    Assert.assertEquals(0, searcher.search(new FilteredQuery(new MatchAllDocsQuery(), f), 10).totalHits);
     reader.close();
     dir.close();
   }
@@ -169,9 +173,13 @@ public class TestDocIdSet extends LuceneTestCase {
           }
         };
       }
+      @Override
+      public String toString(String field) {
+        return "nullDocIdSetFilter";
+      }
     };
     
-    Assert.assertEquals(0, searcher.search(new MatchAllDocsQuery(), f, 10).totalHits);
+    Assert.assertEquals(0, searcher.search(new FilteredQuery(new MatchAllDocsQuery(), f), 10).totalHits);
     reader.close();
     dir.close();
   }

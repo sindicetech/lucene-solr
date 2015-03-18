@@ -343,11 +343,21 @@ final class IndexFileDeleter implements Closeable {
     }
   }
 
-  private void ensureOpen() throws AlreadyClosedException {
+  void ensureOpen() throws AlreadyClosedException {
     writer.ensureOpen(false);
     // since we allow 'closing' state, we must still check this, we could be closing because we hit e.g. OOM
     if (writer.tragedy != null) {
       throw new AlreadyClosedException("refusing to delete any files: this IndexWriter hit an unrecoverable exception", writer.tragedy);
+    }
+  }
+
+  // for testing
+  boolean isClosed() {
+    try {
+      ensureOpen();
+      return false;
+    } catch (AlreadyClosedException ace) {
+      return true;
     }
   }
 
@@ -573,7 +583,7 @@ final class IndexFileDeleter implements Closeable {
       }
 
       // Save files so we can decr on next checkpoint/commit:
-      lastFiles.addAll(segmentInfos.files(directory, false));
+      lastFiles.addAll(segmentInfos.files(false));
     }
     if (infoStream.isEnabled("IFD")) {
       long t1 = System.nanoTime();
@@ -585,7 +595,7 @@ final class IndexFileDeleter implements Closeable {
     assert locked();
     // If this is a commit point, also incRef the
     // segments_N file:
-    for(final String fileName: segmentInfos.files(directory, isCommit)) {
+    for(final String fileName: segmentInfos.files(isCommit)) {
       incRef(fileName);
     }
   }
@@ -660,7 +670,7 @@ final class IndexFileDeleter implements Closeable {
 
   void decRef(SegmentInfos segmentInfos) throws IOException {
     assert locked();
-    decRef(segmentInfos.files(directory, false));
+    decRef(segmentInfos.files(false));
   }
 
   public boolean exists(String fileName) {
@@ -792,7 +802,7 @@ final class IndexFileDeleter implements Closeable {
       userData = segmentInfos.getUserData();
       segmentsFileName = segmentInfos.getSegmentsFileName();
       generation = segmentInfos.getGeneration();
-      files = Collections.unmodifiableCollection(segmentInfos.files(directory, true));
+      files = Collections.unmodifiableCollection(segmentInfos.files(true));
       segmentCount = segmentInfos.size();
     }
 

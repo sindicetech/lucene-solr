@@ -40,6 +40,7 @@ import org.apache.solr.common.util.DataInputInputStream;
 import org.apache.solr.common.util.FastInputStream;
 import org.apache.solr.common.util.FastOutputStream;
 import org.apache.solr.common.util.JavaBinCodec;
+import org.apache.solr.common.util.ObjectReleaseTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -172,9 +173,10 @@ public class TransactionLog {
         }
       } else {
         if (start > 0) {
-          log.error("New transaction log already exists:" + tlogFile + " size=" + raf.length());
+          log.warn("New transaction log already exists:" + tlogFile + " size=" + raf.length());
+          return;
         }
-        assert start==0;
+       
         if (start > 0) {
           raf.setLength(0);
         }
@@ -182,6 +184,8 @@ public class TransactionLog {
       }
 
       success = true;
+      
+      assert ObjectReleaseTracker.track(this);
 
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
@@ -556,6 +560,8 @@ public class TransactionLog {
       }
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    } finally {
+      assert ObjectReleaseTracker.release(this);
     }
   }
 

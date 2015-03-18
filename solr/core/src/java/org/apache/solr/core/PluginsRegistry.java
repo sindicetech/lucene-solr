@@ -27,12 +27,14 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.handler.PingRequestHandler;
 import org.apache.solr.handler.RealTimeGetHandler;
 import org.apache.solr.handler.ReplicationHandler;
+import org.apache.solr.handler.SchemaHandler;
 import org.apache.solr.handler.SolrConfigHandler;
 import org.apache.solr.handler.UpdateRequestHandler;
 import org.apache.solr.handler.admin.LoggingHandler;
 import org.apache.solr.handler.admin.LukeRequestHandler;
 import org.apache.solr.handler.admin.PluginInfoHandler;
 import org.apache.solr.handler.admin.PropertiesRequestHandler;
+import org.apache.solr.handler.admin.SegmentsInfoRequestHandler;
 import org.apache.solr.handler.admin.ShowFileRequestHandler;
 import org.apache.solr.handler.admin.SolrInfoMBeanHandler;
 import org.apache.solr.handler.admin.SystemInfoHandler;
@@ -57,7 +59,8 @@ public class PluginsRegistry {
 
     //solrconfighandler
     implicits.add(getReqHandlerInfo("/config", SolrConfigHandler.class, null));
-
+    //schemahandler
+    implicits.add(getReqHandlerInfo("/schema", SchemaHandler.class, null));
     //register replicationhandler always for SolrCloud
     implicits.add(getReqHandlerInfo("/replication", ReplicationHandler.class,null));
 
@@ -78,6 +81,7 @@ public class PluginsRegistry {
     PluginInfo ping = getReqHandlerInfo("/admin/ping", PingRequestHandler.class, null);
     ping.initArgs.add(INVARIANTS, new NamedList<>(makeMap("echoParams", "all", "q", "solrpingquery")));
     implicits.add(ping);
+    implicits.add(getReqHandlerInfo("/admin/segments", SegmentsInfoRequestHandler.class, null));
     return implicits;
   }
 

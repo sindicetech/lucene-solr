@@ -28,13 +28,13 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.http.params.CoreConnectionPNames;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
-import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
-import org.apache.solr.client.solrj.impl.CloudSolrServer;
-import org.apache.solr.client.solrj.impl.HttpSolrServer;
+import org.apache.solr.client.solrj.impl.CloudSolrClient;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.response.CollectionAdminResponse;
 import org.apache.solr.common.SolrInputDocument;
@@ -139,11 +139,13 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     destroyServers();
   }
 
-  protected CloudSolrServer createCloudClient(String defaultCollection) {
-    CloudSolrServer server = new CloudSolrServer(zkServer.getZkAddress(), random().nextBoolean());
+  protected abstract void doTest() throws Exception;
+
+  protected CloudSolrClient createCloudClient(String defaultCollection) {
+    CloudSolrClient server = new CloudSolrClient(zkServer.getZkAddress(), random().nextBoolean());
     server.setParallelUpdates(random().nextBoolean());
     if (defaultCollection != null) server.setDefaultCollection(defaultCollection);
-    server.getLbServer().getHttpClient().getParams()
+    server.getLbClient().getHttpClient().getParams()
         .setParameter(CoreConnectionPNames.CONNECTION_TIMEOUT, 30000);
     return server;
   }
@@ -161,7 +163,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   protected void index(String collection, SolrInputDocument doc) throws IOException, SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+    CloudSolrClient client = createCloudClient(collection);
     try {
       client.add(doc);
       client.commit(true, true);
@@ -172,7 +174,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   protected void index(String collection, List<SolrInputDocument> docs) throws IOException, SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+    CloudSolrClient client = createCloudClient(collection);
     try {
       client.add(docs);
       client.commit(true, true);
@@ -183,7 +185,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   protected void deleteById(String collection, List<String> ids) throws IOException, SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+    CloudSolrClient client = createCloudClient(collection);
     try {
       client.deleteById(ids);
       client.commit(true, true);
@@ -194,7 +196,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   protected void deleteByQuery(String collection, String q) throws IOException, SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+    CloudSolrClient client = createCloudClient(collection);
     try {
       client.deleteByQuery(q);
       client.commit(true, true);
@@ -208,7 +210,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * Invokes a commit on the given collection.
    */
   protected void commit(String collection) throws IOException, SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+    CloudSolrClient client = createCloudClient(collection);
     try {
       client.commit(true, true);
     }
@@ -220,8 +222,8 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   /**
    * Returns the number of documents in a given collection
    */
-  protected long getNumDocs(String collection) throws SolrServerException {
-    CloudSolrServer client = createCloudClient(collection);
+  protected long getNumDocs(String collection) throws SolrServerException, IOException {
+    CloudSolrClient client = createCloudClient(collection);
     try {
       return client.query(new SolrQuery("*:*")).getResults().getNumFound();
     }
@@ -314,7 +316,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * to ensure that a node will not host more than one core (which will create problem when trying to restart servers).
    */
   private void createCollection(String name) throws Exception {
-    CloudSolrServer client = createCloudClient(null);
+    CloudSolrClient client = createCloudClient(null);
     try {
       // Create the target collection
       Map<String, List<Integer>> collectionInfos = new HashMap<>();
@@ -336,7 +338,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
 
   private CollectionAdminResponse createCollection(Map<String,List<Integer>> collectionInfos,
                                                    String collectionName, int numShards, int replicationFactor,
-                                                   int maxShardsPerNode, SolrServer client, String createNodeSetStr)
+                                                   int maxShardsPerNode, SolrClient client, String createNodeSetStr)
       throws SolrServerException, IOException {
     return createCollection(collectionInfos, collectionName,
         ZkNodeProps.makeMap(
@@ -348,7 +350,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   private CollectionAdminResponse createCollection(Map<String, List<Integer>> collectionInfos, String collectionName,
-                                                   Map<String, Object> collectionProps, SolrServer client,
+                                                   Map<String, Object> collectionProps, SolrClient client,
                                                    String confSetName)
       throws SolrServerException, IOException{
     ModifiableSolrParams params = new ModifiableSolrParams();
@@ -389,7 +391,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * Delete a collection through the Collection API.
    */
   protected CollectionAdminResponse deleteCollection(String collectionName) throws SolrServerException, IOException {
-    SolrServer client = createCloudClient(null);
+    SolrClient client = createCloudClient(null);
     CollectionAdminResponse res;
 
     try {
@@ -414,7 +416,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   }
 
   private void waitForRecoveriesToFinish(String collection, boolean verbose) throws Exception {
-    CloudSolrServer client = this.createCloudClient(null);
+    CloudSolrClient client = this.createCloudClient(null);
     try {
       client.connect();
       ZkStateReader zkStateReader = client.getZkStateReader();
@@ -429,7 +431,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * Asserts that the collection has the correct number of shards and replicas
    */
   protected void assertCollectionExpectations(String collectionName) {
-    CloudSolrServer client = this.createCloudClient(null);
+    CloudSolrClient client = this.createCloudClient(null);
     try {
       client.connect();
       ClusterState clusterState = client.getZkStateReader().getClusterState();
@@ -551,7 +553,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     Map<String,List<CloudJettyRunner>> shardToJetty = new HashMap<>();
     Map<String,CloudJettyRunner> shardToLeaderJetty = new HashMap<>();
 
-    CloudSolrServer cloudClient = this.createCloudClient(null);
+    CloudSolrClient cloudClient = this.createCloudClient(null);
     try {
       cloudClient.connect();
       ZkStateReader zkStateReader = cloudClient.getZkStateReader();
@@ -607,7 +609,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     public String nodeName;
     public String coreNodeName;
     public String url;
-    public SolrServer client;
+    public SolrClient client;
     public Replica info;
     public String slice;
     public String collection;
@@ -662,10 +664,10 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
 
   }
 
-  protected static SolrServer createNewSolrServer(String baseUrl) {
+  protected static SolrClient createNewSolrServer(String baseUrl) {
     try {
       // setup the server...
-      HttpSolrServer s = new HttpSolrServer(baseUrl);
+      HttpSolrClient s = new HttpSolrClient(baseUrl);
       s.setConnectionTimeout(DEFAULT_CONNECTION_TIMEOUT);
       s.setDefaultMaxConnectionsPerHost(100);
       s.setMaxTotalConnections(100);

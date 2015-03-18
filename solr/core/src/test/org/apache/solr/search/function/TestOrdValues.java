@@ -51,13 +51,13 @@ import org.junit.Test;
 
 /**
  * Test search based on OrdFieldSource and ReverseOrdFieldSource.
- * <p/>
+ * <p>
  * Tests here create an index with a few documents, each having
  * an indexed "id" field.
  * The ord values of this field are later used for scoring.
- * <p/>
+ * <p>
  * The order tests use Hits to verify that docs are ordered as expected.
- * <p/>
+ * <p>
  * The exact score tests use TopDocs top to verify the exact score.
  */
 public class TestOrdValues extends LuceneTestCase {
@@ -97,7 +97,7 @@ public class TestOrdValues extends LuceneTestCase {
     Query q = new FunctionQuery(vs);
     log("test: " + q);
     QueryUtils.check(random(), q, s);
-    ScoreDoc[] h = s.search(q, null, 1000).scoreDocs;
+    ScoreDoc[] h = s.search(q, 1000).scoreDocs;
     assertEquals("All docs should be matched!", N_DOCS, h.length);
     String prevID = inOrder
             ? "IE"   // greater than all ids of docs in this test ("ID0001", etc.)
@@ -145,7 +145,7 @@ public class TestOrdValues extends LuceneTestCase {
       vs = new ReverseOrdFieldSource(field);
     }
     Query q = new FunctionQuery(vs);
-    TopDocs td = s.search(q, null, 1000);
+    TopDocs td = s.search(q, 1000);
     assertEquals("All docs should be matched!", N_DOCS, td.totalHits);
     ScoreDoc sd[] = td.scoreDocs;
     for (int i = 0; i < sd.length; i++) {

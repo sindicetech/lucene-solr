@@ -18,18 +18,15 @@ package org.apache.solr.handler.component;
  */
 
 import org.apache.solr.BaseDistributedSearchTestCase;
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.response.FieldStatsInfo;
 import org.apache.solr.client.solrj.response.PivotField;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.params.FacetParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -41,17 +38,13 @@ import java.util.List;
  */
 public class DistributedFacetPivotSmallAdvancedTest extends BaseDistributedSearchTestCase {
 
-  public DistributedFacetPivotSmallAdvancedTest() {
-    this.fixShardCount = true;
-    this.shardCount = 2;
-  }
-
-  @Override
-  public void doTest() throws Exception {
+  @Test
+  @ShardsFixed(num = 2)
+  public void test() throws Exception {
 
     del("*:*");
-    final SolrServer shard0 = clients.get(0);
-    final SolrServer shard1 = clients.get(1);
+    final SolrClient shard0 = clients.get(0);
+    final SolrClient shard1 = clients.get(1);
 
     // NOTE: we use the literal (4 character) string "null" as a company name
     // to help ensure there isn't any bugs where the literal string is treated as if it 
@@ -96,19 +89,23 @@ public class DistributedFacetPivotSmallAdvancedTest extends BaseDistributedSearc
     handle.put("maxScore", SKIPVAL);
 
     doTestDeepPivotStatsOnString();
-    doTestTopStatsWithRefinement();
+
+    doTestTopStatsWithRefinement(true);
+    doTestTopStatsWithRefinement(false);
   }
 
   /**
    * we need to ensure that stats never "overcount" the values from a single shard
    * even if we hit that shard with a refinement request 
    */
-  private void doTestTopStatsWithRefinement() throws Exception {
-    
-    
+  private void doTestTopStatsWithRefinement(final boolean allStats) throws Exception {
+
+    String stat_param = allStats ? 
+      "{!tag=s1}foo_i" : "{!tag=s1 min=true max=true count=true missing=true}foo_i";
+
     ModifiableSolrParams coreParams = params("q", "*:*", "rows", "0",
                                              "stats", "true",
-                                             "stats.field", "{!tag=s1}foo_i" );
+                                             "stats.field", stat_param );
     ModifiableSolrParams facetParams = new ModifiableSolrParams(coreParams);
     facetParams.add(params("facet", "true",
                            "facet.limit", "1",
@@ -135,14 +132,22 @@ public class DistributedFacetPivotSmallAdvancedTest extends BaseDistributedSearc
       assertEquals(msg, 91.0, fieldStatsInfo.getMax());
       assertEquals(msg, 10, (long) fieldStatsInfo.getCount());
       assertEquals(msg, 0, (long) fieldStatsInfo.getMissing());
-      assertEquals(msg, 248.0, fieldStatsInfo.getSum());
-      assertEquals(msg, 15294.0, fieldStatsInfo.getSumOfSquares(), 0.1E-7);
-      assertEquals(msg, 24.8, (double) fieldStatsInfo.getMean(), 0.1E-7);
-      assertEquals(msg, 31.87405772027709, fieldStatsInfo.getStddev(), 0.1E-7);
+
+      if (allStats) {
+        assertEquals(msg, 248.0, fieldStatsInfo.getSum());
+        assertEquals(msg, 15294.0, fieldStatsInfo.getSumOfSquares(), 0.1E-7);
+        assertEquals(msg, 24.8, (double) fieldStatsInfo.getMean(), 0.1E-7);
+        assertEquals(msg, 31.87405772027709, fieldStatsInfo.getStddev(), 0.1E-7);
+      } else {
+        assertNull(msg, fieldStatsInfo.getSum());
+        assertNull(msg, fieldStatsInfo.getSumOfSquares());
+        assertNull(msg, fieldStatsInfo.getMean());
+        assertNull(msg, fieldStatsInfo.getStddev());
+      }
 
       if (params.getBool("facet", false)) {
         // if this was a facet request, then the top pivot constraint and pivot 
-        // stats should match what we expect - regardless of wether refine
+        // stats should match what we expect - regardless of whether refine
         // was used, or if the query was initially satisfied by the default overrequest
         
         List<PivotField> placePivots = rsp.getFacetPivot().get("place_t,company_t");
@@ -163,6 +168,12 @@ public class DistributedFacetPivotSmallAdvancedTest extends BaseDistributedSearc
         assertEquals(4, (long) dublinMicrosoftStatsInfo.getCount());
         assertEquals(0, (long) dublinMicrosoftStatsInfo.getMissing());
         
+        if (! allStats) {
+          assertNull(msg, dublinMicrosoftStatsInfo.getSum());
+          assertNull(msg, dublinMicrosoftStatsInfo.getSumOfSquares());
+          assertNull(msg, dublinMicrosoftStatsInfo.getMean());
+          assertNull(msg, dublinMicrosoftStatsInfo.getStddev());
+        }
       }
     }
 

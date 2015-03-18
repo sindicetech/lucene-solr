@@ -17,7 +17,11 @@ package org.apache.lucene.codecs.lucene49;
  * limitations under the License.
  */
 
+import static org.apache.lucene.codecs.lucene49.Lucene49NormsFormat.VERSION_CURRENT;
+import static org.apache.lucene.codecs.lucene49.Lucene49NormsFormat.VERSION_START;
+
 import java.io.IOException;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -41,9 +45,6 @@ import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.packed.BlockPackedReader;
 import org.apache.lucene.util.packed.PackedInts;
-
-import static org.apache.lucene.codecs.lucene49.Lucene49NormsFormat.VERSION_CURRENT;
-import static org.apache.lucene.codecs.lucene49.Lucene49NormsFormat.VERSION_START;
 
 /**
  * Reader for 4.9 norms
@@ -85,7 +86,7 @@ final class Lucene49NormsProducer extends NormsProducer {
   }
     
   Lucene49NormsProducer(SegmentReadState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
     merging = false;
     String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
     ramBytesUsed = new AtomicLong(RamUsageEstimator.shallowSizeOfInstance(getClass()));
@@ -176,7 +177,7 @@ final class Lucene49NormsProducer extends NormsProducer {
   }
   
   @Override
-  public synchronized Iterable<? extends Accountable> getChildResources() {
+  public synchronized Collection<Accountable> getChildResources() {
     return Accountables.namedAccountables("field", instancesInfo);
   }
   

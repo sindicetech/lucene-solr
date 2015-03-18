@@ -21,8 +21,11 @@ import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
+import org.apache.solr.core.PluginInfo;
+import org.apache.solr.core.PluginBag;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrInfoMBean;
+import org.apache.solr.handler.component.SearchHandler;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestHandler;
 import org.apache.solr.response.SolrQueryResponse;
@@ -33,8 +36,9 @@ import org.apache.solr.util.stats.Timer;
 import org.apache.solr.util.stats.TimerContext;
 
 import java.net.URL;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+
+import static org.apache.solr.core.RequestParams.USEPARAM;
 
 /**
  *
@@ -53,10 +57,11 @@ public abstract class RequestHandlerBase implements SolrRequestHandler, SolrInfo
   private final AtomicLong numTimeouts = new AtomicLong();
   private final Timer requestTimes = new Timer();
   private final long handlerStart = System.currentTimeMillis();
+  private PluginInfo pluginInfo;
 
   /**
    * Initializes the {@link org.apache.solr.request.SolrRequestHandler} by creating three {@link org.apache.solr.common.params.SolrParams} named.
-   * <table border="1">
+   * <table border="1" summary="table of parameters">
    * <tr><th>Name</th><th>Description</th></tr>
    * <tr><td>defaults</td><td>Contains all of the named arguments contained within the list element named "defaults".</td></tr>
    * <tr><td>appends</td><td>Contains all of the named arguments contained within the list element named "appends".</td></tr>
@@ -131,7 +136,9 @@ public abstract class RequestHandlerBase implements SolrRequestHandler, SolrInfo
     numRequests.incrementAndGet();
     TimerContext timer = requestTimes.time();
     try {
-      SolrPluginUtils.setDefaults(req,defaults,appends,invariants);
+      if(pluginInfo != null && pluginInfo.attributes.containsKey(USEPARAM)) req.getContext().put(USEPARAM,pluginInfo.attributes.get(USEPARAM));
+      SolrPluginUtils.setDefaults(this, req, defaults, appends, invariants);
+      req.getContext().remove(USEPARAM);
       rsp.setHttpCaching(httpCaching);
       handleRequestBody( req, rsp );
       // count timeouts
@@ -207,7 +214,7 @@ public abstract class RequestHandlerBase implements SolrRequestHandler, SolrInfo
    *
    * This function is thread safe.
    */
-  public static SolrRequestHandler getRequestHandler(String handlerName, Map<String, SolrRequestHandler> reqHandlers) {
+  public static SolrRequestHandler getRequestHandler(String handlerName, PluginBag<SolrRequestHandler> reqHandlers) {
     if(handlerName == null) return null;
     SolrRequestHandler handler = reqHandlers.get(handlerName);
     int idx = 0;
@@ -227,6 +234,18 @@ public abstract class RequestHandlerBase implements SolrRequestHandler, SolrInfo
       }
     }
     return handler;
+  }
+
+  /**
+   *
+   * @param pluginInfo information about the plugin
+   */
+  public void setPluginInfo(PluginInfo pluginInfo){
+    if(this.pluginInfo==null) this.pluginInfo = pluginInfo;
+  }
+
+  public PluginInfo getPluginInfo(){
+    return  pluginInfo;
   }
 
 

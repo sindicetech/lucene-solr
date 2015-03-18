@@ -68,7 +68,7 @@ final class Lucene42DocValuesConsumer extends DocValuesConsumer {
   
   Lucene42DocValuesConsumer(SegmentWriteState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension, float acceptableOverheadRatio) throws IOException {
     this.acceptableOverheadRatio = acceptableOverheadRatio;
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
     boolean success = false;
     try {
       String dataName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
@@ -194,13 +194,18 @@ final class Lucene42DocValuesConsumer extends DocValuesConsumer {
     }
   }
   
+  private boolean closed;
+  
   @Override
   public void close() throws IOException {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    
     boolean success = false;
     try {
-      if (meta != null) {
-        meta.writeVInt(-1); // write EOF marker
-      }
+      meta.writeVInt(-1); // write EOF marker
       success = true;
     } finally {
       if (success) {

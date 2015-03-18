@@ -17,9 +17,20 @@ package org.apache.lucene.spatial;
  * limitations under the License.
  */
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.logging.Logger;
+
 import com.spatial4j.core.context.SpatialContext;
+import com.spatial4j.core.distance.DistanceUtils;
 import com.spatial4j.core.shape.Point;
 import com.spatial4j.core.shape.Rectangle;
+
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
@@ -36,26 +47,22 @@ import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.LuceneTestCase.SuppressSysoutChecks;
 import org.apache.lucene.util.TestUtil;
-import org.junit.After;
-import org.junit.Before;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-
+import static com.carrotsearch.randomizedtesting.RandomizedTest.randomDouble;
 import static com.carrotsearch.randomizedtesting.RandomizedTest.randomGaussian;
+import static com.carrotsearch.randomizedtesting.RandomizedTest.randomInt;
 import static com.carrotsearch.randomizedtesting.RandomizedTest.randomIntBetween;
 
 /** A base test class for spatial lucene. It's mostly Lucene generic. */
 @SuppressSysoutChecks(bugUrl = "These tests use JUL extensively.")
 public abstract class SpatialTestCase extends LuceneTestCase {
 
+  protected Logger log = Logger.getLogger(getClass().getName());
+
   private DirectoryReader indexReader;
   protected RandomIndexWriter indexWriter;
   private Directory directory;
+  private Analyzer analyzer;
   protected IndexSearcher indexSearcher;
 
   protected SpatialContext ctx;//subclass must initialize
@@ -63,7 +70,6 @@ public abstract class SpatialTestCase extends LuceneTestCase {
   protected Map<String,Type> uninvertMap = new HashMap<>();
   
   @Override
-  @Before
   public void setUp() throws Exception {
     super.setUp();
     // TODO: change this module to index docvalues instead of uninverting
@@ -73,13 +79,14 @@ public abstract class SpatialTestCase extends LuceneTestCase {
 
     directory = newDirectory();
     final Random random = random();
-    indexWriter = new RandomIndexWriter(random,directory, newIndexWriterConfig(random));
+    analyzer = new MockAnalyzer(random);
+    indexWriter = new RandomIndexWriter(random,directory, newIWConfig(random, analyzer));
     indexReader = UninvertingReader.wrap(indexWriter.getReader(), uninvertMap);
     indexSearcher = newSearcher(indexReader);
   }
 
-  protected IndexWriterConfig newIndexWriterConfig(Random random) {
-    final IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig(random, new MockAnalyzer(random));
+  protected IndexWriterConfig newIWConfig(Random random, Analyzer analyzer) {
+    final IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig(random, analyzer);
     //TODO can we randomly choose a doc-values supported format?
     if (needsDocValues())
       indexWriterConfig.setCodec( TestUtil.getDefaultCodec());
@@ -91,10 +98,8 @@ public abstract class SpatialTestCase extends LuceneTestCase {
   }
 
   @Override
-  @After
   public void tearDown() throws Exception {
-    indexWriter.close();
-    IOUtils.close(indexReader,directory);
+    IOUtils.close(indexWriter, indexReader, analyzer, directory);
     super.tearDown();
   }
 
@@ -151,16 +156,40 @@ public abstract class SpatialTestCase extends LuceneTestCase {
   }
 
   protected Rectangle randomRectangle() {
-    final Rectangle WB = ctx.getWorldBounds();
-    int rW = (int) randomGaussianMeanMax(10, WB.getWidth());
-    double xMin = randomIntBetween((int) WB.getMinX(), (int) WB.getMaxX() - rW);
-    double xMax = xMin + rW;
+    return randomRectangle(ctx.getWorldBounds());
+  }
 
-    int yH = (int) randomGaussianMeanMax(Math.min(rW, WB.getHeight()), WB.getHeight());
-    double yMin = randomIntBetween((int) WB.getMinY(), (int) WB.getMaxY() - yH);
-    double yMax = yMin + yH;
+  protected Rectangle randomRectangle(Rectangle bounds) {
+    double[] xNewStartAndWidth = randomSubRange(bounds.getMinX(), bounds.getWidth());
+    double xMin = xNewStartAndWidth[0];
+    double xMax = xMin + xNewStartAndWidth[1];
+    if (bounds.getCrossesDateLine()) {
+      xMin = DistanceUtils.normLonDEG(xMin);
+      xMax = DistanceUtils.normLonDEG(xMax);
+    }
+
+    double[] yNewStartAndHeight = randomSubRange(bounds.getMinY(), bounds.getHeight());
+    double yMin = yNewStartAndHeight[0];
+    double yMax = yMin + yNewStartAndHeight[1];
 
     return ctx.makeRectangle(xMin, xMax, yMin, yMax);
+  }
+
+  /** Returns new minStart and new length that is inside the range specified by the arguments. */
+  protected double[] randomSubRange(double boundStart, double boundLen) {
+    if (boundLen >= 3 && usually()) { // typical
+      // prefer integers for ease of debugability ... and prefer 1/16th of bound
+      int intBoundStart = (int) Math.ceil(boundStart);
+      int intBoundEnd = (int) (boundStart + boundLen);
+      int intBoundLen = intBoundEnd - intBoundStart;
+      int newLen = (int) randomGaussianMeanMax(intBoundLen / 16.0, intBoundLen);
+      int newStart = intBoundStart + randomInt(intBoundLen - newLen);
+      return new double[]{newStart, newLen};
+    } else { // (no int rounding)
+      double newLen = randomGaussianMeanMax(boundLen / 16, boundLen);
+      double newStart = boundStart + (boundLen - newLen == 0 ? 0 : (randomDouble() % (boundLen - newLen)));
+      return new double[]{newStart, newLen};
+    }
   }
 
   private double randomGaussianMinMeanMax(double min, double mean, double max) {

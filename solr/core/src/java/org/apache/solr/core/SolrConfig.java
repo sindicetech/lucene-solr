@@ -37,11 +37,13 @@ import org.apache.solr.search.CacheConfig;
 import org.apache.solr.search.FastLRUCache;
 import org.apache.solr.search.QParserPlugin;
 import org.apache.solr.search.ValueSourceParser;
+import org.apache.solr.search.stats.StatsCache;
 import org.apache.solr.servlet.SolrRequestParsers;
 import org.apache.solr.spelling.QueryConverter;
 import org.apache.solr.update.SolrIndexConfig;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.update.processor.UpdateRequestProcessorChain;
+import org.apache.solr.update.processor.UpdateRequestProcessorFactory;
 import org.apache.solr.util.DOMUtil;
 import org.apache.solr.util.FileUtils;
 import org.apache.solr.util.RegexFileFilter;
@@ -74,6 +76,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.apache.solr.core.SolrConfig.PluginOpts.LAZY;
 import static org.apache.solr.core.SolrConfig.PluginOpts.MULTI_OK;
 import static org.apache.solr.core.SolrConfig.PluginOpts.NOOP;
 import static org.apache.solr.core.SolrConfig.PluginOpts.REQUIRE_CLASS;
@@ -90,11 +93,13 @@ public class SolrConfig extends Config implements MapSerializable{
   public static final Logger log = LoggerFactory.getLogger(SolrConfig.class);
   
   public static final String DEFAULT_CONF_FILE = "solrconfig.xml";
+  private RequestParams requestParams;
 
-  static enum PluginOpts {
+  public static enum PluginOpts {
     MULTI_OK, 
     REQUIRE_NAME,
     REQUIRE_CLASS,
+    LAZY,
     // EnumSet.of and/or EnumSet.copyOf(Collection) are anoying
     // because of type determination
     NOOP
@@ -175,6 +180,7 @@ public class SolrConfig extends Config implements MapSerializable{
   throws ParserConfigurationException, IOException, SAXException {
     super(loader, name, is, "/config/");
     getOverlay();//just in case it is not initialized
+    getRequestParams();
     initLibs();
     luceneMatchVersion = getLuceneVersion("luceneMatchVersion");
     String indexConfigPrefix;
@@ -200,7 +206,11 @@ public class SolrConfig extends Config implements MapSerializable{
       defaultIndexConfig = mainIndexConfig = null;
       indexConfigPrefix = "indexConfig";
     }
-    nrtMode = getBool(indexConfigPrefix+"/nrtMode", true);
+    assertWarnOrFail("The <nrtMode> config has been discontinued and NRT mode is always used by Solr." +
+            " This config will be removed in future versions.", getNode(indexConfigPrefix + "/nrtMode", false) == null,
+        false
+    );
+
     // Parse indexConfig section, using mainIndex as backup in case old config is used
     indexConfig = new SolrIndexConfig(this, "indexConfig", mainIndexConfig);
 
@@ -263,7 +273,7 @@ public class SolrConfig extends Config implements MapSerializable{
       jmxConfig = new JmxConfiguration(false, null, null, null);
     }
      maxWarmingSearchers = getInt("query/maxWarmingSearchers",Integer.MAX_VALUE);
-     slowQueryThresholdMillis = getInt("query/slowQueryThresholdMillis", -1);
+    slowQueryThresholdMillis = getInt("query/slowQueryThresholdMillis", -1);
     for (SolrPluginInfo plugin : plugins) loadPluginInfo(plugin);
      updateHandlerInfo = loadUpdatehandlerInfo();
      
@@ -298,18 +308,20 @@ public class SolrConfig extends Config implements MapSerializable{
     Config.log.info("Loaded SolrConfig: " + name);
   }
 
-  public static List<SolrPluginInfo> plugins = ImmutableList.<SolrPluginInfo>builder()
-      .add(new SolrPluginInfo(SolrRequestHandler.class, "requestHandler", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
+  public static final  List<SolrPluginInfo> plugins = ImmutableList.<SolrPluginInfo>builder()
+      .add(new SolrPluginInfo(SolrRequestHandler.class, SolrRequestHandler.TYPE, REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK, LAZY))
       .add(new SolrPluginInfo(QParserPlugin.class, "queryParser", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
-      .add(new SolrPluginInfo(QueryResponseWriter.class, "queryResponseWriter", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
+      .add(new SolrPluginInfo(QueryResponseWriter.class, "queryResponseWriter", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK, LAZY))
       .add(new SolrPluginInfo(ValueSourceParser.class, "valueSourceParser", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
       .add(new SolrPluginInfo(TransformerFactory.class, "transformer", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
       .add(new SolrPluginInfo(SearchComponent.class, "searchComponent", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
+      .add(new SolrPluginInfo(UpdateRequestProcessorFactory.class, "updateProcessor", REQUIRE_NAME, REQUIRE_CLASS, MULTI_OK))
       // TODO: WTF is up with queryConverter???
       // it aparently *only* works as a singleton? - SOLR-4304
       // and even then -- only if there is a single SpellCheckComponent
       // because of queryConverter.setIndexAnalyzer
       .add(new SolrPluginInfo(QueryConverter.class, "queryConverter", REQUIRE_NAME, REQUIRE_CLASS))
+      .add(new SolrPluginInfo(PluginBag.RuntimeLib.class, "runtimeLib", REQUIRE_NAME, MULTI_OK))
       // this is hackish, since it picks up all SolrEventListeners,
       // regardless of when/how/why they are used (or even if they are
       // declared outside of the appropriate context) but there's no nice
@@ -324,7 +336,14 @@ public class SolrConfig extends Config implements MapSerializable{
       .add(new SolrPluginInfo(IndexSchemaFactory.class, "schemaFactory", REQUIRE_CLASS))
       .add(new SolrPluginInfo(RestManager.class, "restManager"))
       .add(new SolrPluginInfo(InitParams.class, InitParams.TYPE, MULTI_OK))
+      .add(new SolrPluginInfo(StatsCache.class, "statsCache", REQUIRE_CLASS))
       .build();
+  public static final Map<String, SolrPluginInfo> classVsSolrPluginInfo;
+  static {
+    Map<String, SolrPluginInfo> map = new HashMap<>();
+    for (SolrPluginInfo plugin : plugins) map.put(plugin.clazz.getName(), plugin);
+    classVsSolrPluginInfo = Collections.unmodifiableMap(map);
+  }
 
   public static class SolrPluginInfo{
 
@@ -346,13 +365,14 @@ public class SolrConfig extends Config implements MapSerializable{
       in = loader.openResource(ConfigOverlay.RESOURCE_NAME);
     } catch (IOException e) {
       //no problem no overlay.json file
-      return new ConfigOverlay(Collections.EMPTY_MAP,0);
+      return new ConfigOverlay(Collections.EMPTY_MAP,-1);
     }
 
     try {
       int version = 0; //will be always 0 for file based resourceloader
       if (in instanceof ZkSolrResourceLoader.ZkByteArrayInputStream) {
         version = ((ZkSolrResourceLoader.ZkByteArrayInputStream) in).getStat().getVersion();
+        log.info("config overlay loaded . version : {} ", version);
       }
       Map m = (Map) ObjectBuilder.getVal(new JSONParser(new InputStreamReader(in, Charsets.UTF_8)));
       return new ConfigOverlay(m,version);
@@ -424,7 +444,6 @@ public class SolrConfig extends Config implements MapSerializable{
   public final int queryResultWindowSize;
   public final int queryResultMaxDocsCached;
   public final boolean enableLazyFieldLoading;
-  public final boolean nrtMode;
   // DocSet
   public final float hashSetInverseLoadFactor;
   public final int hashDocSetMaxSize;
@@ -629,9 +648,21 @@ public class SolrConfig extends Config implements MapSerializable{
    * SearchComponent, QueryConverter, SolrEventListener, DirectoryFactory,
    * IndexDeletionPolicy, IndexReaderFactory, {@link TransformerFactory}
    */
-  public List<PluginInfo> getPluginInfos(String  type){
+  public List<PluginInfo> getPluginInfos(String type) {
     List<PluginInfo> result = pluginStore.get(type);
-    return result == null ? Collections.<PluginInfo>emptyList(): result; 
+    SolrPluginInfo info = classVsSolrPluginInfo.get(type);
+    if (info != null && info.options.contains(REQUIRE_NAME)) {
+      Map<String, Map> infos = overlay.getNamedPlugins(info.tag);
+      if (!infos.isEmpty()) {
+        LinkedHashMap<String, PluginInfo> map = new LinkedHashMap<>();
+        if (result != null) for (PluginInfo pluginInfo : result) map.put(pluginInfo.name, pluginInfo);
+        for (Map.Entry<String, Map> e : infos.entrySet()) {
+          map.put(e.getKey(), new PluginInfo(info.tag, e.getValue()));
+        }
+        result = new ArrayList<>(map.values());
+      }
+    }
+    return result == null ? Collections.<PluginInfo>emptyList() : result;
   }
   public PluginInfo getPluginInfo(String  type){
     List<PluginInfo> result = pluginStore.get(type);
@@ -649,14 +680,14 @@ public class SolrConfig extends Config implements MapSerializable{
   private void initLibs() {
     NodeList nodes = (NodeList) evaluate("lib", XPathConstants.NODESET);
     if (nodes == null || nodes.getLength() == 0) return;
-    
+
     log.info("Adding specified lib dirs to ClassLoader");
     SolrResourceLoader loader = getResourceLoader();
-    
+
     try {
       for (int i = 0; i < nodes.getLength(); i++) {
         Node node = nodes.item(i);
-        
+
         String baseDir = DOMUtil.getAttr(node, "dir");
         String path = DOMUtil.getAttr(node, "path");
         if (null != baseDir) {
@@ -681,7 +712,7 @@ public class SolrConfig extends Config implements MapSerializable{
       loader.reloadLuceneSPI();
     }
   }
-  
+
   public int getMultipartUploadLimitKB() {
     return multipartUploadLimitKB;
   }
@@ -743,7 +774,8 @@ public class SolrConfig extends Config implements MapSerializable{
       if(plugin.options.contains(PluginOpts.REQUIRE_NAME)){
         LinkedHashMap items = new LinkedHashMap();
         for (PluginInfo info : infos) items.put(info.name, info.toMap());
-        result.put(tag,items);
+        for (Map.Entry e : overlay.getNamedPlugins(plugin.tag).entrySet()) items.put(e.getKey(), e.getValue());
+        result.put(tag, items);
       } else {
         if(plugin.options.contains(MULTI_OK)){
           ArrayList<Map> l = new ArrayList<>();
@@ -797,5 +829,18 @@ public class SolrConfig extends Config implements MapSerializable{
     return overlay;
   }
 
+  public RequestParams getRequestParams() {
+    if(requestParams == null){
+      return refreshRequestParams();
+    }
+    return requestParams;
+  }
+
+
+  public RequestParams refreshRequestParams(){
+    requestParams = RequestParams.getFreshRequestParams(getResourceLoader(),requestParams);
+    log.info("current version of requestparams : {}", requestParams.getZnodeVersion());
+    return requestParams;
+  }
 
 }

@@ -47,11 +47,11 @@ public final class Lucene40RWSegmentInfoFormat extends Lucene40SegmentInfoFormat
       CodecUtil.writeHeader(output, Lucene40SegmentInfoFormat.CODEC_NAME, Lucene40SegmentInfoFormat.VERSION_CURRENT);
       // Write the Lucene version that created this segment, since 3.1
       output.writeString(si.getVersion().toString());
-      output.writeInt(si.getDocCount());
+      output.writeInt(si.maxDoc());
 
       output.writeByte((byte) (si.getUseCompoundFile() ? SegmentInfo.YES : SegmentInfo.NO));
       output.writeStringStringMap(si.getDiagnostics());
-      output.writeStringStringMap(Collections.<String,String>emptyMap());
+      output.writeStringStringMap(si.getAttributes());
       output.writeStringSet(si.files());
 
       success = true;

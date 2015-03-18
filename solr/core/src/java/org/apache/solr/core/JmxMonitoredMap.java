@@ -16,6 +16,7 @@
  */
 package org.apache.solr.core;
 
+import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrConfig.JmxConfiguration;
@@ -39,7 +40,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * Responsible for finding (or creating) a MBeanServer from given configuration
  * and registering all SolrInfoMBean objects with JMX.
  * </p>
- * <p/>
  * <p>
  * Please see http://wiki.apache.org/solr/SolrJmx for instructions on usage and configuration
  * </p>
@@ -117,13 +117,20 @@ public class JmxMonitoredMap<K, V> extends
   public void clear() {
     if (server != null) {
       QueryExp exp = Query.eq(Query.attr("coreHashCode"), Query.value(coreHashCode));
-      Set<ObjectName> objectNames = server.queryNames(null, exp);
+      
+      Set<ObjectName> objectNames = null;
+      try {
+        objectNames = server.queryNames(null, exp);
+      } catch (Exception e) {
+        LOG.warn("Exception querying for mbeans", e);
+      }
+      
       if (objectNames != null)  {
         for (ObjectName name : objectNames) {
           try {
             server.unregisterMBean(name);
           } catch (Exception e) {
-            LOG.error("Exception un-registering mbean {}", name, e);
+            LOG.warn("Exception un-registering mbean {}", name, e);
           }
         }
       }
@@ -279,7 +286,9 @@ public class JmxMonitoredMap<K, V> extends
           }
         }
       } catch (Exception e) {
-        LOG.warn("Could not getStatistics on info bean {}", infoBean.getName(), e);
+        // don't log issue if the core is closing
+        if (!(SolrException.getRootCause(e) instanceof AlreadyClosedException))
+          LOG.warn("Could not getStatistics on info bean {}", infoBean.getName(), e);
       }
 
       MBeanAttributeInfo[] attrInfoArr = attrInfoList
@@ -335,13 +344,13 @@ public class JmxMonitoredMap<K, V> extends
       }
 
       if (val != null) {
-        // Its String or one of the simple types, just return it as JMX suggests direct support for such types
+        // It's String or one of the simple types, just return it as JMX suggests direct support for such types
         for (String simpleTypeName : SimpleType.ALLOWED_CLASSNAMES_LIST) {
           if (val.getClass().getName().equals(simpleTypeName)) {
             return val;
           }
         }
-        // Its an arbitrary object which could be something complex and odd, return its toString, assuming that is
+        // It's an arbitrary object which could be something complex and odd, return its toString, assuming that is
         // a workable representation of the object
         return val.toString();
       }

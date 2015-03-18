@@ -43,6 +43,7 @@ import org.apache.lucene.search.suggest.InputArrayIterator;
 import org.apache.lucene.search.suggest.Lookup.LookupResult;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
 import org.junit.Test;
@@ -91,8 +92,49 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals("a <b>p</b>enny saved is a <b>p</b>enny earned", results.get(0).highlightKey);
     assertEquals(10, results.get(0).value);
     assertEquals(new BytesRef("foobaz"), results.get(0).payload);
-
+    
+    results = suggester.lookup(TestUtil.stringToCharSequence("money penny", random()), 10, false, true);
+    assertEquals(1, results.size());
+    assertEquals("a penny saved is a penny earned", results.get(0).key);
+    assertEquals("a <b>penny</b> saved is a <b>penny</b> earned", results.get(0).highlightKey);
+    assertEquals(10, results.get(0).value);
+    assertEquals(new BytesRef("foobaz"), results.get(0).payload);
+ 
+    results = suggester.lookup(TestUtil.stringToCharSequence("penny ea", random()), 10, false, true);
+    assertEquals(2, results.size());
+    assertEquals("a penny saved is a penny earned", results.get(0).key);
+    assertEquals("a <b>penny</b> saved is a <b>penny</b> <b>ea</b>rned", results.get(0).highlightKey);
+    assertEquals("lend me your ear", results.get(1).key);
+    assertEquals("lend me your <b>ea</b>r", results.get(1).highlightKey);
+        
+    results = suggester.lookup(TestUtil.stringToCharSequence("money penny", random()), 10, false, false);
+    assertEquals(1, results.size());
+    assertEquals("a penny saved is a penny earned", results.get(0).key);
+    assertNull(results.get(0).highlightKey);
+    
+    testConstructorDefaults(suggester, keys, a, true, true);
+    testConstructorDefaults(suggester, keys, a, true, false);
+    testConstructorDefaults(suggester, keys, a, false, false);
+    testConstructorDefaults(suggester, keys, a, false, true);
+    
     suggester.close();
+    a.close();
+  }
+
+  private void testConstructorDefaults(AnalyzingInfixSuggester suggester, Input[] keys, Analyzer a, 
+      boolean allTermsRequired, boolean highlight) throws IOException {
+    AnalyzingInfixSuggester suggester2 = new AnalyzingInfixSuggester(newDirectory(), a, a, 3, false, allTermsRequired, highlight);
+    suggester2.build(new InputArrayIterator(keys));
+    
+    CharSequence key = TestUtil.stringToCharSequence("penny ea", random());
+    
+    List<LookupResult> results1 = suggester.lookup(key, 10, allTermsRequired, highlight);
+    List<LookupResult> results2 = suggester2.lookup(key, false, 10);
+    assertEquals(results1.size(), results2.size());
+    assertEquals(results1.get(0).key, results2.get(0).key);
+    assertEquals(results1.get(0).highlightKey, results2.get(0).highlightKey);
+    
+    suggester2.close();
   }
 
   public void testAfterLoad() throws Exception {
@@ -118,6 +160,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals(new BytesRef("foobaz"), results.get(0).payload);
     assertEquals(2, suggester.getCount());
     suggester.close();
+    a.close();
   }
 
   /** Used to return highlighted result; see {@link
@@ -199,6 +242,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals(10, results.get(0).value);
     assertEquals(new BytesRef("foobaz"), results.get(0).payload);
     suggester.close();
+    a.close();
   }
 
   public String toString(List<LookupHighlightFragment> fragments) {
@@ -280,6 +324,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
       suggester = new AnalyzingInfixSuggester(newFSDirectory(tempDir), a, a, minPrefixLength, false);
     }
     suggester.close();
+    a.close();
   }
 
   public void testHighlight() throws Exception {
@@ -295,6 +340,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals("a penny saved is a penny earned", results.get(0).key);
     assertEquals("a <b>penn</b>y saved is a <b>penn</b>y earned", results.get(0).highlightKey);
     suggester.close();
+    a.close();
   }
 
   public void testHighlightCaseChange() throws Exception {
@@ -327,6 +373,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals("a Penny saved is a penny earned", results.get(0).key);
     assertEquals("a <b>Penny</b> saved is a <b>penny</b> earned", results.get(0).highlightKey);
     suggester.close();
+    a.close();
   }
 
   public void testDoubleClose() throws Exception {
@@ -339,6 +386,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     suggester.build(new InputArrayIterator(keys));
     suggester.close();
     suggester.close();
+    a.close();
   }
 
   public void testSuggestStopFilter() throws Exception {
@@ -373,6 +421,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals("a bob for apples", results.get(0).key);
     assertEquals("a bob for <b>a</b>pples", results.get(0).highlightKey);
     suggester.close();
+    IOUtils.close(suggester, indexAnalyzer, queryAnalyzer);
   }
 
   public void testEmptyAtStart() throws Exception {
@@ -416,6 +465,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals(new BytesRef("foobaz"), results.get(0).payload);
 
     suggester.close();
+    a.close();
   }
 
   public void testBothExactAndPrefix() throws Exception {
@@ -432,6 +482,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals(10, results.get(0).value);
     assertEquals(new BytesRef("foobaz"), results.get(0).payload);
     suggester.close();
+    a.close();
   }
 
   private static String randomText() {
@@ -701,6 +752,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
 
     lookupThread.finish();
     suggester.close();
+    a.close();
   }
 
   private static String hilite(boolean lastPrefix, String[] inputTerms, String[] queryTerms) {
@@ -816,6 +868,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals(10, results.get(1).value);
     assertEquals(new BytesRef("foobaz"), results.get(1).payload);
     suggester.close();
+    a.close();
   }
 
   public void testNRTWithParallelAdds() throws IOException, InterruptedException {
@@ -856,6 +909,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
     assertEquals("python", results.get(0).key);
 
     suggester.close();
+    a.close();
   }
 
   private class IndexDocument implements Runnable {
@@ -1113,6 +1167,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
       assertTrue(result.contexts.contains(new BytesRef("baz")));
 
       suggester.close();
+      a.close();
     }
   }
 
@@ -1130,6 +1185,7 @@ public class AnalyzingInfixSuggesterTest extends LuceneTestCase {
 
     dir.close();
     suggester.close();
+    a.close();
   }
 
   private String pfmToString(AnalyzingInfixSuggester suggester, String surface, String prefix) throws IOException {
