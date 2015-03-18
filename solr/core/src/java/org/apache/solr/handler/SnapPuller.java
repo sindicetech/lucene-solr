@@ -82,9 +82,7 @@ import org.apache.solr.handler.ReplicationHandler.FileInfo;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.SolrIndexSearcher;
-import org.apache.solr.update.CdcrTransactionLog;
 import org.apache.solr.update.CommitUpdateCommand;
-import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.FileUtils;
 import org.apache.solr.util.PropertiesInputStream;
@@ -270,11 +268,10 @@ public class SnapPuller {
   /**
    * Fetches the list of files in a given index commit point and updates internal list of files to download.
    */
-  private void fetchFileList(long gen, long lastProcessedVersion) throws IOException {
+  private void fetchFileList(long gen) throws IOException {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set(COMMAND,  CMD_GET_FILE_LIST);
     params.set(GENERATION, String.valueOf(gen));
-    params.set(CdcrParams.LAST_PROCESSED_VERSION, String.valueOf(lastProcessedVersion));
     params.set(CommonParams.WT, "javabin");
     params.set(CommonParams.QT, "/replication");
     QueryRequest req = new QueryRequest(params);
@@ -383,19 +380,15 @@ public class SnapPuller {
         successfulInstall = true;
         return true;
       }
-
-      // Retrieve the last processed version
-      long lastProcessedVersion = getLastProcessedVersion(core.getUpdateHandler().getUpdateLog());
-
       LOG.info("Master's generation: " + latestGeneration);
       LOG.info("Slave's generation: " + commit.getGeneration());
       LOG.info("Starting replication process");
       // get the list of files first
-      fetchFileList(latestGeneration, lastProcessedVersion);
+      fetchFileList(latestGeneration);
       // this can happen if the commit point is deleted before we fetch the file list.
       if(filesToDownload.isEmpty()) return false;
       LOG.info("Number of files in latest index in master: " + filesToDownload.size());
-      LOG.info("Number of tlog files in latest index in master: " + tlogFilesToDownload.size());
+      LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
 
       // Create the sync service
       fsyncService = Executors.newSingleThreadExecutor(new DefaultSolrThreadFactory("fsyncService"));
@@ -439,7 +432,7 @@ public class SnapPuller {
 
           downloadIndexFiles(isFullCopyNeeded, indexDir, tmpIndexDir,
               latestGeneration);
-          downloadTlogFiles(isFullCopyNeeded, latestGeneration);
+          downloadTlogFiles(latestGeneration);
           LOG.info("Total time taken for download : "
               + ((System.currentTimeMillis() - replicationStartTime) / 1000)
               + " secs");
@@ -559,21 +552,6 @@ public class SnapPuller {
         }
       }
     }
-  }
-
-  private long getLastProcessedVersion(UpdateLog ulog) {
-    UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates();
-    try {
-      List<Long> lastUpdate = recentUpdates.getVersions(1);
-      if (!lastUpdate.isEmpty()) {
-        return lastUpdate.get(0);
-      }
-    }
-    finally {
-      recentUpdates.close();
-    }
-    // we do not have recent updates, probably an emtpy update log
-    return 0;
   }
 
   private volatile Exception fsyncException;
@@ -787,9 +765,9 @@ public class SnapPuller {
     }
   }
 
-  private void downloadTlogFiles(boolean downloadCompleteIndex, long latestGeneration) throws Exception {
+  private void downloadTlogFiles(long latestGeneration) throws Exception {
     LOG.info("Starting download of tlog files from master: " + tlogFilesToDownload);
-    tlogFilesDownloaded = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
+    tlogFilesDownloaded = Collections.synchronizedList(new ArrayList<>());
     File tmpTlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir(), "tlog." + getDateAsStr(new Date()));
     try {
       boolean status = tmpTlogDir.mkdirs();
@@ -995,7 +973,7 @@ public class SnapPuller {
   private void copyTmpTlogFiles2Tlog(File tmpTlogDir) {
     boolean status = false;
     File tlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir());
-    for (File file : makeTmpConfDirFileList(tmpTlogDir, new ArrayList<File>())) {
+    for (File file : makeTmpConfDirFileList(tmpTlogDir, new ArrayList<>())) {
       File oldFile = new File(tlogDir, file.getPath().substring(tmpTlogDir.getPath().length(), file.getPath().length()));
       if (!oldFile.getParentFile().exists()) {
         status = oldFile.getParentFile().mkdirs();
