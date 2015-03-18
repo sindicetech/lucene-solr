@@ -574,7 +574,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
             Replica replica = entry.getValue();
             if (replica.getStr(ZkStateReader.BASE_URL_PROP).contains(":" + port)) {
               if (!shardToJetty.containsKey(slice.getName())) {
-                shardToJetty.put(slice.getName(), new ArrayList<CloudJettyRunner>());
+                shardToJetty.put(slice.getName(), new ArrayList<>());
               }
               boolean isLeader = slice.getLeader() == replica;
               CloudJettyRunner cjr = new CloudJettyRunner(jetty, replica, collection, slice.getName(), entry.getKey());

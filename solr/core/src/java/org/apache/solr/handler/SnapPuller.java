@@ -36,6 +36,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -83,6 +84,7 @@ import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.update.CommitUpdateCommand;
+import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.FileUtils;
 import org.apache.solr.util.PropertiesInputStream;
@@ -766,9 +768,22 @@ public class SnapPuller {
   }
 
   private void downloadTlogFiles(long latestGeneration) throws Exception {
+    UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
+    String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
+
+    HashSet<Map<String, Object>> localTlogFiles = new HashSet<>();
+    for (String fileName : logList) {
+      Map<String,Object> fileMeta = new HashMap<>();
+      fileMeta.put(NAME, fileName);
+      fileMeta.put(SIZE, new File(ulog.getLogDir(), fileName).length());
+      localTlogFiles.add(fileMeta);
+    }
+    HashSet<Map<String, Object>> leaderTlogFiles = new HashSet<>(tlogFilesToDownload);
+    leaderTlogFiles.removeAll(localTlogFiles);
+
     LOG.info("Starting download of tlog files from master: " + tlogFilesToDownload);
     tlogFilesDownloaded = Collections.synchronizedList(new ArrayList<>());
-    File tmpTlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir(), "tlog." + getDateAsStr(new Date()));
+    File tmpTlogDir = new File(ulog.getLogDir(), "tlog." + getDateAsStr(new Date()));
     try {
       boolean status = tmpTlogDir.mkdirs();
       if (!status) {
