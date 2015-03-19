@@ -20,11 +20,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.Channels;
+import java.nio.file.Files;
 import java.util.Collection;
 
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.FastOutputStream;
 import org.apache.solr.common.util.JavaBinCodec;
+import org.apache.solr.common.util.ObjectReleaseTracker;
 
 /**
  * Extends {@link org.apache.solr.update.TransactionLog} to:
@@ -178,10 +180,17 @@ public class CdcrTransactionLog extends TransactionLog {
       }
 
       if (deleteOnClose) {
-        tlogFile.delete();
+        try {
+          Files.deleteIfExists(tlogFile.toPath());
+        } catch (IOException e) {
+          // TODO: should this class care if a file couldnt be deleted?
+          // this just emulates previous behavior, where only SecurityException would be handled.
+        }
       }
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    } finally {
+      assert ObjectReleaseTracker.release(this);
     }
   }
 

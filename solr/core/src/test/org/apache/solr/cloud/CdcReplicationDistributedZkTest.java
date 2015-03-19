@@ -30,15 +30,13 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.handler.CdcrParams;
 import org.apache.solr.servlet.SolrDispatchFilter;
-import org.junit.Before;
 
 public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTest {
 
   @Override
-  @Before
-  public void setUp() throws Exception {
+  public void distribSetUp() throws Exception {
     schemaString = "schema15.xml";      // we need a string id
-    super.setUp();
+    super.distribSetUp();
   }
 
   @Override

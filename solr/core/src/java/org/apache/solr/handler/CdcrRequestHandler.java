@@ -227,7 +227,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     // Find the registered path of the handler
     path = null;
     for (Map.Entry<String, PluginBag.PluginHolder<SolrRequestHandler>> entry : core.getRequestHandlers().getRegistry().entrySet()) {
-      if (entry.getValue().get() == this) {
+      if (core.getRequestHandlers().isLoaded(entry.getKey()) && entry.getValue().get() == this) {
         path = entry.getKey();
         break;
       }

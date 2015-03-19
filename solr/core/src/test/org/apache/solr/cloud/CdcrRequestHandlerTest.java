@@ -19,16 +19,14 @@ package org.apache.solr.cloud;
 
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.handler.CdcrParams;
-import org.junit.Before;
 
 public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
 
   @Override
-  @Before
-  public void setUp() throws Exception {
+  public void distribSetUp() throws Exception {
     schemaString = "schema15.xml";      // we need a string id
     createTargetCollection = false;     // we do not need the target cluster
-    super.setUp();
+    super.distribSetUp();
   }
 
   @Override

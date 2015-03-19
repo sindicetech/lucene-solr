@@ -54,7 +54,8 @@ import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.handler.CdcrParams;
 import org.apache.solr.servlet.SolrDispatchFilter;
 import org.apache.zookeeper.CreateMode;
-import org.junit.Before;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.apache.solr.cloud.OverseerCollectionProcessor.CREATE_NODE_SET;
@@ -111,10 +112,15 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     return "solrconfig-cdcr.xml";
   }
 
-  @Before
   @Override
-  public void setUp() throws Exception {
-    super.setUp();
+  public void distribSetUp() throws Exception {
+    super.distribSetUp();
+
+    if (sliceCount > 0) {
+      System.setProperty("numShards", Integer.toString(sliceCount));
+    } else {
+      System.clearProperty("numShards");
+    }
 
     if (isSSLMode()) {
       System.clearProperty("urlScheme");
@@ -130,7 +136,21 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     }
   }
 
+  @Override
+  protected void createServers(int numServers) throws Exception {}
+
+  @BeforeClass
+  public static void beforeClass() {
+    System.setProperty("solrcloud.update.delay", "0");
+  }
+
+  @AfterClass
+  public static void afterClass() throws Exception {
+    System.clearProperty("solrcloud.update.delay");
+  }
+
   @Test
+  @ShardsFixed(num = 4)
   public void testDistribSearch() throws Exception {
     this.createSourceCollection();
     if (this.createTargetCollection) this.createTargetCollection();
@@ -169,7 +189,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       client.commit(true, true);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -180,7 +200,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       client.commit(true, true);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -191,7 +211,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       client.commit(true, true);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -202,7 +222,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       client.commit(true, true);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -215,7 +235,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       client.commit(true, true);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -228,7 +248,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       return client.query(new SolrQuery("*:*")).getResults().getNumFound();
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -423,14 +443,14 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       super.waitForRecoveriesToFinish(collection, zkStateReader, verbose);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
   /**
    * Asserts that the collection has the correct number of shards and replicas
    */
-  protected void assertCollectionExpectations(String collectionName) {
+  protected void assertCollectionExpectations(String collectionName) throws Exception {
     CloudSolrClient client = this.createCloudClient(null);
     try {
       client.connect();
@@ -449,7 +469,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
           "of shards.", expectedTotalShards, totalShards);
     }
     finally {
-      client.shutdown();
+      client.close();
     }
   }
 
@@ -499,6 +519,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
 
     // now wait till we see the leader for each shard
     for (int i = 1; i <= sliceCount; i++) {
+      this.printLayout();
       zkStateReader.getLeaderRetry(temporaryCollection, "shard" + i, 15000);
     }
 
@@ -594,7 +615,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       this.shardToLeaderJetty.put(collection, shardToLeaderJetty);
     }
     finally {
-      cloudClient.shutdown();
+      cloudClient.close();
     }
   }
 
