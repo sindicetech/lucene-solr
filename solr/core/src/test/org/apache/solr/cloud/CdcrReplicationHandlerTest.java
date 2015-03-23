@@ -73,6 +73,7 @@ public class CdcrReplicationHandlerTest extends AbstractCdcrDistributedZkTest {
     }
 
     List<CloudJettyRunner> slaves = this.getShardToSlaveJetty(SOURCE_COLLECTION, SHARD1);
+    log.info("Stopping shard {}", slaves.get(0).url);
     ChaosMonkey.stop(slaves.get(0).jetty);
 
     for (int i = 5; i < 10; i++) {
@@ -85,6 +86,7 @@ public class CdcrReplicationHandlerTest extends AbstractCdcrDistributedZkTest {
 
     assertEquals(1000, getNumDocs(SOURCE_COLLECTION));
 
+    log.info("Restarting shard {}", slaves.get(0).url);
     this.restartServer(slaves.get(0));
 
     assertEquals(1000, getNumDocs(SOURCE_COLLECTION));
