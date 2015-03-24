@@ -43,9 +43,9 @@ public class CdcrReplicationHandlerTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    // this.doTestFullReplication();
-    // this.doTestPartialReplication();
-    // this.doTestPartialReplicationWithTruncatedTlog();
+    this.doTestFullReplication();
+    this.doTestPartialReplication();
+    this.doTestPartialReplicationWithTruncatedTlog();
     this.doTestPartialReplicationAfterPeerSync();
   }
 
@@ -205,7 +205,7 @@ public class CdcrReplicationHandlerTest extends AbstractCdcrDistributedZkTest {
   }
 
   /**
-   * Asserts that the number of transaction logs across all the shards
+   * Asserts that the transaction logs between the leader and slave
    */
   @Override
   protected void assertUpdateLogs(String collection, int maxNumberOfTLogs) throws Exception {
