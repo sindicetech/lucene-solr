@@ -97,7 +97,7 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  */
 public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTestBase {
 
-  protected int sliceCount = 1;
+  protected int sliceCount = 2;
   protected int replicationFactor = 2;
   protected boolean createTargetCollection = true;
 
@@ -761,7 +761,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     return file.listFiles().length;
   }
 
-  private CollectionInfo collectInfo(String collection) throws Exception {
+  protected CollectionInfo collectInfo(String collection) throws Exception {
     CollectionInfo info = new CollectionInfo(collection);
     for (String shard : shardToJetty.get(collection).keySet()) {
       List<CloudJettyRunner> jettyRunners = shardToJetty.get(collection).get(shard);
@@ -776,7 +776,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     return info;
   }
 
-  private class CollectionInfo {
+  protected class CollectionInfo {
 
     List<CoreInfo> coreInfos = new ArrayList<>();
 
