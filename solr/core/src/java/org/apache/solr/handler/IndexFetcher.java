@@ -82,6 +82,7 @@ import org.apache.solr.handler.ReplicationHandler.*;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.CommitUpdateCommand;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
@@ -809,7 +810,7 @@ public class IndexFetcher {
       }
       // If the file does not exist, we should rename it based on the latest tlog id
       else if (!localFilesMeta.containsKey(version)) {
-        file.put(ALIAS, String.format(Locale.ROOT, UpdateLog.LOG_FILENAME_PATTERN, UpdateLog.TLOG_NAME, ++lastId, version));
+        file.put(ALIAS, String.format(Locale.ROOT, CdcrUpdateLog.LOG_FILENAME_PATTERN, UpdateLog.TLOG_NAME, ++lastId, version));
         filteredTlogFiles.add(file);
       }
     }
