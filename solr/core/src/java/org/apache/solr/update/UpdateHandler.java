@@ -122,9 +122,8 @@ public abstract class UpdateHandler implements SolrInfoMBean {
         }
 
       } else {
-        // nocommit
-        // ulog = new UpdateLog();
-        ulog = new CdcrUpdateLog();
+        String className = ulogPluginInfo.className == null ? UpdateLog.class.getName() : ulogPluginInfo.className;
+        ulog = core.getResourceLoader().newInstance(className, UpdateLog.class);
       }
 
       if (!core.isReloaded() && !core.getDirectoryFactory().isPersistent()) {

@@ -50,7 +50,7 @@ public class CdcrUpdateLogTest extends SolrTestCaseJ4 {
   public static void beforeClass() throws Exception {
     savedFactory = System.getProperty("solr.DirectoryFactory");
     System.setProperty("solr.directoryFactory", "org.apache.solr.core.MockFSDirectoryFactory");
-    initCore("solrconfig-tlog.xml","schema15.xml");
+    initCore("solrconfig-cdcrupdatelog.xml","schema15.xml");
   }
 
   @AfterClass

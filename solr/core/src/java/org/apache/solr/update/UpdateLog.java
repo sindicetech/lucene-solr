@@ -70,7 +70,7 @@ import static org.apache.solr.update.processor.DistributingUpdateProcessorFactor
 /** @lucene.experimental */
 public class UpdateLog implements PluginInfoInitialized {
   private static final long STATUS_TIME = TimeUnit.NANOSECONDS.convert(60, TimeUnit.SECONDS);
-  public static String LOG_FILENAME_PATTERN = "%s.%019d.%1d";
+  public static String LOG_FILENAME_PATTERN = "%s.%019d";
   public static String TLOG_NAME="tlog";
 
   public static Logger log = LoggerFactory.getLogger(UpdateLog.class);
@@ -276,7 +276,7 @@ public class UpdateLog implements PluginInfoInitialized {
     for (String oldLogName : tlogFiles) {
       File f = new File(tlogDir, oldLogName);
       try {
-        oldLog = new CdcrTransactionLog( f, null, true );
+        oldLog = newTransactionLog(f, null, true);
         addOldLog(oldLog, false);  // don't remove old logs on startup since more than one may be uncapped.
       } catch (Exception e) {
         SolrException.log(log, "Failure to open existing log file (non fatal) " + f, e);
@@ -324,6 +324,14 @@ public class UpdateLog implements PluginInfoInitialized {
       startingUpdates.close();
     }
 
+  }
+
+  /**
+   * Returns a new {@link org.apache.solr.update.TransactionLog}. Sub-classes can override this method to
+   * change the implementation of the transaction log.
+   */
+  public TransactionLog newTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
+    return new TransactionLog(tlogFile, globalStrings, openExisting);
   }
 
   public String getLogDir() {
@@ -390,7 +398,7 @@ public class UpdateLog implements PluginInfoInitialized {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
     String last = tlogFiles[tlogFiles.length-1];
-    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
+    return Long.parseLong(last.substring(TLOG_NAME.length() + 1));
   }
 
   public void add(AddUpdateCommand cmd) {
@@ -407,7 +415,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.write(cmd, operationFlags);
       }
 
@@ -458,7 +466,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDelete(cmd, operationFlags);
       }
 
@@ -482,7 +490,7 @@ public class UpdateLog implements PluginInfoInitialized {
       long pos = -1;
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDeleteByQuery(cmd, operationFlags);
       }
 
@@ -808,7 +816,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
     List<TransactionLog> recoverLogs = new ArrayList<>(1);
     for (TransactionLog ll : newestLogsOnStartup) {
-      ll.incref();
+      if (!ll.try_incref()) continue;
 
       try {
         if (ll.endsWithCommit()) {
@@ -842,10 +850,10 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  protected void ensureLog(long startVersion) {
+  protected void ensureLog() {
     if (tlog == null) {
-      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, startVersion);
-      tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
+      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id);
+      tlog = newTransactionLog(new File(tlogDir, newLogName), globalStrings, false);
     }
   }
 
