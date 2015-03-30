@@ -16,27 +16,6 @@
  */
 package org.apache.solr.handler;
 
-import static org.apache.lucene.util.IOUtils.CHARSET_UTF_8;
-import static org.apache.solr.handler.ReplicationHandler.ALIAS;
-import static org.apache.solr.handler.ReplicationHandler.CHECKSUM;
-import static org.apache.solr.handler.ReplicationHandler.CMD_DETAILS;
-import static org.apache.solr.handler.ReplicationHandler.CMD_GET_FILE;
-import static org.apache.solr.handler.ReplicationHandler.CMD_GET_FILE_LIST;
-import static org.apache.solr.handler.ReplicationHandler.CMD_INDEX_VERSION;
-import static org.apache.solr.handler.ReplicationHandler.COMMAND;
-import static org.apache.solr.handler.ReplicationHandler.COMPRESSION;
-import static org.apache.solr.handler.ReplicationHandler.CONF_FILES;
-import static org.apache.solr.handler.ReplicationHandler.CONF_FILE_SHORT;
-import static org.apache.solr.handler.ReplicationHandler.EXTERNAL;
-import static org.apache.solr.handler.ReplicationHandler.FILE;
-import static org.apache.solr.handler.ReplicationHandler.FILE_STREAM;
-import static org.apache.solr.handler.ReplicationHandler.GENERATION;
-import static org.apache.solr.handler.ReplicationHandler.INTERNAL;
-import static org.apache.solr.handler.ReplicationHandler.MASTER_URL;
-import static org.apache.solr.handler.ReplicationHandler.NAME;
-import static org.apache.solr.handler.ReplicationHandler.OFFSET;
-import static org.apache.solr.handler.ReplicationHandler.SIZE;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -98,15 +77,19 @@ import org.apache.solr.handler.ReplicationHandler.FileInfo;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.CommitUpdateCommand;
+import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.FileUtils;
 import org.apache.solr.util.PropertiesInputStream;
 import org.apache.solr.util.PropertiesOutputStream;
 import org.apache.solr.util.RefCounted;
-import org.eclipse.jetty.util.log.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.lucene.util.IOUtils.CHARSET_UTF_8;
+import static org.apache.solr.handler.ReplicationHandler.*;
 
 /**
  * <p/> Provides functionality of downloading changed index files as well as config files and a timer for scheduling fetches from the
@@ -140,14 +123,18 @@ public class SnapPuller {
 
   private volatile List<Map<String, Object>> confFilesToDownload;
 
+  private volatile List<Map<String, Object>> tlogFilesToDownload;
+
   private volatile List<Map<String, Object>> filesDownloaded;
 
   private volatile List<Map<String, Object>> confFilesDownloaded;
 
+  private volatile List<Map<String, Object>> tlogFilesDownloaded;
+
   private volatile Map<String, Object> currentFile;
 
   private volatile DirectoryFileFetcher dirFileFetcher;
-  
+
   private volatile LocalFsFileFetcher localFileFetcher;
 
   private volatile ExecutorService fsyncService;
@@ -190,7 +177,7 @@ public class SnapPuller {
       LOG.warn("'masterUrl' must be specified without the /replication suffix");
     }
     this.masterUrl = masterUrl;
-    
+
     this.replicationHandler = handler;
     pollIntervalStr = (String) initArgs.get(POLL_INTERVAL);
     pollInterval = readInterval(pollIntervalStr);
@@ -248,7 +235,7 @@ public class SnapPuller {
     try {
       server.setSoTimeout(60000);
       server.setConnectionTimeout(15000);
-      
+
       rsp = server.request(req);
     } catch (SolrServerException e) {
       throw new SolrException(ErrorCode.SERVER_ERROR, e.getMessage());
@@ -286,6 +273,11 @@ public class SnapPuller {
       if (files != null)
         confFilesToDownload = Collections.synchronizedList(files);
 
+      files = (List<Map<String,Object>>) response.get(TLOG_FILES);
+      if (files != null) {
+        tlogFilesToDownload = Collections.synchronizedList(files);
+      }
+
     } catch (SolrServerException e) {
       throw new IOException(e);
     } finally {
@@ -300,7 +292,7 @@ public class SnapPuller {
    * downloaded. It also downloads the conf files (if they are modified).
    *
    * @param core the SolrCore
-   * @param forceReplication force a replication in all cases 
+   * @param forceReplication force a replication in all cases
    * @return true on success, false if slave is already in sync
    * @throws IOException if an exception occurs
    */
@@ -357,12 +349,12 @@ public class SnapPuller {
               new ModifiableSolrParams());
           core.getUpdateHandler().commit(new CommitUpdateCommand(req, false));
         }
-        
+
         //there is nothing to be replicated
         successfulInstall = true;
         return true;
       }
-      
+
       if (!forceReplication && IndexDeletionPolicyWrapper.getCommitTimestamp(commit) == latestVersion) {
         //master and slave are already in sync just return
         LOG.info("Slave in sync with master.");
@@ -377,6 +369,7 @@ public class SnapPuller {
       // this can happen if the commit point is deleted before we fetch the file list.
       if(filesToDownload.isEmpty()) return false;
       LOG.info("Number of files in latest index in master: " + filesToDownload.size());
+      LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
 
       // Create the sync service
       fsyncService = Executors.newSingleThreadExecutor(new DefaultSolrThreadFactory("fsyncService"));
@@ -388,21 +381,22 @@ public class SnapPuller {
           .getCommitTimestamp(commit) >= latestVersion
           || commit.getGeneration() >= latestGeneration || forceReplication;
 
-      String tmpIdxDirName = "index." + new SimpleDateFormat(SnapShooter.DATE_FMT, Locale.ROOT).format(new Date());
+      String timestamp = new SimpleDateFormat(SnapShooter.DATE_FMT, Locale.ROOT).format(new Date());
+      String tmpIdxDirName = "index." + timestamp;
       tmpIndex = createTempindexDir(core, tmpIdxDirName);
 
       tmpIndexDir = core.getDirectoryFactory().get(tmpIndex, DirContext.DEFAULT, core.getSolrConfig().indexConfig.lockType);
-      
+
       // cindex dir...
       indexDirPath = core.getIndexDir();
       indexDir = core.getDirectoryFactory().get(indexDirPath, DirContext.DEFAULT, core.getSolrConfig().indexConfig.lockType);
 
       try {
-        
+
         if (isIndexStale(indexDir)) {
           isFullCopyNeeded = true;
         }
-        
+
         if (!isFullCopyNeeded) {
           // rollback - and do it before we download any files
           // so we don't remove files we thought we didn't need
@@ -410,16 +404,17 @@ public class SnapPuller {
           solrCore.getUpdateHandler().getSolrCoreState()
           .closeIndexWriter(core, true);
         }
-        
+
         boolean reloadCore = false;
-        
+
         try {
           LOG.info("Starting download to " + tmpIndexDir + " fullCopy="
               + isFullCopyNeeded);
           successfulInstall = false;
-          
+
           downloadIndexFiles(isFullCopyNeeded, indexDir, tmpIndexDir,
               latestGeneration);
+          downloadTlogFiles(timestamp, latestGeneration);
           LOG.info("Total time taken for download : "
               + ((System.currentTimeMillis() - replicationStartTime) / 1000)
               + " secs");
@@ -442,7 +437,7 @@ public class SnapPuller {
                   core.getDirectoryFactory().remove(indexDir);
                 }
               }
-              
+
               LOG.info("Configuration files are modified, core will be reloaded");
               logReplicationTimeAndConfFiles(modifiedConfFiles,
                   successfulInstall);// write to a file time of replication and
@@ -467,7 +462,7 @@ public class SnapPuller {
             solrCore.getUpdateHandler().getSolrCoreState().openIndexWriter(core);
           }
         }
-        
+
         // we must reload the core after we open the IW back up
         if (reloadCore) {
           reloadCore();
@@ -486,10 +481,10 @@ public class SnapPuller {
           if (isFullCopyNeeded) {
             solrCore.getUpdateHandler().newIndexWriter(isFullCopyNeeded);
           }
-          
+
           openNewSearcherAndUpdateCommitPoint(isFullCopyNeeded);
         }
-        
+
         replicationStartTime = 0;
         return successfulInstall;
       } catch (ReplicationHandlerException e) {
@@ -525,11 +520,11 @@ public class SnapPuller {
             SolrException.log(LOG, "Error removing directory " + tmpIndexDir, e);
           }
         }
-        
+
         if (tmpIndexDir != null) {
           core.getDirectoryFactory().release(tmpIndexDir);
         }
-        
+
         if (indexDir != null) {
           core.getDirectoryFactory().release(indexDir);
         }
@@ -569,7 +564,7 @@ public class SnapPuller {
     Directory dir = null;
     try {
       dir = solrCore.getDirectoryFactory().get(solrCore.getDataDir(), DirContext.META_DATA, solrCore.getSolrConfig().indexConfig.lockType);
-      
+
       int indexCount = 1, confFilesCount = 1;
       if (props.containsKey(TIMES_INDEX_REPLICATED)) {
         indexCount = Integer.valueOf(props.getProperty(TIMES_INDEX_REPLICATED)) + 1;
@@ -662,7 +657,7 @@ public class SnapPuller {
   private void openNewSearcherAndUpdateCommitPoint(boolean isFullCopyNeeded) throws IOException {
     SolrQueryRequest req = new LocalSolrQueryRequest(solrCore,
         new ModifiableSolrParams());
-    
+
     RefCounted<SolrIndexSearcher> searcher = null;
     IndexCommit commitPoint;
     try {
@@ -687,7 +682,7 @@ public class SnapPuller {
 
     // update the commit point in replication handler
     replicationHandler.indexCommitPoint = commitPoint;
-    
+
   }
 
   /**
@@ -734,7 +729,7 @@ public class SnapPuller {
       }
       for (Map<String, Object> file : confFilesToDownload) {
         String saveAs = (String) (file.get(ALIAS) == null ? file.get(NAME) : file.get(ALIAS));
-        localFileFetcher = new LocalFsFileFetcher(tmpconfDir, file, saveAs, true, latestGeneration);
+        localFileFetcher = new LocalFsFileFetcher(tmpconfDir, file, saveAs, CONF_FILE_SHORT, latestGeneration);
         currentFile = file;
         localFileFetcher.fetchFile();
         confFilesDownloaded.add(new HashMap<String, Object>(file));
@@ -746,6 +741,77 @@ public class SnapPuller {
     } finally {
       delTree(tmpconfDir);
     }
+  }
+
+  private void downloadTlogFiles(String timestamp, long latestGeneration) throws Exception {
+    UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
+    List<Map<String, Object>> filteredTlogFiles = this.getFilteredTlogFiles();
+
+    LOG.info("Starting download of tlog files from master: " + filteredTlogFiles);
+    tlogFilesDownloaded = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
+    File tmpTlogDir = new File(ulog.getLogDir(), "tlog." + getDateAsStr(new Date()));
+    try {
+      boolean status = tmpTlogDir.mkdirs();
+      if (!status) {
+        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+            "Failed to create temporary tlog folder: " + tmpTlogDir.getName());
+      }
+      for (Map<String, Object> file : filteredTlogFiles) {
+        String saveAs = (String) (file.get(ALIAS) == null ? file.get(NAME) : file.get(ALIAS));
+        localFileFetcher = new LocalFsFileFetcher(tmpTlogDir, file, saveAs, TLOG_FILE, latestGeneration);
+        currentFile = file;
+        localFileFetcher.fetchFile();
+        tlogFilesDownloaded.add(new HashMap<>(file));
+      }
+      // this is called before copying the files to the original conf dir
+      // so that if there is an exception avoid corrupting the original files.
+      terminateAndWaitFsyncService();
+      copyTmpTlogFiles2Tlog(tmpTlogDir, timestamp);
+    } finally {
+      delTree(tmpTlogDir);
+    }
+  }
+
+  /**
+   * Filters the tlog files based on their version number, as the tlog ids between the leader and the slaves can be
+   * desynchronised due to recovery strategy commits. Files are filtered out if a file with the same version and the
+   * same size exists locally. The filtered tlog files will be assigned a new alias name
+   * that will follow the local sequence of tlog ids.
+   */
+  private List<Map<String, Object>> getFilteredTlogFiles() {
+    UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
+    String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
+    long lastId = ulog.getLastLogId();
+
+    Map<Long, Map<String, Object>> localFilesMeta = new HashMap<>();
+    for (String logFile : logList) {
+      long version = Math.abs(Long.parseLong(logFile.substring(logFile.lastIndexOf('.') + 1)));
+
+      Map<String, Object> fileMeta = new HashMap<>();
+      fileMeta.put(SIZE, new File(ulog.getLogDir(), logFile).length());
+      fileMeta.put(NAME, logFile);
+      localFilesMeta.put(version, fileMeta);
+    }
+
+    List<Map<String, Object>> filteredTlogFiles = new ArrayList<>();
+    for (Map<String, Object> file : tlogFilesToDownload) {
+      String filename = (String) file.get(NAME);
+      long size = (Long) file.get(SIZE);
+      long version = Math.abs(Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1)));
+
+      // if the file exists but does not have the right size, we should not change its name/id
+      if (localFilesMeta.containsKey(version) && !localFilesMeta.get(version).get(SIZE).equals(size)) {
+        file.put(ALIAS, localFilesMeta.get(version).get(NAME));
+        filteredTlogFiles.add(file);
+      }
+      // If the file does not exist, we should rename it based on the latest tlog id
+      else if (!localFilesMeta.containsKey(version)) {
+        file.put(ALIAS, String.format(Locale.ROOT, CdcrUpdateLog.LOG_FILENAME_PATTERN, UpdateLog.TLOG_NAME, ++lastId, version));
+        filteredTlogFiles.add(file);
+      }
+    }
+
+    return filteredTlogFiles;
   }
 
   /**
@@ -766,7 +832,7 @@ public class SnapPuller {
       if (!indexDir.fileExists((String) file.get(NAME))
           || downloadCompleteIndex) {
         dirFileFetcher = new DirectoryFileFetcher(tmpIndexDir, file,
-            (String) file.get(NAME), false, latestGeneration);
+            (String) file.get(NAME), FILE, latestGeneration);
         currentFile = file;
         dirFileFetcher.fetchFile();
         filesDownloaded.add(new HashMap<String,Object>(file));
@@ -857,7 +923,7 @@ public class SnapPuller {
   }
 
   /**
-   * Make file list 
+   * Make file list
    */
   private List<File> makeTmpConfDirFileList(File dir, List<File> fileList) {
     File[] files = dir.listFiles();
@@ -870,7 +936,7 @@ public class SnapPuller {
     }
     return fileList;
   }
-  
+
   /**
    * The conf files are copied to the tmp dir to the conf dir. A backup of the old file is maintained
    */
@@ -912,6 +978,46 @@ public class SnapPuller {
     }
   }
 
+  /**
+   * The tlog files are copied to the tmp dir to the tlog dir. A backup of the old file is maintained
+   */
+  private void copyTmpTlogFiles2Tlog(File tmpTlogDir, String timestamp) {
+    boolean status = false;
+    File tlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir());
+    File backupTlogDir = new File(tlogDir.getParent(), UpdateLog.TLOG_NAME + "." + timestamp);
+
+    for (File file : makeTmpConfDirFileList(tmpTlogDir, new ArrayList<File>())) {
+      File oldFile = new File(tlogDir, file.getPath().substring(tmpTlogDir.getPath().length(), file.getPath().length()));
+      if (!oldFile.getParentFile().exists()) {
+        status = oldFile.getParentFile().mkdirs();
+        if (!status) {
+          throw new SolrException(ErrorCode.SERVER_ERROR,
+              "Unable to mkdirs: " + oldFile.getParentFile());
+        }
+      }
+      if (oldFile.exists()) {
+        File backupFile = new File(backupTlogDir, oldFile.getName());
+        if (!backupFile.getParentFile().exists()) {
+          status = backupFile.getParentFile().mkdirs();
+          if (!status) {
+            throw new SolrException(ErrorCode.SERVER_ERROR,
+                "Unable to mkdirs: " + backupFile.getParentFile());
+          }
+        }
+        status = oldFile.renameTo(backupFile);
+        if (!status) {
+          throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+              "Unable to rename: " + oldFile + " to: " + backupFile);
+        }
+      }
+      status = file.renameTo(oldFile);
+      if (!status) {
+        throw new SolrException(ErrorCode.SERVER_ERROR,
+            "Unable to rename: " + file + " to: " + oldFile);
+      }
+    }
+  }
+
   private String getDateAsStr(Date d) {
     return new SimpleDateFormat(SnapShooter.DATE_FMT, Locale.ROOT).format(d);
   }
@@ -927,7 +1033,7 @@ public class SnapPuller {
       dir = solrCore.getDirectoryFactory().get(solrCore.getDataDir(), DirContext.META_DATA, solrCore.getSolrConfig().indexConfig.lockType);
       if (dir.fileExists(SnapPuller.INDEX_PROPERTIES)){
         final IndexInput input = dir.openInput(SnapPuller.INDEX_PROPERTIES, DirectoryFactory.IOCONTEXT_NO_CACHE);
-  
+
         final InputStream is = new PropertiesInputStream(input);
         try {
           p.load(new InputStreamReader(is, CHARSET_UTF_8));
@@ -968,7 +1074,7 @@ public class SnapPuller {
         }
       }
     }
-    
+
   }
 
   private final Map<String, FileInfo> confFileInfoCache = new HashMap<String, FileInfo>();
@@ -1005,7 +1111,7 @@ public class SnapPuller {
     }
     return nameVsFile.isEmpty() ? Collections.EMPTY_LIST : nameVsFile.values();
   }
-  
+
   static boolean delTree(File dir) {
     boolean isSuccess = true;
     File contents[] = dir.listFiles();
@@ -1055,6 +1161,20 @@ public class SnapPuller {
 
   long getReplicationStartTime() {
     return replicationStartTime;
+  }
+
+  List<Map<String, Object>> getTlogFilesToDownload() {
+    //make a copy first because it can be null later
+    List<Map<String, Object>> tmp = tlogFilesToDownload;
+    //create a new instance. or else iterator may fail
+    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<>(tmp);
+  }
+
+  List<Map<String, Object>> getTlogFilesDownloaded() {
+    //make a copy first because it can be null later
+    List<Map<String, Object>> tmp = tlogFilesDownloaded;
+    // NOTE: it's safe to make a copy of a SynchronizedCollection(ArrayList)
+    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<>(tmp);
   }
 
   List<Map<String, Object>> getConfFilesToDownload() {
@@ -1135,7 +1255,7 @@ public class SnapPuller {
 
     int errorCount = 0;
 
-    private boolean isConf;
+    private String solrParamOutput;
 
     private boolean aborted = false;
 
@@ -1144,15 +1264,15 @@ public class SnapPuller {
     private IndexOutput outStream;
 
     DirectoryFileFetcher(Directory tmpIndexDir, Map<String, Object> fileDetails, String saveAs,
-                boolean isConf, long latestGen) throws IOException {
+                String solrParamOutput, long latestGen) throws IOException {
       this.copy2Dir = tmpIndexDir;
       this.fileName = (String) fileDetails.get(NAME);
       this.size = (Long) fileDetails.get(SIZE);
-      this.isConf = isConf;
+      this.solrParamOutput = solrParamOutput;
       this.saveAs = saveAs;
 
       indexGen = latestGen;
-      
+
       outStream = copy2Dir.createOutput(saveAs, DirectoryFactory.IOCONTEXT_NO_CACHE);
 
       if (includeChecksum)
@@ -1318,14 +1438,9 @@ public class SnapPuller {
       params.set(GENERATION, Long.toString(indexGen));
       params.set(CommonParams.QT, "/replication");
       //add the version to download. This is used to reserve the download
-      if (isConf) {
-        //set cf instead of file for config file
-        params.set(CONF_FILE_SHORT, fileName);
-      } else {
-        params.set(FILE, fileName);
-      }
+      params.set(solrParamOutput, fileName);
       if (useInternal) {
-        params.set(COMPRESSION, "true"); 
+        params.set(COMPRESSION, "true");
       }
       //use checksum
       if (this.includeChecksum) {
@@ -1338,11 +1453,11 @@ public class SnapPuller {
       if (bytesDownloaded > 0) {
         params.set(OFFSET, Long.toString(bytesDownloaded));
       }
-      
+
 
       NamedList response;
       InputStream is = null;
-      
+
       HttpSolrServer s = new HttpSolrServer(masterUrl, myHttpClient, null);  //XXX use shardhandler
       try {
         s.setSoTimeout(60000);
@@ -1363,7 +1478,7 @@ public class SnapPuller {
       }
     }
   }
-  
+
   /**
    * The class acts as a client for ReplicationHandler.FileStream. It understands the protocol of wt=filestream
    *
@@ -1383,7 +1498,7 @@ public class SnapPuller {
     long bytesDownloaded = 0;
 
     FileChannel fileChannel;
-    
+
     private FileOutputStream fileOutputStream;
 
     byte[] buf = new byte[1024 * 1024];
@@ -1394,7 +1509,7 @@ public class SnapPuller {
 
     int errorCount = 0;
 
-    private boolean isConf;
+    private String solrParamOutput;
 
     private boolean aborted = false;
 
@@ -1402,17 +1517,17 @@ public class SnapPuller {
 
     // TODO: could do more code sharing with DirectoryFileFetcher
     LocalFsFileFetcher(File dir, Map<String, Object> fileDetails, String saveAs,
-                boolean isConf, long latestGen) throws IOException {
+                String solrParamOutput, long latestGen) throws IOException {
       this.copy2Dir = dir;
       this.fileName = (String) fileDetails.get(NAME);
       this.size = (Long) fileDetails.get(SIZE);
-      this.isConf = isConf;
+      this.solrParamOutput = solrParamOutput;
       this.saveAs = saveAs;
 
       indexGen = latestGen;
 
       this.file = new File(copy2Dir, saveAs);
-      
+
       File parentDir = this.file.getParentFile();
       if( ! parentDir.exists() ){
         if ( ! parentDir.mkdirs() ) {
@@ -1420,7 +1535,7 @@ public class SnapPuller {
                                   "Failed to create (sub)directory for file: " + saveAs);
         }
       }
-      
+
       this.fileOutputStream = new FileOutputStream(file);
       this.fileChannel = this.fileOutputStream.getChannel();
 
@@ -1583,14 +1698,9 @@ public class SnapPuller {
       params.set(GENERATION, Long.toString(indexGen));
       params.set(CommonParams.QT, "/replication");
       //add the version to download. This is used to reserve the download
-      if (isConf) {
-        //set cf instead of file for config file
-        params.set(CONF_FILE_SHORT, fileName);
-      } else {
-        params.set(FILE, fileName);
-      }
+      params.set(solrParamOutput, fileName);
       if (useInternal) {
-        params.set(COMPRESSION, "true"); 
+        params.set(COMPRESSION, "true");
       }
       //use checksum
       if (this.includeChecksum) {
@@ -1603,7 +1713,7 @@ public class SnapPuller {
       if (bytesDownloaded > 0) {
         params.set(OFFSET, Long.toString(bytesDownloaded));
       }
-      
+
 
       NamedList response;
       InputStream is = null;
@@ -1627,7 +1737,7 @@ public class SnapPuller {
       }
     }
   }
-  
+
   NamedList getDetails() throws IOException, SolrServerException {
     ModifiableSolrParams params = new ModifiableSolrParams();
     params.set(COMMAND, CMD_DETAILS);
