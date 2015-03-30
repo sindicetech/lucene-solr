@@ -761,7 +761,7 @@ public class SnapPuller {
         localFileFetcher = new LocalFsFileFetcher(tmpTlogDir, file, saveAs, TLOG_FILE, latestGeneration);
         currentFile = file;
         localFileFetcher.fetchFile();
-        tlogFilesDownloaded.add(new HashMap<>(file));
+        tlogFilesDownloaded.add(new HashMap<String, Object>(file));
       }
       // this is called before copying the files to the original conf dir
       // so that if there is an exception avoid corrupting the original files.
@@ -783,17 +783,17 @@ public class SnapPuller {
     String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
     long lastId = ulog.getLastLogId();
 
-    Map<Long, Map<String, Object>> localFilesMeta = new HashMap<>();
+    Map<Long, Map<String, Object>> localFilesMeta = new HashMap<Long, Map<String, Object>>();
     for (String logFile : logList) {
       long version = Math.abs(Long.parseLong(logFile.substring(logFile.lastIndexOf('.') + 1)));
 
-      Map<String, Object> fileMeta = new HashMap<>();
+      Map<String, Object> fileMeta = new HashMap<String, Object>();
       fileMeta.put(SIZE, new File(ulog.getLogDir(), logFile).length());
       fileMeta.put(NAME, logFile);
       localFilesMeta.put(version, fileMeta);
     }
 
-    List<Map<String, Object>> filteredTlogFiles = new ArrayList<>();
+    List<Map<String, Object>> filteredTlogFiles = new ArrayList<Map<String, Object>>();
     for (Map<String, Object> file : tlogFilesToDownload) {
       String filename = (String) file.get(NAME);
       long size = (Long) file.get(SIZE);
@@ -1167,14 +1167,14 @@ public class SnapPuller {
     //make a copy first because it can be null later
     List<Map<String, Object>> tmp = tlogFilesToDownload;
     //create a new instance. or else iterator may fail
-    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<>(tmp);
+    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<Map<String, Object>>(tmp);
   }
 
   List<Map<String, Object>> getTlogFilesDownloaded() {
     //make a copy first because it can be null later
     List<Map<String, Object>> tmp = tlogFilesDownloaded;
     // NOTE: it's safe to make a copy of a SynchronizedCollection(ArrayList)
-    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<>(tmp);
+    return tmp == null ? Collections.EMPTY_LIST : new ArrayList<Map<String, Object>>(tmp);
   }
 
   List<Map<String, Object>> getConfFilesToDownload() {

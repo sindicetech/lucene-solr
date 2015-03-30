@@ -448,9 +448,9 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
   List<Map<String, Object>> getTlogFileList() {
     UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
     String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
-    List<Map<String, Object>> tlogFiles = new ArrayList<>();
+    List<Map<String, Object>> tlogFiles = new ArrayList<Map<String, Object>>();
     for (String fileName : logList) {
-      Map<String,Object> fileMeta = new HashMap<>();
+      Map<String,Object> fileMeta = new HashMap<String,Object>();
       fileMeta.put(NAME, fileName);
       fileMeta.put(SIZE, new File(ulog.getLogDir(), fileName).length());
       tlogFiles.add(fileMeta);
