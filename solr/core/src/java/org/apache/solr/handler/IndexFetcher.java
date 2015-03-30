@@ -780,7 +780,7 @@ public class IndexFetcher {
    * Filters the tlog files based on their version number, as the tlog ids between the leader and the slaves can be
    * desynchronised due to recovery strategy commits. Files are filtered out if a file with the same version and the
    * same size exists locally. The filtered tlog files will be assigned a new alias name
-   * that will follow the local sequences of tlog ids.
+   * that will follow the local sequence of tlog ids.
    */
   private List<Map<String, Object>> getFilteredTlogFiles() {
     UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
