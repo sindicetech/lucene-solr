@@ -255,7 +255,7 @@ public class CdcrUpdateLog extends UpdateLog {
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
         numRecordsReadInCurrentTlog = 0;
-        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+        log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
     }
 
@@ -269,7 +269,7 @@ public class CdcrUpdateLog extends UpdateLog {
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
         numRecordsReadInCurrentTlog = 0;
-        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+        log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
     }
 
@@ -353,7 +353,7 @@ public class CdcrUpdateLog extends UpdateLog {
           tlogReader = currentTlog.getReader(0);
           pointer.set(currentTlog.tlogFile);
           numRecordsReadInCurrentTlog = 0;
-          log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+          log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
         }
         else {
           // the only tlog left is the new tlog which is currently being written,
