@@ -42,16 +42,13 @@ import java.util.zip.Checksum;
 import java.util.zip.DeflaterOutputStream;
 
 import org.apache.commons.io.IOUtils;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexDeletionPolicy;
-import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
-
-import static org.apache.lucene.util.IOUtils.CHARSET_UTF_8;
-
 import org.apache.solr.client.solrj.impl.BinaryResponseParser;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
@@ -64,22 +61,25 @@ import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.DirectoryFactory;
+import org.apache.solr.core.DirectoryFactory.DirContext;
 import org.apache.solr.core.IndexDeletionPolicyWrapper;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrDeletionPolicy;
 import org.apache.solr.core.SolrEventListener;
-import org.apache.solr.core.DirectoryFactory.DirContext;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.BinaryQueryResponseWriter;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.update.SolrIndexWriter;
+import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.NumberUtils;
 import org.apache.solr.util.PropertiesInputStream;
 import org.apache.solr.util.RefCounted;
 import org.apache.solr.util.plugin.SolrCoreAware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.lucene.util.IOUtils.CHARSET_UTF_8;
 
 /**
  * <p> A Handler which provides a REST API for replication and serves replication requests from Slaves. <p/> </p>
@@ -97,7 +97,7 @@ import org.slf4j.LoggerFactory;
  * @since solr 1.4
  */
 public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAware {
-  
+
   private static final Logger LOG = LoggerFactory.getLogger(ReplicationHandler.class.getName());
   SolrCore core;
 
@@ -109,8 +109,8 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       version = v;
     }
     /**
-     * builds a CommitVersionInfo data for the specified IndexCommit.  
-     * Will never be null, ut version and generation may be zero if 
+     * builds a CommitVersionInfo data for the specified IndexCommit.
+     * Will never be null, ut version and generation may be zero if
      * there are problems extracting them from the commit data
      */
     public static CommitVersionInfo build(IndexCommit commit) {
@@ -150,7 +150,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
   private boolean replicateOnCommit = false;
 
   private boolean replicateOnStart = false;
-  
+
   private int numberBackupsToKeep = 0; //zero: do not delete old backups
 
   private int numTimesReplicated = 0;
@@ -179,13 +179,13 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     // It gives the current 'replicateable' index version
     if (command.equals(CMD_INDEX_VERSION)) {
       IndexCommit commitPoint = indexCommitPoint;  // make a copy so it won't change
- 
+
       if (commitPoint == null) {
         // if this handler is 'lazy', we may not have tracked the last commit
         // because our commit listener is registered on inform
         commitPoint = core.getDeletionPolicy().getLatestCommit();
       }
-      
+
       if (commitPoint != null && replicationEnabled.get()) {
         //
         // There is a race condition here.  The commit point may be changed / deleted by the time
@@ -349,18 +349,18 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       if (numberToKeep < 1) {
         numberToKeep = Integer.MAX_VALUE;
       }
-      
+
       IndexDeletionPolicyWrapper delPolicy = core.getDeletionPolicy();
       IndexCommit indexCommit = delPolicy.getLatestCommit();
-      
+
       if (indexCommit == null) {
         indexCommit = req.getSearcher().getIndexReader().getIndexCommit();
       }
-      
+
       // small race here before the commit point is saved
       new SnapShooter(core, params.get("location")).createSnapAsync(
           indexCommit, numberToKeep, this);
-      
+
     } catch (Exception e) {
       LOG.warn("Exception during creating a snapshot", e);
       rsp.add("exception", e);
@@ -377,10 +377,13 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
   private void getFileStream(SolrParams solrParams, SolrQueryResponse rsp) {
     ModifiableSolrParams rawParams = new ModifiableSolrParams(solrParams);
     rawParams.set(CommonParams.WT, FILE_STREAM);
-    
+
     String cfileName = solrParams.get(CONF_FILE_SHORT);
+    String tlogFileName = solrParams.get(TLOG_FILE);
     if (cfileName != null) {
-      rsp.add(FILE_STREAM, new LocalFsFileStream(solrParams));
+      rsp.add(FILE_STREAM, new LocalFsConfFileStream(solrParams));
+    } else if (tlogFileName != null) {
+      rsp.add(FILE_STREAM, new LocalFsTlogFileStream(solrParams));
     } else {
       rsp.add(FILE_STREAM, new DirectoryFileStream(solrParams));
     }
@@ -395,7 +398,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     }
     long gen = Long.parseLong(v);
     IndexCommit commit = core.getDeletionPolicy().getCommitPoint(gen);
- 
+
     //System.out.println("ask for files for gen:" + commit.getGeneration() + core.getCoreDescriptor().getCoreContainer().getZkController().getNodeName());
     if (commit == null) {
       rsp.add("status", "invalid index generation");
@@ -412,7 +415,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       Collection<String> files = new HashSet<String>(commit.getFileNames());
       dir = core.getDirectoryFactory().get(core.getNewIndexDir(), DirContext.DEFAULT, core.getSolrConfig().indexConfig.lockType);
       try {
-        
+
         for (String fileName : files) {
           if (fileName.endsWith(".lock")) continue;
           Map<String,Object> fileMeta = new HashMap<String,Object>();
@@ -429,11 +432,30 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       LOG.error("Unable to get file names for indexCommit generation: " + gen, e);
     }
     rsp.add(CMD_GET_FILE_LIST, result);
+
+    // fetch list of tlog files
+    List<Map<String, Object>> tlogfiles = getTlogFileList();
+    LOG.info("Adding tlog files to list: " + tlogfiles);
+    rsp.add(TLOG_FILES, tlogfiles);
+
     if (confFileNameAlias.size() < 1 || core.getCoreDescriptor().getCoreContainer().isZooKeeperAware())
       return;
     LOG.debug("Adding config files to list: " + includeConfFiles);
     //if configuration files need to be included get their details
     rsp.add(CONF_FILES, getConfFileInfoFromCache(confFileNameAlias, confFileInfoCache));
+  }
+
+  List<Map<String, Object>> getTlogFileList() {
+    UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
+    String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
+    List<Map<String, Object>> tlogFiles = new ArrayList<Map<String, Object>>();
+    for (String fileName : logList) {
+      Map<String,Object> fileMeta = new HashMap<String,Object>();
+      fileMeta.put(NAME, fileName);
+      fileMeta.put(SIZE, new File(ulog.getLogDir(), fileName).length());
+      tlogFiles.add(fileMeta);
+    }
+    return tlogFiles;
   }
 
   /**
@@ -538,7 +560,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     return "$URL$";
   }
 
-  /** 
+  /**
    * returns the CommitVersionInfo for the current searcher, or null on error.
    */
   private CommitVersionInfo getIndexVersion() {
@@ -619,7 +641,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     CommitVersionInfo vInfo = getIndexVersion();
     details.add("indexVersion", null == vInfo ? 0 : vInfo.version);
     details.add(GENERATION, null == vInfo ? 0 : vInfo.generation);
-    
+
     IndexCommit commit = indexCommitPoint;  // make a copy so it won't change
 
     if (isMaster) {
@@ -757,11 +779,11 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       details.add("master", master);
     if (slave.size() > 0)
       details.add("slave", slave);
-    
+
     NamedList snapshotStats = snapShootDetails;
     if (snapshotStats != null)
       details.add(CMD_BACKUP, snapshotStats);
-    
+
     return details;
   }
 
@@ -869,12 +891,12 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
             Boolean.toString(enableMaster) + " and slave setting is " + Boolean.toString(enableSlave));
       }
     }
-    
+
     if (!enableSlave && !enableMaster) {
       enableMaster = true;
       master = new NamedList<Object>();
     }
-    
+
     if (enableMaster) {
       includeConfFiles = (String) master.get(CONF_FILES);
       if (includeConfFiles != null && includeConfFiles.trim().length() > 0) {
@@ -897,7 +919,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       if (!replicateOnCommit && ! replicateOnOptimize) {
         replicateOnCommit = true;
       }
-      
+
       // if we only want to replicate on optimize, we need the deletion policy to
       // save the last optimized commit point.
       if (replicateOnOptimize) {
@@ -966,7 +988,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
       isMaster = true;
     }
   }
-  
+
   // check master or slave is enabled
   private boolean isEnabled( NamedList params ){
     if( params == null ) return false;
@@ -1058,11 +1080,11 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
           ***/
         }
         if (snapshoot) {
-          try {            
+          try {
             int numberToKeep = numberBackupsToKeep;
             if (numberToKeep < 1) {
               numberToKeep = Integer.MAX_VALUE;
-            }            
+            }
             SnapShooter snapShooter = new SnapShooter(core, null);
             snapShooter.createSnapAsync(currentCommitPoint, numberToKeep, ReplicationHandler.this);
           } catch (Exception e) {
@@ -1097,6 +1119,7 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     public void write(OutputStream out) throws IOException {
       String fileName = params.get(FILE);
       String cfileName = params.get(CONF_FILE_SHORT);
+      String tlogFileName = params.get(TLOG_FILE);
       String sOffset = params.get(OFFSET);
       String sLen = params.get(LEN);
       String compress = params.get(COMPRESSION);
@@ -1118,11 +1141,11 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
         boolean useChecksum = Boolean.parseBoolean(sChecksum);
         if (sOffset != null) offset = Long.parseLong(sOffset);
         if (sLen != null) len = Integer.parseInt(sLen);
-        if (fileName == null && cfileName == null) {
+        if (fileName == null && cfileName == null && tlogFileName == null) {
           // no filename do nothing
           writeNothing();
         }
-        
+
         RefCounted<SolrIndexSearcher> sref = core.getSearcher();
         Directory dir;
         try {
@@ -1137,13 +1160,13 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
         byte[] buf = new byte[(len == -1 || len > PACKET_SZ) ? PACKET_SZ : len];
         Checksum checksum = null;
         if (useChecksum) checksum = new Adler32();
-        
+
         long filelen = dir.fileLength(fileName);
         while (true) {
           offset = offset == -1 ? 0 : offset;
           int read = (int) Math.min(buf.length, filelen - offset);
           in.readBytes(buf, 0, read);
-          
+
           fos.writeInt((int) read);
           if (useChecksum) {
             checksum.reset();
@@ -1184,16 +1207,22 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     }
   }
 
-  private class LocalFsFileStream extends DirectoryFileStream {
+  private abstract class LocalFsFileStream extends DirectoryFileStream {
+
+    private File file;
 
     public LocalFsFileStream(SolrParams solrParams) {
       super(solrParams);
+      this.file = this.initFile();
     }
+
+    protected abstract File initFile();
 
     @Override
     public void write(OutputStream out) throws IOException {
       String fileName = params.get(FILE);
       String cfileName = params.get(CONF_FILE_SHORT);
+      String tlogFileName = params.get(TLOG_FILE);
       String sOffset = params.get(OFFSET);
       String sLen = params.get(LEN);
       String compress = params.get(COMPRESSION);
@@ -1216,15 +1245,10 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
           offset = Long.parseLong(sOffset);
         if (sLen != null)
           len = Integer.parseInt(sLen);
-        if (fileName == null && cfileName == null) {
+        if (fileName == null && cfileName == null && tlogFileName == null) {
           //no filename do nothing
           writeNothing();
         }
-
-        File file = null;
-  
-        //if if is a conf file read from config diectory
-        file = new File(core.getResourceLoader().getConfigDir(), cfileName);
 
         if (file.exists() && file.canRead()) {
           inputStream = new FileInputStream(file);
@@ -1269,8 +1293,34 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
         IOUtils.closeQuietly(inputStream);
       }
     }
-  } 
-  
+  }
+
+  private class LocalFsTlogFileStream extends LocalFsFileStream {
+
+    public LocalFsTlogFileStream(SolrParams solrParams) {
+      super(solrParams);
+    }
+
+    protected File initFile() {
+      //if it is a tlog file read from tlog directory
+      return new File(core.getUpdateHandler().getUpdateLog().getLogDir(), params.get(TLOG_FILE));
+    }
+
+  }
+
+  private class LocalFsConfFileStream extends LocalFsFileStream {
+
+    public LocalFsConfFileStream(SolrParams solrParams) {
+      super(solrParams);
+    }
+
+    protected File initFile() {
+      //if it is a conf file read from config directory
+      return new File(core.getResourceLoader().getConfigDir(), params.get(CONF_FILE_SHORT));
+    }
+
+  }
+
   public static final String MASTER_URL = "masterUrl";
 
   public static final String STATUS = "status";
@@ -1315,6 +1365,8 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
 
   public static final String CONF_FILE_SHORT = "cf";
 
+  public static final String TLOG_FILE = "tlogFile";
+
   public static final String CHECKSUM = "checksum";
 
   public static final String ALIAS = "alias";
@@ -1322,6 +1374,8 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
   public static final String CONF_CHECKSUM = "confchecksum";
 
   public static final String CONF_FILES = "confFiles";
+
+  public static final String TLOG_FILES = "tlogFiles";
 
   public static final String REPLICATE_AFTER = "replicateAfter";
 
@@ -1342,15 +1396,15 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
   public static final String OK_STATUS = "OK";
 
   public static final String NEXT_EXECUTION_AT = "nextExecutionAt";
-  
+
   public static final String NUMBER_BACKUPS_TO_KEEP_REQUEST_PARAM = "numberToKeep";
-  
+
   public static final String NUMBER_BACKUPS_TO_KEEP_INIT_PARAM = "maxNumberOfBackups";
 
-  /** 
-   * Boolean param for tests that can be specified when using 
-   * {@link #CMD_FETCH_INDEX} to force the current request to block until 
-   * the fetch is complete.  <b>NOTE:</b> This param is not advised for 
+  /**
+   * Boolean param for tests that can be specified when using
+   * {@link #CMD_FETCH_INDEX} to force the current request to block until
+   * the fetch is complete.  <b>NOTE:</b> This param is not advised for
    * non-test code, since the the durration of the fetch for non-trivial
    * indexes will likeley cause the request to time out.
    *

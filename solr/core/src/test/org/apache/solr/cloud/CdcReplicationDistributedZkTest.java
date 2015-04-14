@@ -651,7 +651,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     }
   }
 
-  private int numberOfFiles(String dir) {
+  protected int numberOfFiles(String dir) {
     File file = new File(dir);
     if (!file.isDirectory()) {
       assertTrue("Path to tlog " + dir + " does not exists or it's not a directory.", false);
@@ -660,7 +660,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     return file.listFiles().length;
   }
 
-  private CollectionInfo collectInfo(String collection) throws Exception {
+  protected CollectionInfo collectInfo(String collection) throws Exception {
     CollectionInfo info = new CollectionInfo(collection);
     for (String shard : shardToJetty.get(collection).keySet()) {
       List<CloudJettyRunner> jettyRunners = shardToJetty.get(collection).get(shard);
@@ -675,7 +675,7 @@ public class CdcReplicationDistributedZkTest extends AbstractCdcrDistributedZkTe
     return info;
   }
 
-  private class CollectionInfo {
+  protected class CollectionInfo {
 
     List<CoreInfo> coreInfos = new ArrayList();
 
