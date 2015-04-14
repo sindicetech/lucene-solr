@@ -126,7 +126,7 @@ class SolrCores {
   }
 
   //WARNING! This should be the _only_ place you put anything into the list of transient cores!
-  protected SolrCore putTransientCore(ConfigSolr cfg, String name, SolrCore core, SolrResourceLoader loader) {
+  protected SolrCore putTransientCore(NodeConfig cfg, String name, SolrCore core, SolrResourceLoader loader) {
     SolrCore retCore;
     CoreContainer.log.info("Opening transient core {}", name);
     synchronized (modifyLock) {
@@ -245,7 +245,7 @@ class SolrCores {
   }
 
   /* If you don't increment the reference count, someone could close the core before you use it. */
-  protected SolrCore  getCoreFromAnyList(String name, boolean incRefCount) {
+  SolrCore  getCoreFromAnyList(String name, boolean incRefCount) {
     synchronized (modifyLock) {
       SolrCore core = cores.get(name);
 

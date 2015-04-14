@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.lucene40;
 
 import java.io.IOException;
 import java.text.ParseException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
@@ -64,13 +65,13 @@ public class Lucene40SegmentInfoFormat extends SegmentInfoFormat {
         throw new CorruptIndexException("invalid docCount: " + docCount, input);
       }
       final boolean isCompoundFile = input.readByte() == SegmentInfo.YES;
-      final Map<String,String> diagnostics = input.readStringStringMap();
-      input.readStringStringMap(); // read deprecated attributes
-      final Set<String> files = input.readStringSet();
+      final Map<String,String> diagnostics = Collections.unmodifiableMap(input.readStringStringMap());
+      final Map<String,String> attributes = Collections.unmodifiableMap(input.readStringStringMap());
+      final Set<String> files = Collections.unmodifiableSet(input.readStringSet());
       
       CodecUtil.checkEOF(input);
 
-      final SegmentInfo si = new SegmentInfo(dir, version, segment, docCount, isCompoundFile, null, diagnostics, null);
+      final SegmentInfo si = new SegmentInfo(dir, version, segment, docCount, isCompoundFile, null, diagnostics, null, attributes);
       si.setFiles(files);
 
       success = true;

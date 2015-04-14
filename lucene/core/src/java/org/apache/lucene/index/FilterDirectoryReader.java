@@ -33,6 +33,15 @@ import java.util.List;
  */
 public abstract class FilterDirectoryReader extends DirectoryReader {
 
+  /** Get the wrapped instance by <code>reader</code> as long as this reader is
+   *  an instance of {@link FilterDirectoryReader}.  */
+  public static DirectoryReader unwrap(DirectoryReader reader) {
+    while (reader instanceof FilterDirectoryReader) {
+      reader = ((FilterDirectoryReader) reader).in;
+    }
+    return reader;
+  }
+
   /**
    * Factory class passed to FilterDirectoryReader constructor that allows
    * subclasses to wrap the filtered DirectoryReader's subreaders.  You
@@ -70,7 +79,7 @@ public abstract class FilterDirectoryReader extends DirectoryReader {
    * @param in the DirectoryReader to filter
    * @param wrapper the SubReaderWrapper to use to wrap subreaders
    */
-  public FilterDirectoryReader(DirectoryReader in, SubReaderWrapper wrapper) {
+  public FilterDirectoryReader(DirectoryReader in, SubReaderWrapper wrapper) throws IOException {
     super(in.directory(), wrapper.wrap(in.getSequentialSubReaders()));
     this.in = in;
   }
@@ -84,9 +93,9 @@ public abstract class FilterDirectoryReader extends DirectoryReader {
    * @param in the DirectoryReader to wrap
    * @return the wrapped DirectoryReader
    */
-  protected abstract DirectoryReader doWrapDirectoryReader(DirectoryReader in);
+  protected abstract DirectoryReader doWrapDirectoryReader(DirectoryReader in) throws IOException;
 
-  private final DirectoryReader wrapDirectoryReader(DirectoryReader in) {
+  private final DirectoryReader wrapDirectoryReader(DirectoryReader in) throws IOException {
     return in == null ? null : doWrapDirectoryReader(in);
   }
 
@@ -125,4 +134,8 @@ public abstract class FilterDirectoryReader extends DirectoryReader {
     in.doClose();
   }
 
+  /** Returns the wrapped {@link DirectoryReader}. */
+  public DirectoryReader getDelegate() {
+    return in;
+  }
 }

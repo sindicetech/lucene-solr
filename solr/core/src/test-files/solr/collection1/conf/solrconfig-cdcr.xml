@@ -74,7 +74,7 @@
   </requestHandler>
 
   <updateHandler class="solr.DirectUpdateHandler2">
-    <updateLog>
+    <updateLog class="solr.CdcrUpdateLog">
       <str name="dir">${solr.ulog.dir:}</str>
     </updateLog>
   </updateHandler>

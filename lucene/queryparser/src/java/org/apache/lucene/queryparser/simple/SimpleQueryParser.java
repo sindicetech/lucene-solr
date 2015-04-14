@@ -23,6 +23,7 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.util.QueryBuilder;
@@ -43,7 +44,8 @@ import java.util.Map;
  * <p>
  * Any errors in query syntax will be ignored and the parser will attempt
  * to decipher what it can; however, this may mean odd or unexpected results.
- * <h4>Query Operators</h4>
+ * <p>
+ * <b>Query Operators</b>
  * <ul>
  *  <li>'{@code +}' specifies {@code AND} operation: <tt>token1+token2</tt>
  *  <li>'{@code |}' specifies {@code OR} operation: <tt>token1|token2</tt>
@@ -63,7 +65,7 @@ import java.util.Map;
  * For example, the following will evaluate {@code token1 OR token2} first,
  * then {@code AND} with {@code token3}:
  * <blockquote>token1 | token2 + token3</blockquote>
- * <h4>Escaping</h4>
+ * <b>Escaping</b>
  * <p>
  * An individual term may contain any possible character with certain characters
  * requiring escaping using a '{@code \}'.  The following characters will need to be escaped in
@@ -140,14 +142,18 @@ public class SimpleQueryParser extends QueryBuilder {
     this.flags = flags;
   }
 
-  /** Parses the query text and returns parsed query (or null if empty) */
+  /** Parses the query text and returns parsed query */
   public Query parse(String queryText) {
     char data[] = queryText.toCharArray();
     char buffer[] = new char[data.length];
 
     State state = new State(data, buffer, 0, data.length);
     parseSubQuery(state);
-    return state.top;
+    if (state.top == null) {
+      return new MatchNoDocsQuery();
+    } else {
+      return state.top;
+    }
   }
 
   private void parseSubQuery(State state) {

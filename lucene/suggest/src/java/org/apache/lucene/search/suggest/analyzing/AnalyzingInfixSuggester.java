@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -52,16 +54,17 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SortedSetDocValues;
+import org.apache.lucene.index.SortingMergePolicy;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.sorter.EarlyTerminatingSortingCollector;
-import org.apache.lucene.index.sorter.SortingMergePolicy;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Collector;
+import org.apache.lucene.search.EarlyTerminatingSortingCollector;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.PrefixQuery;
@@ -74,7 +77,6 @@ import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopFieldDocs;
 import org.apache.lucene.search.suggest.InputIterator;
 import org.apache.lucene.search.suggest.Lookup;
-import org.apache.lucene.search.suggest.Lookup.LookupResult; // javadocs
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.Directory;
@@ -129,6 +131,10 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
   final Version matchVersion;
   private final Directory dir;
   final int minPrefixChars;
+  
+  private final boolean allTermsRequired;
+  private final boolean highlight;
+  
   private final boolean commitOnBuild;
 
   /** Used for ongoing NRT additions/updates. */
@@ -140,6 +146,12 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
   /** Default minimum number of leading characters before
    *  PrefixQuery is used (4). */
   public static final int DEFAULT_MIN_PREFIX_CHARS = 4;
+  
+  /** Default boolean clause option for multiple terms matching (all terms required). */
+  public static final boolean DEFAULT_ALL_TERMS_REQUIRED = true;
+ 
+  /** Default higlighting option. */
+  public static final boolean DEFAULT_HIGHLIGHT = true;
 
   /** How we sort the postings and search results. */
   private static final Sort SORT = new Sort(new SortField("weight", SortField.Type.LONG, true));
@@ -150,9 +162,9 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
    *  Lucene index).  Note that {@link #close}
    *  will also close the provided directory. */
   public AnalyzingInfixSuggester(Directory dir, Analyzer analyzer) throws IOException {
-    this(dir, analyzer, analyzer, DEFAULT_MIN_PREFIX_CHARS, false);
+    this(analyzer.getVersion(), dir, analyzer, analyzer, DEFAULT_MIN_PREFIX_CHARS, false, DEFAULT_ALL_TERMS_REQUIRED, DEFAULT_HIGHLIGHT);
   }
-
+  
   /**
    * @deprecated Use {@link #AnalyzingInfixSuggester(Directory, Analyzer)}
    */
@@ -179,8 +191,33 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
    */
   public AnalyzingInfixSuggester(Directory dir, Analyzer indexAnalyzer, Analyzer queryAnalyzer, int minPrefixChars,
                                  boolean commitOnBuild) throws IOException {
-     this(indexAnalyzer.getVersion(), dir, indexAnalyzer, queryAnalyzer, minPrefixChars, commitOnBuild);
+    this(indexAnalyzer.getVersion(), dir, indexAnalyzer, queryAnalyzer, minPrefixChars, commitOnBuild, DEFAULT_ALL_TERMS_REQUIRED, DEFAULT_HIGHLIGHT);
   }
+  
+  /** Create a new instance, loading from a previously built
+   *  AnalyzingInfixSuggester directory, if it exists.  This directory must be
+   *  private to the infix suggester (i.e., not an external
+   *  Lucene index).  Note that {@link #close}
+   *  will also close the provided directory.
+   *
+   *  @param minPrefixChars Minimum number of leading characters
+   *     before PrefixQuery is used (default 4).
+   *     Prefixes shorter than this are indexed as character
+   *     ngrams (increasing index size but making lookups
+   *     faster).
+   *
+   *  @param commitOnBuild Call commit after the index has finished building. This would persist the
+   *                       suggester index to disk and future instances of this suggester can use this pre-built dictionary.
+   *
+   *  @param allTermsRequired All terms in the suggest query must be matched.
+   *  @param highlight Highlight suggest query in suggestions.
+   *
+   */
+  public AnalyzingInfixSuggester(Directory dir, Analyzer indexAnalyzer, Analyzer queryAnalyzer, int minPrefixChars,
+                                 boolean commitOnBuild, boolean allTermsRequired, boolean highlight) throws IOException {
+    this(indexAnalyzer.getVersion(), dir, indexAnalyzer, queryAnalyzer, minPrefixChars, commitOnBuild, allTermsRequired, highlight);
+  }
+                                    
 
   /**
    * @deprecated Use {@link #AnalyzingInfixSuggester(Directory, Analyzer, Analyzer, int, boolean)}
@@ -188,6 +225,15 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
   @Deprecated
   public AnalyzingInfixSuggester(Version matchVersion, Directory dir, Analyzer indexAnalyzer, Analyzer queryAnalyzer, int minPrefixChars,
                                  boolean commitOnBuild) throws IOException {
+    this(matchVersion, dir, indexAnalyzer, queryAnalyzer, minPrefixChars, commitOnBuild, DEFAULT_ALL_TERMS_REQUIRED, DEFAULT_HIGHLIGHT);
+  }
+
+  /**
+   * @deprecated Use {@link #AnalyzingInfixSuggester(Directory, Analyzer, Analyzer, int, boolean)}
+   */
+  @Deprecated
+  public AnalyzingInfixSuggester(Version matchVersion, Directory dir, Analyzer indexAnalyzer, Analyzer queryAnalyzer, int minPrefixChars,
+                                 boolean commitOnBuild, boolean allTermsRequired, boolean highlight) throws IOException {
 
     if (minPrefixChars < 0) {
       throw new IllegalArgumentException("minPrefixChars must be >= 0; got: " + minPrefixChars);
@@ -199,6 +245,8 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
     this.dir = dir;
     this.minPrefixChars = minPrefixChars;
     this.commitOnBuild = commitOnBuild;
+    this.allTermsRequired = allTermsRequired;
+    this.highlight = highlight;
 
     if (DirectoryReader.indexExists(dir)) {
       // Already built; open it:
@@ -393,7 +441,7 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
 
   @Override
   public List<LookupResult> lookup(CharSequence key, Set<BytesRef> contexts, boolean onlyMorePopular, int num) throws IOException {
-    return lookup(key, contexts, num, true, true);
+    return lookup(key, contexts, num, allTermsRequired, highlight);
   }
 
   /** Lookup, without any context. */
@@ -534,11 +582,12 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
     //System.out.println("finalQuery=" + query);
 
     // Sort by weight, descending:
-    TopFieldCollector c = TopFieldCollector.create(SORT, num, true, false, false, false);
+    TopFieldCollector c = TopFieldCollector.create(SORT, num, true, false, false);
 
     // We sorted postings by weight during indexing, so we
     // only retrieve the first num hits now:
-    Collector c2 = new EarlyTerminatingSortingCollector(c, SORT, num);
+    final MergePolicy mergePolicy = writer.getConfig().getMergePolicy();
+    Collector c2 = new EarlyTerminatingSortingCollector(c, SORT, num, (SortingMergePolicy) mergePolicy);
     IndexSearcher searcher = searcherMgr.acquire();
     List<LookupResult> results = null;
     try {
@@ -562,7 +611,11 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
 
   /**
    * Create the results based on the search hits.
-   * Can be overridden by subclass to add particular behavior (e.g. weight transformation)
+   * Can be overridden by subclass to add particular behavior (e.g. weight transformation).
+   * Note that there is no prefix toke (the {@code prefixToken} argument will
+   * be null) whenever the final token in the incoming request was in fact finished
+   * (had trailing characters, such as white-space).
+   *
    * @throws IOException If there are problems reading fields from the underlying Lucene index.
    */
   protected List<LookupResult> createResults(IndexSearcher searcher, TopFieldDocs hits, int num,
@@ -629,7 +682,7 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
   /** Override this method to customize the Object
    *  representing a single highlighted suggestions; the
    *  result is set on each {@link
-   *  LookupResult#highlightKey} member. */
+   *  org.apache.lucene.search.suggest.Lookup.LookupResult#highlightKey} member. */
   protected Object highlight(String text, Set<String> matchedTokens, String prefixToken) throws IOException {
     try (TokenStream ts = queryAnalyzer.tokenStream("text", new StringReader(text))) {
       CharTermAttribute termAtt = ts.addAttribute(CharTermAttribute.class);
@@ -757,7 +810,7 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     try {
       if (searcherMgr != null) {
@@ -773,7 +826,7 @@ public class AnalyzingInfixSuggester extends Lookup implements Closeable {
           searcherMgr.release(searcher);
         }
       }
-      return resources;
+      return Collections.unmodifiableList(resources);
     } catch (IOException ioe) {
       throw new RuntimeException(ioe);
     }

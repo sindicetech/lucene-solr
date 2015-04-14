@@ -281,7 +281,7 @@ public class TestPatternReplaceCharFilter extends BaseTokenStreamTestCase {
    * A demonstration of how backtracking regular expressions can lead to relatively 
    * easy DoS attacks.
    * 
-   * @see "http://swtch.com/~rsc/regexp/regexp1.html"
+   * @see <a href="http://swtch.com/~rsc/regexp/regexp1.html">"http://swtch.com/~rsc/regexp/regexp1.html"</a>
    */
   @Ignore
   public void testNastyPattern() throws Exception {
@@ -324,6 +324,7 @@ public class TestPatternReplaceCharFilter extends BaseTokenStreamTestCase {
       /* ASCII only input?: */
       final boolean asciiOnly = true;
       checkRandomData(random, a, 250 * RANDOM_MULTIPLIER, maxInputLength, asciiOnly);
+      a.close();
     }
   }
  }

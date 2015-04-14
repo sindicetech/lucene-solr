@@ -85,7 +85,7 @@ import org.apache.lucene.util.packed.PackedInts;
 
 /**
  * This is just like {@link BlockTreeTermsWriter}, except it also stores a version per term, and adds a method to its TermsEnum
- * implementation to seekExact only if the version is >= the specified version.  The version is added to the terms index to avoid seeking if
+ * implementation to seekExact only if the version is &gt;= the specified version.  The version is added to the terms index to avoid seeking if
  * no term in the block has a high enough version.  The term blocks file is .tiv and the terms index extension is .tipv.
  *
  * @lucene.experimental
@@ -176,20 +176,9 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
                                      int maxItemsInBlock)
     throws IOException
   {
-    if (minItemsInBlock <= 1) {
-      throw new IllegalArgumentException("minItemsInBlock must be >= 2; got " + minItemsInBlock);
-    }
-    if (maxItemsInBlock <= 0) {
-      throw new IllegalArgumentException("maxItemsInBlock must be >= 1; got " + maxItemsInBlock);
-    }
-    if (minItemsInBlock > maxItemsInBlock) {
-      throw new IllegalArgumentException("maxItemsInBlock must be >= minItemsInBlock; got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
-    }
-    if (2*(minItemsInBlock-1) > maxItemsInBlock) {
-      throw new IllegalArgumentException("maxItemsInBlock must be at least 2*(minItemsInBlock-1); got maxItemsInBlock=" + maxItemsInBlock + " minItemsInBlock=" + minItemsInBlock);
-    }
+    BlockTreeTermsWriter.validateSettings(minItemsInBlock, maxItemsInBlock);
 
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
 
     final String termsFileName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, TERMS_EXTENSION);
     out = state.directory.createOutput(termsFileName, state.context);
@@ -849,8 +838,14 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
     private final RAMOutputStream bytesWriter = new RAMOutputStream();
   }
 
+  private boolean closed;
+  
   @Override
   public void close() throws IOException {
+    if (closed) {
+      return;
+    }
+    closed = true;
 
     boolean success = false;
     try {

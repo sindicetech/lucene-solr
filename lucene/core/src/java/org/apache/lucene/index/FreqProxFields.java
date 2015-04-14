@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.lucene.index.FreqProxTermsWriterPerField.FreqProxPostingsArray;
-import org.apache.lucene.util.AttributeSource; // javadocs
+import org.apache.lucene.util.AttributeSource;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -230,14 +230,41 @@ class FreqProxFields extends Fields {
     }
 
     @Override
-    public DocsEnum docs(Bits liveDocs, DocsEnum reuse, int flags) {
+    public PostingsEnum postings(Bits liveDocs, PostingsEnum reuse, int flags) {
       if (liveDocs != null) {
         throw new IllegalArgumentException("liveDocs must be null");
       }
 
+      if (PostingsEnum.featureRequested(flags, PostingsEnum.POSITIONS)) {
+        FreqProxPostingsEnum posEnum;
+
+        if (!terms.hasProx) {
+          // Caller wants positions but we didn't index them;
+          // don't lie:
+          throw new IllegalArgumentException("did not index positions");
+        }
+
+        if (!terms.hasOffsets && PostingsEnum.featureRequested(flags, PostingsEnum.OFFSETS)) {
+          // Caller wants offsets but we didn't index them;
+          // don't lie:
+          throw new IllegalArgumentException("did not index offsets");
+        }
+
+        if (reuse instanceof FreqProxPostingsEnum) {
+          posEnum = (FreqProxPostingsEnum) reuse;
+          if (posEnum.postingsArray != postingsArray) {
+            posEnum = new FreqProxPostingsEnum(terms, postingsArray);
+          }
+        } else {
+          posEnum = new FreqProxPostingsEnum(terms, postingsArray);
+        }
+        posEnum.reset(sortedTermIDs[ord]);
+        return posEnum;
+      }
+
       FreqProxDocsEnum docsEnum;
 
-      if (!terms.hasFreq && (flags & DocsEnum.FLAG_FREQS) != 0) {
+      if (!terms.hasFreq && PostingsEnum.featureRequested(flags, PostingsEnum.FREQS)) {
         // Caller wants freqs but we didn't index them;
         // don't lie:
         throw new IllegalArgumentException("did not index freq");
@@ -253,37 +280,6 @@ class FreqProxFields extends Fields {
       }
       docsEnum.reset(sortedTermIDs[ord]);
       return docsEnum;
-    }
-
-    @Override
-    public DocsAndPositionsEnum docsAndPositions(Bits liveDocs, DocsAndPositionsEnum reuse, int flags) {
-      if (liveDocs != null) {
-        throw new IllegalArgumentException("liveDocs must be null");
-      }
-      FreqProxDocsAndPositionsEnum posEnum;
-
-      if (!terms.hasProx) {
-        // Caller wants positions but we didn't index them;
-        // don't lie:
-        throw new IllegalArgumentException("did not index positions");
-      }
-
-      if (!terms.hasOffsets && (flags & DocsAndPositionsEnum.FLAG_OFFSETS) != 0) {
-        // Caller wants offsets but we didn't index them;
-        // don't lie:
-        throw new IllegalArgumentException("did not index offsets");
-      }
-
-      if (reuse instanceof FreqProxDocsAndPositionsEnum) {
-        posEnum = (FreqProxDocsAndPositionsEnum) reuse;
-        if (posEnum.postingsArray != postingsArray) {
-          posEnum = new FreqProxDocsAndPositionsEnum(terms, postingsArray);
-        }
-      } else {
-        posEnum = new FreqProxDocsAndPositionsEnum(terms, postingsArray);
-      }
-      posEnum.reset(sortedTermIDs[ord]);
-      return posEnum;
     }
 
     /**
@@ -307,7 +303,7 @@ class FreqProxFields extends Fields {
     }
   }
 
-  private static class FreqProxDocsEnum extends DocsEnum {
+  private static class FreqProxDocsEnum extends PostingsEnum {
 
     final FreqProxTermsWriterPerField terms;
     final FreqProxPostingsArray postingsArray;
@@ -345,6 +341,26 @@ class FreqProxFields extends Fields {
       } else {
         return freq;
       }
+    }
+
+    @Override
+    public int nextPosition() throws IOException {
+      return -1;
+    }
+
+    @Override
+    public int startOffset() throws IOException {
+      return -1;
+    }
+
+    @Override
+    public int endOffset() throws IOException {
+      return -1;
+    }
+
+    @Override
+    public BytesRef getPayload() throws IOException {
+      return null;
     }
 
     @Override
@@ -389,7 +405,7 @@ class FreqProxFields extends Fields {
     }
   }
 
-  private static class FreqProxDocsAndPositionsEnum extends DocsAndPositionsEnum {
+  private static class FreqProxPostingsEnum extends PostingsEnum {
 
     final FreqProxTermsWriterPerField terms;
     final FreqProxPostingsArray postingsArray;
@@ -407,7 +423,7 @@ class FreqProxFields extends Fields {
     boolean hasPayload;
     BytesRefBuilder payload = new BytesRefBuilder();
 
-    public FreqProxDocsAndPositionsEnum(FreqProxTermsWriterPerField terms, FreqProxPostingsArray postingsArray) {
+    public FreqProxPostingsEnum(FreqProxTermsWriterPerField terms, FreqProxPostingsArray postingsArray) {
       this.terms = terms;
       this.postingsArray = postingsArray;
       this.readOffsets = terms.hasOffsets;

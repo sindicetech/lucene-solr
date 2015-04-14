@@ -25,8 +25,8 @@ import java.util.Set;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericDocValuesField;
-import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.RandomIndexWriter;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
@@ -424,14 +424,9 @@ public class TestQueryRescorer extends LuceneTestCase {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher) throws IOException {
+    public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
 
-      return new Weight() {
-
-        @Override
-        public Query getQuery() {
-          return FixedScoreQuery.this;
-        }
+      return new Weight(FixedScoreQuery.this) {
 
         @Override
         public float getValueForNormalization() {
@@ -514,7 +509,7 @@ public class TestQueryRescorer extends LuceneTestCase {
         return false;
       }
       FixedScoreQuery other = (FixedScoreQuery) o;
-      return Float.floatToIntBits(getBoost()) == Float.floatToIntBits(other.getBoost()) &&
+      return super.equals(o) &&
         reverse == other.reverse &&
         Arrays.equals(idToNum, other.idToNum);
     }

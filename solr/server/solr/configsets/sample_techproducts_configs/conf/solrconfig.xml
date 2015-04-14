@@ -72,17 +72,17 @@
        The examples below can be used to load some solr-contribs along 
        with their external dependencies.
     -->
-  <lib dir="${solr.install.dir:../../..}/contrib/extraction/lib" regex=".*\.jar" />
-  <lib dir="${solr.install.dir:../../..}/dist/" regex="solr-cell-\d.*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/contrib/extraction/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-cell-\d.*\.jar" />
 
-  <lib dir="${solr.install.dir:../../..}/contrib/clustering/lib/" regex=".*\.jar" />
-  <lib dir="${solr.install.dir:../../..}/dist/" regex="solr-clustering-\d.*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/contrib/clustering/lib/" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-clustering-\d.*\.jar" />
 
-  <lib dir="${solr.install.dir:../../..}/contrib/langid/lib/" regex=".*\.jar" />
-  <lib dir="${solr.install.dir:../../..}/dist/" regex="solr-langid-\d.*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/contrib/langid/lib/" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-langid-\d.*\.jar" />
 
-  <lib dir="${solr.install.dir:../../..}/contrib/velocity/lib" regex=".*\.jar" />
-  <lib dir="${solr.install.dir:../../..}/dist/" regex="solr-velocity-\d.*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/contrib/velocity/lib" regex=".*\.jar" />
+  <lib dir="${solr.install.dir:../../../..}/dist/" regex="solr-velocity-\d.*\.jar" />
 
   <!-- an exact 'path' can be used instead of a 'dir' to specify a 
        specific jar file.  This will cause a serious error to be logged 
@@ -117,30 +117,14 @@
        persistent, and doesn't work with replication.
     -->
   <directoryFactory name="DirectoryFactory" 
-                    class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}">
-    
-         
-    <!-- These will be used if you are using the solr.HdfsDirectoryFactory,
-         otherwise they will be ignored. If you don't plan on using hdfs,
-         you can safely remove this section. -->      
-    <!-- The root directory that collection data should be written to. -->     
-    <str name="solr.hdfs.home">${solr.hdfs.home:}</str>
-    <!-- The hadoop configuration files to use for the hdfs client. -->    
-    <str name="solr.hdfs.confdir">${solr.hdfs.confdir:}</str>
-    <!-- Enable/Disable the hdfs cache. -->    
-    <str name="solr.hdfs.blockcache.enabled">${solr.hdfs.blockcache.enabled:true}</str>
-    <!-- Enable/Disable using one global cache for all SolrCores. 
-         The settings used will be from the first HdfsDirectoryFactory created. -->    
-    <str name="solr.hdfs.blockcache.global">${solr.hdfs.blockcache.global:true}</str>
-    
-  </directoryFactory> 
+                    class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
 
   <!-- The CodecFactory for defining the format of the inverted index.
        The default implementation is SchemaCodecFactory, which is the official Lucene
        index format, but hooks into the schema to provide per-field customization of
        the postings lists and per-document values in the fieldType element
        (postingsFormat/docValuesFormat). Note that most of the alternative implementations
-       are experimental, so if you choose to customize the index format, its a good
+       are experimental, so if you choose to customize the index format, it's a good
        idea to convert back to the official format e.g. via IndexWriter.addIndexes(IndexReader)
        before upgrading to a newer version to avoid unnecessary reindexing.
   -->
@@ -154,7 +138,7 @@
        </schemaFactory>
        
        When ManagedIndexSchemaFactory is specified, Solr will load the schema from
-       he resource named in 'managedSchemaResourceName', rather than from schema.xml.
+       the resource named in 'managedSchemaResourceName', rather than from schema.xml.
        Note that the managed schema resource CANNOT be named schema.xml.  If the managed
        schema does not exist, Solr will create it after reading schema.xml, then rename
        'schema.xml' to 'schema.xml.bak'. 
@@ -274,15 +258,6 @@
     <unlockOnStartup>false</unlockOnStartup>
       -->
 
-    <!-- If true, IndexReaders will be opened/reopened from the IndexWriter
-         instead of from the Directory. Hosts in a master/slave setup
-         should have this set to false while those in a SolrCloud
-         cluster need to be set to true. Default: true
-      -->
-    <!-- 
-    <nrtMode>true</nrtMode>
-      -->
-
     <!-- Commit Deletion Policy
          Custom deletion policies can be specified here. The class must
          implement org.apache.lucene.index.IndexDeletionPolicy.
@@ -323,13 +298,6 @@
          this is enabled here, and controlled through log4j.properties.
       -->
      <infoStream>true</infoStream>
-    
-    <!--
-        Use true to enable this safety check, which can help
-        reduce the risk of propagating index corruption from older segments 
-        into new ones, at the expense of slower merging.
-    -->
-     <checkIntegrityAtMerge>false</checkIntegrityAtMerge>
   </indexConfig>
 
 
@@ -837,6 +805,21 @@
      <lst name="defaults">
        <str name="echoParams">explicit</str>
        <int name="rows">10</int>
+       <!-- Controls the distribution of a query to shards other than itself.
+            Consider making 'preferLocalShards' true when:
+              1) maxShardsPerNode > 1
+              2) Number of shards > 1
+              3) CloudSolrClient or LbHttpSolrServer is used by clients.
+            Without this option, every core broadcasts the distributed query to
+            a replica of each shard where the replicas are chosen randomly.
+            This option directs the cores to prefer cores hosted locally, thus
+            preventing network delays between machines.
+            This behavior also immunizes a bad/slow machine from slowing down all
+            the good machines (if those good machines were querying this bad one).
+
+            Specify this option=false for clients connecting through HttpSolrServer
+       -->
+       <bool name="preferLocalShards">false</bool>
      </lst>
     <!-- In addition to defaults, "appends" params can be specified
          to identify values which should be appended to the list of
@@ -1054,7 +1037,7 @@
   <initParams path="/update/json/docs">
     <lst name="defaults">
       <!--this ensures that the entire json doc will be stored verbatim into one field-->
-      <str name="srcField">_src</str>
+      <str name="srcField">_src_</str>
       <!--This means a the uniqueKeyField will be extracted from the fields and
        all fields go into the 'df' field. In this config df is already configured to be 'text'
         -->
@@ -1366,7 +1349,11 @@
     </arr>
   </requestHandler>
 
-  <!-- This causes long startup times on big indexes, even when never used.  See SOLR-6679
+  <!-- This is disabled by default because it currently causes long startup times on 
+       big indexes, even when never used.  See SOLR-6679 for background.
+
+       To use this suggester, set the "solr.suggester.enabled=true" system property
+    -->
   <searchComponent name="suggest" class="solr.SuggestComponent">
     <lst name="suggester">
       <str name="name">mySuggester</str>
@@ -1375,10 +1362,12 @@
       <str name="field">cat</str>
       <str name="weightField">price</str>
       <str name="suggestAnalyzerFieldType">string</str>
+      <str name="buildOnStartup">false</str>
     </lst>
   </searchComponent>
 
-  <requestHandler name="/suggest" class="solr.SearchHandler" startup="lazy">
+  <requestHandler name="/suggest" class="solr.SearchHandler" 
+                  startup="lazy" >
     <lst name="defaults">
       <str name="suggest">true</str>
       <str name="suggest.count">10</str>
@@ -1772,7 +1761,9 @@
   <!--
      Custom response writers can be declared as needed...
     -->
-    <queryResponseWriter name="velocity" class="solr.VelocityResponseWriter" startup="lazy"/>
+    <queryResponseWriter name="velocity" class="solr.VelocityResponseWriter" startup="lazy">
+      <str name="template.base.dir">${velocity.template.base.dir:}</str>
+    </queryResponseWriter>
   
 
   <!-- XSLT response writer transforms the XML output by any xslt file found

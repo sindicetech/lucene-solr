@@ -28,9 +28,11 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.LuceneTestCase.SuppressFileSystems;
 import org.apache.lucene.util.LuceneTestCase.SuppressSysoutChecks;
 import org.apache.lucene.util.QuickPatchThreadsFilter;
 import org.apache.lucene.util.TestUtil;
+import org.apache.solr.client.solrj.embedded.JettyConfig;
 import org.apache.solr.client.solrj.impl.HttpClientConfigurer;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.client.solrj.util.ClientUtils;
@@ -40,19 +42,21 @@ import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.SolrInputField;
-import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.util.ObjectReleaseTracker;
 import org.apache.solr.common.util.XML;
-import org.apache.solr.core.ConfigSolr;
-import org.apache.solr.core.ConfigSolrXmlOld;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.CoreDescriptor;
+import org.apache.solr.core.CoresLocator;
+import org.apache.solr.core.NodeConfig;
 import org.apache.solr.core.SolrConfig;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrResourceLoader;
-import org.apache.solr.handler.JsonUpdateRequestHandler;
+import org.apache.solr.core.SolrXmlConfig;
+import org.apache.solr.core.ZkContainer;
+import org.apache.solr.handler.UpdateRequestHandler;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestHandler;
@@ -65,6 +69,7 @@ import org.apache.solr.util.AbstractSolrTestCase;
 import org.apache.solr.util.RevertDefaultThreadHandlerRule;
 import org.apache.solr.util.SSLTestConfig;
 import org.apache.solr.util.TestHarness;
+import org.apache.zookeeper.KeeperException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -81,9 +86,11 @@ import org.xml.sax.SAXException;
 import javax.xml.xpath.XPathExpressionException;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.io.Writer;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
@@ -91,6 +98,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.net.URL;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -122,9 +131,34 @@ import static com.google.common.base.Preconditions.checkNotNull;
     QuickPatchThreadsFilter.class
 })
 @SuppressSysoutChecks(bugUrl = "Solr dumps tons of logs to console.")
+@SuppressFileSystems("ExtrasFS") // might be ok, the failures with e.g. nightly runs might be "normal"
 public abstract class SolrTestCaseJ4 extends LuceneTestCase {
-  private static String coreName = ConfigSolrXmlOld.DEFAULT_DEFAULT_CORE_NAME;
+
+  public static final String DEFAULT_TEST_CORENAME = "collection1";
+  protected static final String CORE_PROPERTIES_FILENAME = "core.properties";
+
+  private static String coreName = DEFAULT_TEST_CORENAME;
+
   public static int DEFAULT_CONNECTION_TIMEOUT = 60000;  // default socket connection timeout in ms
+
+  protected void writeCoreProperties(Path coreDirectory, String corename) throws IOException {
+    Properties props = new Properties();
+    props.setProperty("name", corename);
+    props.setProperty("configSet", "collection1");
+    props.setProperty("config", "${solrconfig:solrconfig.xml}");
+    props.setProperty("schema", "${schema:schema.xml}");
+
+    writeCoreProperties(coreDirectory, props, this.getTestName());
+  }
+
+  public static void writeCoreProperties(Path coreDirectory, Properties properties, String testname) throws IOException {
+    log.info("Writing core.properties file to {}", coreDirectory);
+    Files.createDirectories(coreDirectory);
+    try (Writer writer =
+             new OutputStreamWriter(Files.newOutputStream(coreDirectory.resolve(CORE_PROPERTIES_FILENAME)), Charset.forName("UTF-8"))) {
+      properties.store(writer, testname);
+    }
+  }
 
   /**
    * Annotation for test classes that want to disable SSL
@@ -136,6 +170,18 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
   public @interface SuppressSSL {
     /** Point to JIRA entry. */
     public String bugUrl() default "None";
+  }
+  
+  /**
+   * Annotation for test classes that want to disable ObjectReleaseTracker
+   */
+  @Documented
+  @Inherited
+  @Retention(RetentionPolicy.RUNTIME)
+  @Target(ElementType.TYPE)
+  public @interface SuppressObjectReleaseTracker {
+    /** Point to JIRA entry. */
+    public String bugUrl();
   }
   
   // these are meant to be accessed sequentially, but are volatile just to ensure any test
@@ -165,7 +211,6 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     System.setProperty("solr.clustering.enabled", "false");
     setupLogging();
     startTrackingSearchers();
-    startTrackingZkClients();
     ignoreException("ignore_exception");
     newRandomConfig();
     
@@ -185,9 +230,15 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
       deleteCore();
       resetExceptionIgnores();
       endTrackingSearchers();
-      endTrackingZkClients();
+      if (!RandomizedContext.current().getTargetClass().isAnnotationPresent(SuppressObjectReleaseTracker.class)) {
+        assertTrue("Some resources were not closed, shutdown, or released.", ObjectReleaseTracker.clearObjectTrackerAndCheckEmpty());
+      } else {
+        if (!ObjectReleaseTracker.clearObjectTrackerAndCheckEmpty()) {
+          log.warn("Some resources were not closed, shutdown, or released. Remove the SuppressObjectReleaseTracker annotation to get more information on the fail.");
+        }
+      }
       resetFactory();
-      coreName = ConfigSolrXmlOld.DEFAULT_DEFAULT_CORE_NAME;
+      coreName = DEFAULT_TEST_CORENAME;
     } finally {
       initCoreDataDir = null;
       System.clearProperty("zookeeper.forceSync");
@@ -244,8 +295,9 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
       return new SSLTestConfig();
     }
     
-    final boolean trySsl = random().nextBoolean();
-    boolean trySslClientAuth = random().nextBoolean();
+    // we don't choose ssl that often because of SOLR-5776
+    final boolean trySsl = random().nextInt(10) < 2;
+    boolean trySslClientAuth = random().nextInt(10) < 2;
     if (Constants.MAC_OS_X) {
       trySslClientAuth = false;
     }
@@ -254,6 +306,10 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
         trySslClientAuth);
     
     return new SSLTestConfig(trySsl, trySslClientAuth);
+  }
+
+  protected static JettyConfig buildJettyConfig(String context) {
+    return JettyConfig.builder().setContext(context).withSSLConfig(sslConfig).build();
   }
   
   protected static String buildUrl(final int port, final String context) {
@@ -281,14 +337,14 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
    */
   public static void setupNoCoreTest(File solrHome, String xmlStr) throws Exception {
 
-    File tmpFile = new File(solrHome, ConfigSolr.SOLR_XML_FILE);
+    File tmpFile = new File(solrHome, SolrXmlConfig.SOLR_XML_FILE);
     if (xmlStr == null) {
       xmlStr = "<solr></solr>";
     }
     FileUtils.write(tmpFile, xmlStr, IOUtils.UTF_8);
 
     SolrResourceLoader loader = new SolrResourceLoader(solrHome.getAbsolutePath());
-    h = new TestHarness(loader, ConfigSolr.fromFile(loader, new File(solrHome, "solr.xml")));
+    h = new TestHarness(SolrXmlConfig.fromFile(loader, new File(solrHome, "solr.xml")));
     lrf = h.getRequestFactory("standard", 0, 20, CommonParams.VERSION, "2.2");
   }
   
@@ -409,12 +465,6 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
       numOpens = numCloses = 0;
     }
   }
-  static long zkClientNumOpens;
-  static long zkClientNumCloses;
-  public static void startTrackingZkClients() {
-    zkClientNumOpens = SolrZkClient.numOpens.get();
-    zkClientNumCloses = SolrZkClient.numCloses.get();
-  }
 
   public static void endTrackingSearchers() {
      long endNumOpens = SolrIndexSearcher.numOpens.get();
@@ -439,7 +489,7 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
      if (endNumOpens-numOpens != endNumCloses-numCloses) {
        String msg = "ERROR: SolrIndexSearcher opens=" + (endNumOpens-numOpens) + " closes=" + (endNumCloses-numCloses);
        log.error(msg);
-       // if its TestReplicationHandler, ignore it. the test is broken and gets no love
+       // if it's TestReplicationHandler, ignore it. the test is broken and gets no love
        if ("TestReplicationHandler".equals(RandomizedContext.current().getTargetClass().getSimpleName())) {
          log.warn("TestReplicationHandler wants to fail!: " + msg);
        } else {
@@ -447,20 +497,6 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
        }
      }
   }
-  
-  public static void endTrackingZkClients() {
-    long endNumOpens = SolrZkClient.numOpens.get();
-    long endNumCloses = SolrZkClient.numCloses.get();
-
-    SolrZkClient.numOpens.getAndSet(0);
-    SolrZkClient.numCloses.getAndSet(0);
-
-    if (endNumOpens-zkClientNumOpens != endNumCloses-zkClientNumCloses) {
-      String msg = "ERROR: SolrZkClient opens=" + (endNumOpens-zkClientNumOpens) + " closes=" + (endNumCloses-zkClientNumCloses);
-      log.error(msg);
-      fail(msg);
-    }
- }
   
   /** Causes an exception matching the regex pattern to not be logged. */
   public static void ignoreException(String pattern) {
@@ -590,6 +626,21 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     return h.getCoreContainer();
   }
 
+  public static CoreContainer createCoreContainer(NodeConfig config, CoresLocator locator) {
+    testSolrHome = config.getSolrResourceLoader().getInstanceDir();
+    h = new TestHarness(config, locator);
+    lrf = h.getRequestFactory("standard", 0, 20, CommonParams.VERSION, "2.2");
+    return h.getCoreContainer();
+  }
+
+  public static CoreContainer createCoreContainer(String coreName, String dataDir, String solrConfig, String schema) {
+    NodeConfig nodeConfig = TestHarness.buildTestNodeConfig(new SolrResourceLoader(SolrResourceLoader.locateSolrHome()));
+    CoresLocator locator = new TestHarness.TestCoresLocator(coreName, dataDir, solrConfig, schema);
+    CoreContainer cc = createCoreContainer(nodeConfig, locator);
+    h.coreName = coreName;
+    return cc;
+  }
+
   public static CoreContainer createDefaultCoreContainer(String solrHome) {
     testSolrHome = checkNotNull(solrHome);
     h = new TestHarness("collection1", initCoreDataDir.getAbsolutePath(), "solrconfig.xml", "schema.xml");
@@ -637,7 +688,21 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
    */
   public static void deleteCore() {
     log.info("###deleteCore" );
-    if (h != null) { h.close(); }
+    if (h != null) {
+      // If the test case set up Zk, it should still have it as available,
+      // otherwise the core close will just be unnecessarily delayed.
+      CoreContainer cc = h.getCoreContainer();
+      if (! cc.getCores().isEmpty() && cc.isZooKeeperAware()) {
+        try {
+          cc.getZkController().getZkClient().exists("/", false);
+        } catch (KeeperException e) {
+          log.error("Testing connectivity to ZK by checking for root path failed", e);
+          fail("Trying to tear down a ZK aware core container with ZK not reachable");
+        } catch (InterruptedException ignored) {}
+      }
+
+      h.close();
+    }
 
     if (factoryProp == null) {
       System.clearProperty("solr.directoryFactory");
@@ -765,9 +830,9 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
   }
   /**
    * Validates a query matches some JSON test expressions and closes the
-   * query. The text expression is of the form path:JSON.  To facilitate
-   * easy embedding in Java strings, the JSON tests can have double quotes
-   * replaced with single quotes.
+   * query. The text expression is of the form path:JSON.  The Noggit JSON
+   * parser used accepts single quoted strings and bare strings to allow
+   * easy embedding in Java Strings.
    * <p>
    * Please use this with care: this makes it easy to match complete
    * structures, but doing so can result in fragile tests if you are
@@ -1043,20 +1108,6 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     @Override
     public String toString() { return xml; }
   }
-
-  /**
-   * @see IOUtils#rm(Path...)
-   */
-  @Deprecated()
-  public static boolean recurseDelete(File f) {
-    try {
-      IOUtils.rm(f.toPath());
-      return true;
-    } catch (IOException e) {
-      System.err.println(e.toString());
-      return false;
-    }
-  }
   
   public void clearIndex() {
     assertU(delQ("*:*"));
@@ -1076,7 +1127,7 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     DirectSolrConnection connection = new DirectSolrConnection(core);
     SolrRequestHandler handler = core.getRequestHandler("/update/json");
     if (handler == null) {
-      handler = new JsonUpdateRequestHandler();
+      handler = new UpdateRequestHandler();
       handler.init(null);
     }
     return connection.request(handler, args, json);
@@ -1094,22 +1145,15 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     return Arrays.asList(docs);
   }
 
-  /** Converts "test JSON" and returns standard JSON.
-   *  Currently this only consists of changing unescaped single quotes to double quotes,
-   *  and escaped single quotes to single quotes.
-   *
-   * The primary purpose is to be able to easily embed JSON strings in a JAVA string
-   * with the best readability.
+  /** Converts "test JSON" strings into JSON parseable by our JSON parser.
+   *  For example, this method changed single quoted strings into double quoted strings before
+   *  the parser could natively handle them.
    *
    * This transformation is automatically applied to JSON test srings (like assertJQ).
    */
   public static String json(String testJSON) {
-    testJSON = nonEscapedSingleQuotePattern.matcher(testJSON).replaceAll("\"");
-    testJSON = escapedSingleQuotePattern.matcher(testJSON).replaceAll("'");
     return testJSON;
   }
-  private static Pattern nonEscapedSingleQuotePattern = Pattern.compile("(?<!\\\\)\'");
-  private static Pattern escapedSingleQuotePattern = Pattern.compile("\\\\\'");
 
 
   /** Creates JSON from a SolrInputDocument.  Doesn't currently handle boosts.
@@ -1798,7 +1842,7 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     copyMinConf(dstRoot, null);
   }
 
-  // Creates a minimal conf dir. Optionally adding in a core.properties file from the string passed in
+  // Creates a minimal conf dir, adding in a core.properties file from the string passed in
   // the string to write to the core.properties file may be null in which case nothing is done with it.
   // propertiesContent may be an empty string, which will actually work.
   public static void copyMinConf(File dstRoot, String propertiesContent) throws IOException {
@@ -1807,6 +1851,7 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     if (! dstRoot.exists()) {
       assertTrue("Failed to make subdirectory ", dstRoot.mkdirs());
     }
+    Files.createFile(dstRoot.toPath().resolve("core.properties"));
     if (propertiesContent != null) {
       FileUtils.writeStringToFile(new File(dstRoot, "core.properties"), propertiesContent, Charsets.UTF_8.toString());
     }
@@ -1852,6 +1897,7 @@ public abstract class SolrTestCaseJ4 extends LuceneTestCase {
     FileUtils.copyFile(new File(top, "open-exchange-rates.json"), new File(subHome, "open-exchange-rates.json"));
     FileUtils.copyFile(new File(top, "protwords.txt"), new File(subHome, "protwords.txt"));
     FileUtils.copyFile(new File(top, "schema.xml"), new File(subHome, "schema.xml"));
+    FileUtils.copyFile(new File(top, "enumsConfig.xml"), new File(subHome, "enumsConfig.xml"));
     FileUtils.copyFile(new File(top, "solrconfig.snippet.randomindexconfig.xml"), new File(subHome, "solrconfig.snippet.randomindexconfig.xml"));
     FileUtils.copyFile(new File(top, "solrconfig.xml"), new File(subHome, "solrconfig.xml"));
     FileUtils.copyFile(new File(top, "stopwords.txt"), new File(subHome, "stopwords.txt"));

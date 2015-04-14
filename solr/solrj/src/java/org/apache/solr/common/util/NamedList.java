@@ -65,6 +65,12 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
     nvPairs = new ArrayList<>();
   }
 
+
+  public NamedList(int sz) {
+    nvPairs = new ArrayList<>(sz<<1);
+  }
+
+
   /**
    * Creates a NamedList instance containing the "name,value" pairs contained in the
    * Entry[].
@@ -455,7 +461,7 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
   }
 
   /**
-   * Iterates over the Map and sequentially adds it's key/value pairs
+   * Iterates over the Map and sequentially adds its key/value pairs
    */
   public boolean addAll(Map<String,T> args) {
     for (Map.Entry<String, T> entry : args.entrySet() ) {

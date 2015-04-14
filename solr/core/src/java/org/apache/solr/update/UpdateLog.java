@@ -70,7 +70,7 @@ import static org.apache.solr.update.processor.DistributingUpdateProcessorFactor
 /** @lucene.experimental */
 public class UpdateLog implements PluginInfoInitialized {
   private static final long STATUS_TIME = TimeUnit.NANOSECONDS.convert(60, TimeUnit.SECONDS);
-  public static String LOG_FILENAME_PATTERN = "%s.%019d.%1d";
+  public static String LOG_FILENAME_PATTERN = "%s.%019d";
   public static String TLOG_NAME="tlog";
 
   public static Logger log = LoggerFactory.getLogger(UpdateLog.class);
@@ -130,7 +130,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
   protected TransactionLog tlog;
   protected TransactionLog prevTlog;
-  protected Deque<TransactionLog> logs = new LinkedList<>();  // list of recent logs, newest first
+  protected final Deque<TransactionLog> logs = new LinkedList<>();  // list of recent logs, newest first
   protected LinkedList<TransactionLog> newestLogsOnStartup = new LinkedList<>();
   protected int numOldRecords;  // number of records in the recent logs
 
@@ -142,7 +142,8 @@ public class UpdateLog implements PluginInfoInitialized {
 
   protected final int numDeletesToKeep = 1000;
   protected final int numDeletesByQueryToKeep = 100;
-  public final int numRecordsToKeep = 100;
+  protected int numRecordsToKeep;
+  protected int maxNumLogsToKeep;
 
   // keep track of deletes only... this is not updated on an add
   protected LinkedHashMap<BytesRef, LogPtr> oldDeletes = new LinkedHashMap<BytesRef, LogPtr>(numDeletesToKeep) {
@@ -215,10 +216,31 @@ public class UpdateLog implements PluginInfoInitialized {
     return versionInfo;
   }
 
+  public int getNumRecordsToKeep() {
+    return numRecordsToKeep;
+  }
+
+  public int getMaxNumLogsToKeep() {
+    return maxNumLogsToKeep;
+  }
+
+  protected static int objToInt(Object obj, int def) {
+    if (obj != null) {
+      return Integer.parseInt(obj.toString());
+    }
+    else return def;
+  }
+
   @Override
   public void init(PluginInfo info) {
     dataDir = (String)info.initArgs.get("dir");
     defaultSyncLevel = SyncLevel.getSyncLevel((String)info.initArgs.get("syncLevel"));
+
+    numRecordsToKeep = objToInt(info.initArgs.get("numRecordsToKeep"), 100);
+    maxNumLogsToKeep = objToInt(info.initArgs.get("maxNumLogsToKeep"), 10);
+
+    log.info("Initializing UpdateLog: dataDir={} defaultSyncLevel={} numRecordsToKeep={} maxNumLogsToKeep={}",
+        dataDir, defaultSyncLevel, numRecordsToKeep, maxNumLogsToKeep);
   }
 
   /* Note, when this is called, uhandler is not completely constructed.
@@ -254,7 +276,7 @@ public class UpdateLog implements PluginInfoInitialized {
     for (String oldLogName : tlogFiles) {
       File f = new File(tlogDir, oldLogName);
       try {
-        oldLog = new CdcrTransactionLog( f, null, true );
+        oldLog = newTransactionLog(f, null, true);
         addOldLog(oldLog, false);  // don't remove old logs on startup since more than one may be uncapped.
       } catch (Exception e) {
         SolrException.log(log, "Failure to open existing log file (non fatal) " + f, e);
@@ -304,6 +326,14 @@ public class UpdateLog implements PluginInfoInitialized {
 
   }
 
+  /**
+   * Returns a new {@link org.apache.solr.update.TransactionLog}. Sub-classes can override this method to
+   * change the implementation of the transaction log.
+   */
+  public TransactionLog newTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
+    return new TransactionLog(tlogFile, globalStrings, openExisting);
+  }
+
   public String getLogDir() {
     return tlogDir.getAbsolutePath();
   }
@@ -317,7 +347,7 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
   /* Takes over ownership of the log, keeping it until no longer needed
-     and then decrementing it's reference and dropping it.
+     and then decrementing its reference and dropping it.
    */
   protected synchronized void addOldLog(TransactionLog oldLog, boolean removeOld) {
     if (oldLog == null) return;
@@ -335,7 +365,7 @@ public class UpdateLog implements PluginInfoInitialized {
       int nrec = log.numRecords();
       // remove oldest log if we don't need it to keep at least numRecordsToKeep, or if
       // we already have the limit of 10 log files.
-      if (currRecords - nrec >= numRecordsToKeep || logs.size() >= 10) {
+      if (currRecords - nrec >= numRecordsToKeep || (maxNumLogsToKeep > 0 && logs.size() >= maxNumLogsToKeep)) {
         currRecords -= nrec;
         numOldRecords -= nrec;
         logs.removeLast().decref();  // dereference so it will be deleted when no longer in use
@@ -368,7 +398,7 @@ public class UpdateLog implements PluginInfoInitialized {
     if (id != -1) return id;
     if (tlogFiles.length == 0) return -1;
     String last = tlogFiles[tlogFiles.length-1];
-    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
+    return Long.parseLong(last.substring(TLOG_NAME.length() + 1));
   }
 
   public void add(AddUpdateCommand cmd) {
@@ -385,7 +415,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.write(cmd, operationFlags);
       }
 
@@ -436,7 +466,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDelete(cmd, operationFlags);
       }
 
@@ -460,7 +490,7 @@ public class UpdateLog implements PluginInfoInitialized {
       long pos = -1;
       // don't log if we are replaying from another log
       if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
-        ensureLog(cmd.getVersion());
+        ensureLog();
         pos = tlog.writeDeleteByQuery(cmd, operationFlags);
       }
 
@@ -786,7 +816,7 @@ public class UpdateLog implements PluginInfoInitialized {
 
     List<TransactionLog> recoverLogs = new ArrayList<>(1);
     for (TransactionLog ll : newestLogsOnStartup) {
-      ll.incref();
+      if (!ll.try_incref()) continue;
 
       try {
         if (ll.endsWithCommit()) {
@@ -820,10 +850,10 @@ public class UpdateLog implements PluginInfoInitialized {
   }
 
 
-  protected void ensureLog(long startVersion) {
+  protected void ensureLog() {
     if (tlog == null) {
-      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, startVersion);
-      tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
+      String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id);
+      tlog = newTransactionLog(new File(tlogDir, newLogName), globalStrings, false);
     }
   }
 
@@ -1298,10 +1328,6 @@ public class UpdateLog implements PluginInfoInitialized {
                 // versionInfo.unblockUpdates();
               }
             }
-          } catch (InterruptedException e) {
-            SolrException.log(log, e);
-          } catch (IOException e) {
-            SolrException.log(log, e);
           } catch (Exception e) {
             SolrException.log(log, e);
           }

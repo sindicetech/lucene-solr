@@ -139,9 +139,10 @@ public class CheckHits {
     protected void doSetNextReader(LeafReaderContext context) throws IOException {
       base = context.docBase;
     }
+    
     @Override
-    public boolean acceptsDocsOutOfOrder() {
-      return true;
+    public boolean needsScores() {
+      return false;
     }
   }
 
@@ -342,13 +343,13 @@ public class CheckHits {
     if (!deep) return;
 
     Explanation detail[] = expl.getDetails();
-    // TODO: can we improve this entire method? its really geared to work only with TF/IDF
+    // TODO: can we improve this entire method? it's really geared to work only with TF/IDF
     if (expl.getDescription().endsWith("computed from:")) {
       return; // something more complicated.
     }
     if (detail!=null) {
       if (detail.length==1) {
-        // simple containment, unless its a freq of: (which lets a query explain how the freq is calculated), 
+        // simple containment, unless it's a freq of: (which lets a query explain how the freq is calculated), 
         // just verify contained expl has same score
         if (!expl.getDescription().endsWith("with freq of:"))
           verifyExplanation(q,doc,score,deep,detail[0]);
@@ -423,18 +424,17 @@ public class CheckHits {
       super(r);
     }
     protected void checkExplanations(Query q) throws IOException {
-      super.search(q, null,
+      super.search(q,
                    new ExplanationAsserter
                    (q, null, this));
     }
     @Override
     public TopFieldDocs search(Query query,
-                               Filter filter,
                                int n,
                                Sort sort) throws IOException {
       
       checkExplanations(query);
-      return super.search(query,filter,n,sort);
+      return super.search(query,n,sort);
     }
     @Override
     public void search(Query query, Collector results) throws IOException {
@@ -442,16 +442,10 @@ public class CheckHits {
       super.search(query, results);
     }
     @Override
-    public void search(Query query, Filter filter, Collector results) throws IOException {
-      checkExplanations(query);
-      super.search(query, filter, results);
-    }
-    @Override
-    public TopDocs search(Query query, Filter filter,
-                          int n) throws IOException {
+    public TopDocs search(Query query, int n) throws IOException {
 
       checkExplanations(query);
-      return super.search(query,filter, n);
+      return super.search(query, n);
     }
   }
     
@@ -511,8 +505,9 @@ public class CheckHits {
     protected void doSetNextReader(LeafReaderContext context) throws IOException {
       base = context.docBase;
     }
+    
     @Override
-    public boolean acceptsDocsOutOfOrder() {
+    public boolean needsScores() {
       return true;
     }
   }

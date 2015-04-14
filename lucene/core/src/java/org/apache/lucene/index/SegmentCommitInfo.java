@@ -22,8 +22,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.lucene.store.Directory;
@@ -340,15 +340,24 @@ public class SegmentCommitInfo {
   }
 
   void setDelCount(int delCount) {
-    if (delCount < 0 || delCount > info.getDocCount()) {
-      throw new IllegalArgumentException("invalid delCount=" + delCount + " (docCount=" + info.getDocCount() + ")");
+    if (delCount < 0 || delCount > info.maxDoc()) {
+      throw new IllegalArgumentException("invalid delCount=" + delCount + " (maxDoc=" + info.maxDoc() + ")");
     }
     this.delCount = delCount;
   }
+  
+  /** 
+   * Returns a description of this segment. 
+   * @deprecated Use {@link #toString(int)} instead.
+   */
+  @Deprecated
+  public String toString(Directory dir, int pendingDelCount) {
+    return toString(pendingDelCount);
+  }
 
   /** Returns a description of this segment. */
-  public String toString(Directory dir, int pendingDelCount) {
-    String s = info.toString(dir, delCount + pendingDelCount);
+  public String toString(int pendingDelCount) {
+    String s = info.toString(delCount + pendingDelCount);
     if (delGen != -1) {
       s += ":delGen=" + delGen;
     }
@@ -363,7 +372,7 @@ public class SegmentCommitInfo {
 
   @Override
   public String toString() {
-    return toString(info.dir, 0);
+    return toString(0);
   }
 
   @Override

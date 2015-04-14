@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.blocktreeords;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -29,9 +30,9 @@ import org.apache.lucene.codecs.FieldsProducer;
 import org.apache.lucene.codecs.PostingsReaderBase;
 import org.apache.lucene.codecs.blocktreeords.FSTOrdsOutputs.Output;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.store.IndexInput;
@@ -133,8 +134,8 @@ public final class OrdsBlockTreeTermsReader extends FieldsProducer {
 
         BytesRef minTerm = readBytesRef(in);
         BytesRef maxTerm = readBytesRef(in);
-        if (docCount < 0 || docCount > state.segmentInfo.getDocCount()) { // #docs with field must be <= #docs
-          throw new CorruptIndexException("invalid docCount: " + docCount + " maxDoc: " + state.segmentInfo.getDocCount(), in);
+        if (docCount < 0 || docCount > state.segmentInfo.maxDoc()) { // #docs with field must be <= #docs
+          throw new CorruptIndexException("invalid docCount: " + docCount + " maxDoc: " + state.segmentInfo.maxDoc(), in);
         }
         if (sumDocFreq < docCount) {  // #postings must be >= #docs with field
           throw new CorruptIndexException("invalid sumDocFreq: " + sumDocFreq + " docCount: " + docCount, in);
@@ -234,7 +235,7 @@ public final class OrdsBlockTreeTermsReader extends FieldsProducer {
   }
   
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     resources.addAll(Accountables.namedAccountables("field", fields));
     resources.add(Accountables.namedAccountable("delegate", postingsReader));

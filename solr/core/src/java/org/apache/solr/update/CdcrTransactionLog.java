@@ -20,11 +20,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.channels.Channels;
+import java.nio.file.Files;
 import java.util.Collection;
 
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.FastOutputStream;
 import org.apache.solr.common.util.JavaBinCodec;
+import org.apache.solr.common.util.ObjectReleaseTracker;
 
 /**
  * Extends {@link org.apache.solr.update.TransactionLog} to:
@@ -39,14 +41,25 @@ import org.apache.solr.common.util.JavaBinCodec;
 public class CdcrTransactionLog extends TransactionLog {
 
   private boolean isReplaying;
+  long startVersion; // (absolute) version of the first element of this transaction log
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings) {
     super(tlogFile, globalStrings);
+
+    // The starting version number will be used to seek more efficiently tlogs
+    String filename = tlogFile.getName();
+    startVersion = Math.abs(Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1)));
+
     isReplaying = false;
   }
 
   CdcrTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
     super(tlogFile, globalStrings, openExisting);
+
+    // The starting version number will be used to seek more efficiently tlogs
+    String filename = tlogFile.getName();
+    startVersion = Math.abs(Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1)));
+
     numRecords = openExisting ? this.readNumRecords() : 0;
     // if we try to reopen an existing tlog file and that the number of records is equal to 0, then we are replaying
     // the log and we will append a commit
@@ -59,7 +72,7 @@ public class CdcrTransactionLog extends TransactionLog {
    * Returns the number of records in the log (currently includes the header and an optional commit).
    */
   public int numRecords() {
-    return this.numRecords;
+    return super.numRecords();
   }
 
   /**
@@ -141,7 +154,9 @@ public class CdcrTransactionLog extends TransactionLog {
         this.numRecords++;
         // We are replaying the log. We need to update the number of records for the writeCommit.
         if (isReplaying) {
-          CdcrTransactionLog.this.numRecords = this.numRecords;
+          synchronized (CdcrTransactionLog.this) {
+            CdcrTransactionLog.this.numRecords = this.numRecords;
+          }
         }
       }
       return o;
@@ -155,6 +170,18 @@ public class CdcrTransactionLog extends TransactionLog {
     if (refcount.getAndIncrement() == 0) {
       reopenOutputStream(); // synchronised with this
     }
+  }
+
+  /**
+   * Modified to act like {@link #incref()} in order to be compatible with {@link UpdateLog#recoverFromLog()}.
+   * Otherwise, we would have to duplicate the method {@link UpdateLog#recoverFromLog()} in
+   * {@link org.apache.solr.update.CdcrUpdateLog} and change the call
+   * {@code if (!ll.try_incref()) continue; } to {@code incref(); }.
+   */
+  @Override
+  public boolean try_incref() {
+    this.incref();
+    return true;
   }
 
   @Override
@@ -178,10 +205,17 @@ public class CdcrTransactionLog extends TransactionLog {
       }
 
       if (deleteOnClose) {
-        tlogFile.delete();
+        try {
+          Files.deleteIfExists(tlogFile.toPath());
+        } catch (IOException e) {
+          // TODO: should this class care if a file couldnt be deleted?
+          // this just emulates previous behavior, where only SecurityException would be handled.
+        }
       }
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    } finally {
+      assert ObjectReleaseTracker.release(this);
     }
   }
 

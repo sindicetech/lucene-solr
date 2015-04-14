@@ -17,13 +17,16 @@
 
 package org.apache.solr.request;
 
+import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.util.RTimer;
 import org.apache.solr.util.RefCounted;
 import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.ContentStream;
 import org.apache.solr.core.SolrCore;
 
+import java.io.Closeable;
 import java.util.Map;
 import java.util.HashMap;
 
@@ -40,18 +43,26 @@ import java.util.HashMap;
  *
  *
  */
-public abstract class SolrQueryRequestBase implements SolrQueryRequest {
+public abstract class SolrQueryRequestBase implements SolrQueryRequest, Closeable {
   protected final SolrCore core;
   protected final SolrParams origParams;
   protected volatile IndexSchema schema;
   protected SolrParams params;
   protected Map<Object,Object> context;
   protected Iterable<ContentStream> streams;
+  protected Map<String,Object> json;
 
-  public SolrQueryRequestBase(SolrCore core, SolrParams params) {
+  private final RTimer requestTimer;
+
+  public SolrQueryRequestBase(SolrCore core, SolrParams params, RTimer requestTimer) {
     this.core = core;
     this.schema = null == core ? null : core.getLatestSchema();
     this.params = this.origParams = params;
+    this.requestTimer = requestTimer;
+  }
+
+  public SolrQueryRequestBase(SolrCore core, SolrParams params) {
+    this(core, params, new RTimer());
   }
 
   @Override
@@ -81,6 +92,10 @@ public abstract class SolrQueryRequestBase implements SolrQueryRequest {
   @Override
   public long getStartTime() {
     return startTime;
+  }
+
+  public RTimer getRequestTimer () {
+    return requestTimer;
   }
 
   // The index searcher associated with this request
@@ -148,6 +163,24 @@ public abstract class SolrQueryRequestBase implements SolrQueryRequest {
   @Override
   public String toString() {
     return this.getClass().getSimpleName() + '{' + params + '}';
+  }
+
+  @Override
+  public void forward(String handler ,SolrParams params, SolrQueryResponse rsp){
+    try(LocalSolrQueryRequest r = new LocalSolrQueryRequest(getCore(), params)) {
+      getCore().getRequestHandler(handler).handleRequest(r, rsp);
+    }
+
+  }
+
+  @Override
+  public Map<String, Object> getJSON() {
+    return json;
+  }
+
+  @Override
+  public void setJSON(Map<String, Object> json) {
+    this.json = json;
   }
 
 }

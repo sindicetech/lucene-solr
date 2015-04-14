@@ -17,7 +17,11 @@ package org.apache.lucene.codecs.lucene40;
  * limitations under the License.
  */
 
+import java.io.Closeable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Collection;
+import java.util.Collections;
 
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.StoredFieldsReader;
@@ -34,10 +38,6 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
-
-import java.io.Closeable;
-import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 
 /**
  * Reader for 4.0 stored fields
@@ -124,8 +124,8 @@ final class Lucene40StoredFieldsReader extends StoredFieldsReader implements Clo
       final long indexSize = indexStream.length() - HEADER_LENGTH_IDX;
       this.size = (int) (indexSize >> 3);
       // Verify two sources of "maxDoc" agree:
-      if (this.size != si.getDocCount()) {
-        throw new CorruptIndexException("doc counts differ for segment " + segment + ": fieldsReader shows " + this.size + " but segmentInfo shows " + si.getDocCount(), indexStream);
+      if (this.size != si.maxDoc()) {
+        throw new CorruptIndexException("doc counts differ for segment " + segment + ": fieldsReader shows " + this.size + " but segmentInfo shows " + si.maxDoc(), indexStream);
       }
       numTotalDocs = (int) (indexSize >> 3);
       success = true;
@@ -259,7 +259,7 @@ final class Lucene40StoredFieldsReader extends StoredFieldsReader implements Clo
   }
   
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Collections.emptyList();
   }
 

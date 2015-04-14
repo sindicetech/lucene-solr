@@ -47,7 +47,7 @@ class DirectDocValuesConsumer extends DocValuesConsumer {
   final int maxDoc;
 
   DirectDocValuesConsumer(SegmentWriteState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
     boolean success = false;
     try {
       String dataName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
@@ -262,7 +262,7 @@ class DirectDocValuesConsumer extends DocValuesConsumer {
     }
   }
 
-  // note: this might not be the most efficient... but its fairly simple
+  // note: this might not be the most efficient... but it's fairly simple
   @Override
   public void addSortedSetField(FieldInfo field, Iterable<BytesRef> values, final Iterable<Number> docToOrdCount, final Iterable<Number> ords) throws IOException {
     meta.writeVInt(field.number);

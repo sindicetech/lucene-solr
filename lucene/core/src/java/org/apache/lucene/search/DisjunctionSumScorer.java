@@ -18,12 +18,14 @@ package org.apache.lucene.search;
  */
 
 import java.io.IOException;
+import java.util.List;
+
+import org.apache.lucene.search.ScorerPriorityQueue.ScorerWrapper;
 
 /** A Scorer for OR like queries, counterpart of <code>ConjunctionScorer</code>.
  * This Scorer implements {@link Scorer#advance(int)} and uses advance() on the given Scorers. 
  */
 final class DisjunctionSumScorer extends DisjunctionScorer { 
-  private double score;
   private final float[] coord;
   
   /** Construct a <code>DisjunctionScorer</code>.
@@ -31,23 +33,19 @@ final class DisjunctionSumScorer extends DisjunctionScorer {
    * @param subScorers Array of at least two subscorers.
    * @param coord Table of coordination factors
    */
-  DisjunctionSumScorer(Weight weight, Scorer[] subScorers, float[] coord) {
-    super(weight, subScorers);
+  DisjunctionSumScorer(Weight weight, List<Scorer> subScorers, float[] coord, boolean needsScores) {
+    super(weight, subScorers, needsScores);
     this.coord = coord;
   }
-  
+
   @Override
-  protected void reset() {
-    score = 0;
-  }
-  
-  @Override
-  protected void accum(Scorer subScorer) throws IOException {
-    score += subScorer.score();
-  }
-  
-  @Override
-  protected float getFinal() {
-    return (float)score * coord[freq]; 
+  protected float score(ScorerWrapper topList) throws IOException {
+    double score = 0;
+    int freq = 0;
+    for (ScorerWrapper w = topList; w != null; w = w.next) {
+      score += w.scorer.score();
+      freq += 1;
+    }
+    return (float)score * coord[freq];
   }
 }

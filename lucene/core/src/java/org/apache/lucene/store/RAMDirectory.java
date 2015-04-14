@@ -19,6 +19,7 @@ package org.apache.lucene.store;
 
 import java.io.IOException;
 import java.io.FileNotFoundException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -87,14 +88,16 @@ public class RAMDirectory extends BaseDirectory implements Accountable {
    * @param dir a <code>Directory</code> value
    * @exception IOException if an error occurs
    */
-  public RAMDirectory(Directory dir, IOContext context) throws IOException {
+  public RAMDirectory(FSDirectory dir, IOContext context) throws IOException {
     this(dir, false, context);
   }
   
-  private RAMDirectory(Directory dir, boolean closeDir, IOContext context) throws IOException {
+  private RAMDirectory(FSDirectory dir, boolean closeDir, IOContext context) throws IOException {
     this();
     for (String file : dir.listAll()) {
-      dir.copy(this, file, file, context);
+      if (!Files.isDirectory(dir.getDirectory().resolve(file))) {
+        copyFrom(dir, file, file, context);
+      }
     }
     if (closeDir) {
       dir.close();
@@ -105,7 +108,7 @@ public class RAMDirectory extends BaseDirectory implements Accountable {
   public final String[] listAll() {
     ensureOpen();
     // NOTE: this returns a "weakly consistent view". Unless we change Dir API, keep this,
-    // and do not synchronize or anything stronger. its great for testing!
+    // and do not synchronize or anything stronger. it's great for testing!
     // NOTE: fileMap.keySet().toArray(new String[0]) is broken in non Sun JDKs,
     // and the code below is resilient to map changes during the array population.
     Set<String> fileNames = fileMap.keySet();
@@ -143,7 +146,7 @@ public class RAMDirectory extends BaseDirectory implements Accountable {
   }
   
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Accountables.namedAccountables("file", fileMap);
   }
   
@@ -173,7 +176,7 @@ public class RAMDirectory extends BaseDirectory implements Accountable {
       existing.directory = null;
     }
     fileMap.put(name, file);
-    return new RAMOutputStream(file, true);
+    return new RAMOutputStream(name, file, true);
   }
 
   /**

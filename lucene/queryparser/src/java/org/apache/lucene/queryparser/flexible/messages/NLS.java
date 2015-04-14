@@ -70,7 +70,7 @@ public class NLS {
     String str = getLocalizedMessage(key, locale);
 
     if (args.length > 0) {
-      str = MessageFormat.format(str, args);
+      str = new MessageFormat(str, Locale.ROOT).format(args);
     }
 
     return str;
@@ -149,9 +149,7 @@ public class NLS {
     try {
       field.set(null, field.getName());
       validateMessage(field.getName(), clazz);
-    } catch (IllegalArgumentException e) {
-      // should not happen
-    } catch (IllegalAccessException e) {
+    } catch (IllegalArgumentException | IllegalAccessException e) {
       // should not happen
     }
   }

@@ -164,7 +164,7 @@ public class TestIndexWriter extends LuceneTestCase {
 
 
 
-    // TODO: we have the logic in MDW to do this check, and its better, because it knows about files it tried
+    // TODO: we have the logic in MDW to do this check, and it's better, because it knows about files it tried
     // to delete but couldn't: we should replace this!!!!
     public static void assertNoUnreferencedFiles(Directory dir, String message) throws IOException {
       if (dir instanceof MockDirectoryWrapper) {
@@ -443,7 +443,7 @@ public class TestIndexWriter extends LuceneTestCase {
 
       IndexReader reader = DirectoryReader.open(dir);
       IndexSearcher searcher = newSearcher(reader);
-      ScoreDoc[] hits = searcher.search(new TermQuery(searchTerm), null, 1000).scoreDocs;
+      ScoreDoc[] hits = searcher.search(new TermQuery(searchTerm), 1000).scoreDocs;
       assertEquals(10, hits.length);
       reader.close();
 
@@ -465,7 +465,7 @@ public class TestIndexWriter extends LuceneTestCase {
       writer.close();
       reader = DirectoryReader.open(dir);
       searcher = newSearcher(reader);
-      hits = searcher.search(new TermQuery(searchTerm), null, 1000).scoreDocs;
+      hits = searcher.search(new TermQuery(searchTerm), 1000).scoreDocs;
       assertEquals(27, hits.length);
       reader.close();
 
@@ -501,12 +501,12 @@ public class TestIndexWriter extends LuceneTestCase {
       assertEquals(1, reader.numDocs());
       Term t = new Term("field", "a");
       assertEquals(1, reader.docFreq(t));
-      DocsEnum td = TestUtil.docs(random(), reader,
+      PostingsEnum td = TestUtil.docs(random(), reader,
           "field",
           new BytesRef("a"),
           MultiFields.getLiveDocs(reader),
           null,
-          DocsEnum.FLAG_FREQS);
+          PostingsEnum.FREQS);
       td.nextDoc();
       assertEquals(128*1024, td.freq());
       reader.close();
@@ -832,14 +832,14 @@ public class TestIndexWriter extends LuceneTestCase {
     Terms tpv = r.getTermVectors(0).terms("field");
     TermsEnum termsEnum = tpv.iterator(null);
     assertNotNull(termsEnum.next());
-    DocsAndPositionsEnum dpEnum = termsEnum.docsAndPositions(null, null);
+    PostingsEnum dpEnum = termsEnum.postings(null, null, PostingsEnum.ALL);
     assertNotNull(dpEnum);
     assertTrue(dpEnum.nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
     assertEquals(1, dpEnum.freq());
     assertEquals(100, dpEnum.nextPosition());
 
     assertNotNull(termsEnum.next());
-    dpEnum = termsEnum.docsAndPositions(null, dpEnum);
+    dpEnum = termsEnum.postings(null, dpEnum, PostingsEnum.ALL);
     assertNotNull(dpEnum);
     assertTrue(dpEnum.nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
     assertEquals(1, dpEnum.freq());
@@ -873,8 +873,8 @@ public class TestIndexWriter extends LuceneTestCase {
     writer2.addDocument(doc);
     writer2.close();
 
-    IndexReader r1 = DirectoryReader.open(dir2);
-    writer.addIndexes(r1, r1);
+    DirectoryReader r1 = DirectoryReader.open(dir2);
+    TestUtil.addIndexesSlowly(writer, r1, r1);
     writer.close();
 
     IndexReader r3 = DirectoryReader.open(dir);
@@ -905,6 +905,15 @@ public class TestIndexWriter extends LuceneTestCase {
       // LUCENE-2239: won't work with NIOFS/MMAP
       adder = new MockDirectoryWrapper(random, new RAMDirectory());
       IndexWriterConfig conf = newIndexWriterConfig(random, new MockAnalyzer(random));
+      if (conf.getMergeScheduler() instanceof ConcurrentMergeScheduler) {
+        conf.setMergeScheduler(new SuppressingConcurrentMergeScheduler() {
+            @Override
+            protected boolean isOK(Throwable th) {
+              return th instanceof AlreadyClosedException ||
+                (th instanceof IllegalStateException && th.getMessage().contains("this writer hit an unrecoverable error"));
+            }
+          });
+      }
       IndexWriter w = new IndexWriter(adder, conf);
       Document doc = new Document();
       doc.add(newStringField(random, "id", "500", Field.Store.NO));
@@ -940,6 +949,12 @@ public class TestIndexWriter extends LuceneTestCase {
       // When interrupt arrives in w.close(), this can
       // lead to double-write of files:
       dir.setPreventDoubleWrite(false);
+      
+      // open/close slowly sometimes
+      dir.setUseSlowOpenClosers(true);
+      
+      // throttle a little
+      dir.setThrottling(MockDirectoryWrapper.Throttling.SOMETIMES);
 
       IndexWriter w = null;
       while(!finish) {
@@ -962,6 +977,15 @@ public class TestIndexWriter extends LuceneTestCase {
             }
             IndexWriterConfig conf = newIndexWriterConfig(random,
                                                           new MockAnalyzer(random)).setMaxBufferedDocs(2);
+            if (conf.getMergeScheduler() instanceof ConcurrentMergeScheduler) {
+              conf.setMergeScheduler(new SuppressingConcurrentMergeScheduler() {
+                  @Override
+                  protected boolean isOK(Throwable th) {
+                    return th instanceof AlreadyClosedException ||
+                      (th instanceof IllegalStateException && th.getMessage().contains("this writer hit an unrecoverable error"));
+                  }
+                });
+            }
             //conf.setInfoStream(log);
             w = new IndexWriter(dir, conf);
 
@@ -1214,12 +1238,12 @@ public class TestIndexWriter extends LuceneTestCase {
 
 
     // test that the terms were indexed.
-    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc1field1"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
-    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc2field1"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
-    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc3field1"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
-    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc1field2"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
-    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc2field2"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
-    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc3field2"), null, null, DocsEnum.FLAG_NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc1field1"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc2field1"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "binary", new BytesRef("doc3field1"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc1field2"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc2field2"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
+    assertTrue(TestUtil.docs(random(), ir, "string", new BytesRef("doc3field2"), null, null, PostingsEnum.NONE).nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
 
     ir.close();
     dir.close();
@@ -1278,11 +1302,9 @@ public class TestIndexWriter extends LuceneTestCase {
       if (iter == 1) {
         // we run a full commit so there should be a segments file etc.
         assertTrue(files.contains("segments_1"));
-        assertEquals(files.toString(), files.size(), 4);
       } else {
         // this is an NRT reopen - no segments files yet
-
-        assertEquals(files.toString(), files.size(), 3);
+        assertFalse(files.contains("segments_1"));
       }
       w.addDocument(doc);
       w.forceMerge(1);
@@ -1391,6 +1413,8 @@ public class TestIndexWriter extends LuceneTestCase {
     if (dir instanceof MockDirectoryWrapper) {
       ((MockDirectoryWrapper)dir).setEnableVirusScanner(false);
     }
+    
+    String[] origFiles = dir.listAll();
     IndexWriter writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                                 .setMaxBufferedDocs(2)
                                                 .setMergePolicy(newLogMergePolicy())
@@ -1399,13 +1423,13 @@ public class TestIndexWriter extends LuceneTestCase {
 
     // Creating over empty dir should not create any files,
     // or, at most the write.lock file
-    final int extraFileCount;
-    if (files.length == 1) {
-      assertTrue(files[0].endsWith("write.lock"));
-      extraFileCount = 1;
+    final int extraFileCount = files.length - origFiles.length;
+    if (extraFileCount == 1) {
+      assertTrue(Arrays.asList(files).contains(IndexWriter.WRITE_LOCK_NAME));
     } else {
-      assertEquals(0, files.length);
-      extraFileCount = 0;
+      Arrays.sort(origFiles);
+      Arrays.sort(files);
+      assertArrayEquals(origFiles, files);
     }
 
     Document doc = new Document();
@@ -1419,10 +1443,14 @@ public class TestIndexWriter extends LuceneTestCase {
     // Adding just one document does not call flush yet.
     int computedExtraFileCount = 0;
     for (String file : dir.listAll()) {
-      if (file.lastIndexOf('.') < 0
-          // don't count stored fields and term vectors in
-          || !Arrays.asList("fdx", "fdt", "tvx", "tvd", "tvf").contains(file.substring(file.lastIndexOf('.') + 1))) {
-        ++computedExtraFileCount;
+      if (IndexWriter.WRITE_LOCK_NAME.equals(file) || 
+          file.startsWith(IndexFileNames.SEGMENTS) || 
+          IndexFileNames.CODEC_FILE_PATTERN.matcher(file).matches()) {
+        if (file.lastIndexOf('.') < 0
+            // don't count stored fields and term vectors in
+            || !Arrays.asList("fdx", "fdt", "tvx", "tvd", "tvf").contains(file.substring(file.lastIndexOf('.') + 1))) {
+          ++computedExtraFileCount;
+        }
       }
     }
     assertEquals("only the stored and term vector files should exist in the directory", extraFileCount, computedExtraFileCount);
@@ -1437,12 +1465,12 @@ public class TestIndexWriter extends LuceneTestCase {
     // After rollback, IW should remove all files
     writer.rollback();
     String allFiles[] = dir.listAll();
-    assertTrue("no files should exist in the directory after rollback", allFiles.length == 0 || Arrays.equals(allFiles, new String[] { IndexWriter.WRITE_LOCK_NAME }));
+    assertEquals("no files should exist in the directory after rollback", origFiles.length + extraFileCount, allFiles.length);
 
     // Since we rolled-back above, that close should be a no-op
     writer.close();
     allFiles = dir.listAll();
-    assertTrue("expected a no-op close after IW.rollback()", allFiles.length == 0 || Arrays.equals(allFiles, new String[] { IndexWriter.WRITE_LOCK_NAME }));
+    assertEquals("expected a no-op close after IW.rollback()", origFiles.length + extraFileCount, allFiles.length);
     dir.close();
   }
 
@@ -2326,7 +2354,7 @@ public class TestIndexWriter extends LuceneTestCase {
     Directory dir = newDirectory();
     IndexWriterConfig iwc = newIndexWriterConfig(new MockAnalyzer(random()));
     final SetOnce<IndexWriter> iwRef = new SetOnce<>();
-    iwc.setInfoStream(new RandomIndexWriter.TestPointInfoStream(iwc.getInfoStream(), new RandomIndexWriter.TestPoint() {
+    IndexWriter evilWriter = RandomIndexWriter.mockIndexWriter(dir, iwc, new RandomIndexWriter.TestPoint() {
       @Override
       public void apply(String message) {
         if ("startCommitMerge".equals(message)) {
@@ -2335,8 +2363,7 @@ public class TestIndexWriter extends LuceneTestCase {
           iwRef.get().setKeepFullyDeletedSegments(true);
         }
       }
-    }));
-    IndexWriter evilWriter = new IndexWriter(dir, iwc);
+    });
     iwRef.set(evilWriter);
     for (int i = 0; i < 1000; i++) {
       addDoc(evilWriter);
@@ -2462,7 +2489,7 @@ public class TestIndexWriter extends LuceneTestCase {
 
     iwc.setMergeScheduler(new ConcurrentMergeScheduler() {
         @Override
-        public void doMerge(MergePolicy.OneMerge merge) throws IOException {
+        public void doMerge(IndexWriter writer, MergePolicy.OneMerge merge) throws IOException {
           mergeStarted.countDown();
           try {
             closeStarted.await();
@@ -2470,7 +2497,7 @@ public class TestIndexWriter extends LuceneTestCase {
             Thread.currentThread().interrupt();
             throw new RuntimeException(ie);
           }
-          super.doMerge(merge);
+          super.doMerge(writer, merge);
         }
 
         @Override
@@ -2488,66 +2515,18 @@ public class TestIndexWriter extends LuceneTestCase {
     dir.close();
   }
 
-  // LUCENE-5574
-  public void testClosingNRTReaderDoesNotCorruptYourIndex() throws IOException {
-
-    // Windows disallows deleting & overwriting files still
-    // open for reading:
-    assumeFalse("this test can't run on Windows", Constants.WINDOWS);
-
-    MockDirectoryWrapper dir = newMockDirectory();
-    if (TestUtil.isWindowsFS(dir)) {
-      dir.close();
-      assumeFalse("this test can't run on Windows", true);
-    }
-    
-    // don't act like windows either, or the test won't simulate the condition
-    dir.setEnableVirusScanner(false);
-
-    // Allow deletion of still open files:
-    dir.setNoDeleteOpenFile(false);
-
-    // Allow writing to same file more than once:
-    dir.setPreventDoubleWrite(false);
-
-    IndexWriterConfig iwc = newIndexWriterConfig(new MockAnalyzer(random()));
-    LogMergePolicy lmp = new LogDocMergePolicy();
-    lmp.setMergeFactor(2);
-    iwc.setMergePolicy(lmp);
-
-    RandomIndexWriter w = new RandomIndexWriter(random(), dir, iwc);
-    Document doc = new Document();
-    doc.add(new TextField("a", "foo", Field.Store.NO));
-    w.addDocument(doc);
-    w.commit();
-    w.addDocument(doc);
-
-    // Get a new reader, but this also sets off a merge:
-    IndexReader r = w.getReader();
-    w.close();
-
-    // Blow away index and make a new writer:
-    for(String fileName : dir.listAll()) {
-      dir.deleteFile(fileName);
-    }
-
-    w = new RandomIndexWriter(random(), dir);
-    w.addDocument(doc);
-    w.close();
-    r.close();
-    dir.close();
-  }
-
   /** Make sure that close waits for any still-running commits. */
   public void testCloseDuringCommit() throws Exception {
 
     final CountDownLatch startCommit = new CountDownLatch(1);
     final CountDownLatch finishCommit = new CountDownLatch(1);
 
-    // infostream that "takes a long time" to commit
-    InfoStream slowCommittingInfoStream = new InfoStream() {
+    Directory dir = newDirectory();
+    IndexWriterConfig iwc = new IndexWriterConfig(null);
+    // use an infostream that "takes a long time" to commit
+    final IndexWriter iw = RandomIndexWriter.mockIndexWriter(dir, iwc, new RandomIndexWriter.TestPoint() {
       @Override
-      public void message(String component, String message) {
+      public void apply(String message) {
         if (message.equals("finishStartCommit")) {
           startCommit.countDown();
           try {
@@ -2557,20 +2536,7 @@ public class TestIndexWriter extends LuceneTestCase {
           }
         }
       }
-
-      @Override
-      public boolean isEnabled(String component) {
-        return true;
-      }
-      
-      @Override
-      public void close() throws IOException {}
-    };
-    
-    Directory dir = newDirectory();
-    IndexWriterConfig iwc = new IndexWriterConfig(null);
-    iwc.setInfoStream(slowCommittingInfoStream);
-    final IndexWriter iw = new IndexWriter(dir, iwc);
+    });
     new Thread() {
       @Override
       public void run() {

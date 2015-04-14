@@ -44,6 +44,7 @@ import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.CloseHook;
+import org.apache.solr.core.PluginBag;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestHandler;
@@ -225,8 +226,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     // Find the registered path of the handler
     path = null;
-    for (Map.Entry<String, SolrRequestHandler> entry : core.getRequestHandlers().entrySet()) {
-      if (entry.getValue() == this) {
+    for (Map.Entry<String, PluginBag.PluginHolder<SolrRequestHandler>> entry : core.getRequestHandlers().getRegistry().entrySet()) {
+      if (core.getRequestHandlers().isLoaded(entry.getKey()) && entry.getValue().get() == this) {
         path = entry.getKey();
         break;
       }

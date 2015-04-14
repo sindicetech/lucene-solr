@@ -18,12 +18,15 @@ package org.apache.solr;
  */
 
 import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.apache.solr.client.solrj.SolrServer;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.NamedList;
+import org.junit.Test;
+
+import java.io.IOException;
 
 /**
  * TODO? perhaps use:
@@ -43,8 +46,8 @@ public class TestDistributedGrouping extends BaseDistributedSearchTestCase {
   String tdate_b = "b_n_tdt";
   String oddField="oddField_s";
 
-  @Override
-  public void doTest() throws Exception {
+  @Test
+  public void test() throws Exception {
     del("*:*");
     commit();
 
@@ -243,7 +246,7 @@ public class TestDistributedGrouping extends BaseDistributedSearchTestCase {
     setDistributedParams(params);
 
     int which = r.nextInt(clients.size());
-    SolrServer client = clients.get(which);
+    SolrClient client = clients.get(which);
     QueryResponse rsp = client.query(params);
     NamedList nl = (NamedList<?>) rsp.getResponse().get("grouped");
     nl = (NamedList<?>) nl.getVal(0);
@@ -265,7 +268,7 @@ public class TestDistributedGrouping extends BaseDistributedSearchTestCase {
     simpleQuery("q", "*:*", "rows", 10, "fl", "id," + i1, "group", "true", "group.field", i1, "debug", "true");
   }
 
-  private void simpleQuery(Object... queryParams) throws SolrServerException {
+  private void simpleQuery(Object... queryParams) throws SolrServerException, IOException {
     ModifiableSolrParams params = new ModifiableSolrParams();
     for (int i = 0; i < queryParams.length; i += 2) {
       params.add(queryParams[i].toString(), queryParams[i + 1].toString());

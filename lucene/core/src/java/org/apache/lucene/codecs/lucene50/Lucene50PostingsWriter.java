@@ -160,7 +160,7 @@ public final class Lucene50PostingsWriter extends PushPostingsWriterBase {
     // TODO: should we try skipping every 2/4 blocks...?
     skipWriter = new Lucene50SkipWriter(MAX_SKIP_LEVELS,
                                         BLOCK_SIZE, 
-                                        state.segmentInfo.getDocCount(),
+                                        state.segmentInfo.maxDoc(),
                                         docOut,
                                         posOut,
                                         payOut);
@@ -221,7 +221,7 @@ public final class Lucene50PostingsWriter extends PushPostingsWriterBase {
     final int docDelta = docID - lastDocID;
 
     if (docID < 0 || (docCount > 0 && docDelta <= 0)) {
-      throw new CorruptIndexException("docs out of order (" + docID + " <= " + lastDocID + " )", docOut.toString());
+      throw new CorruptIndexException("docs out of order (" + docID + " <= " + lastDocID + " )", docOut);
     }
 
     docDeltaBuffer[docBufferUpto] = docDelta;

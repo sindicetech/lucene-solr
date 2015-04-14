@@ -17,8 +17,6 @@ package org.apache.lucene.index;
  * limitations under the License.
  */
 
-import static org.apache.lucene.index.SortedSetDocValues.NO_MORE_ORDS;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -26,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -46,6 +45,7 @@ import org.apache.lucene.document.SortedSetDocValuesField;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.CheckIndex.Status.DocValuesStatus;
 import org.apache.lucene.index.TermsEnum.SeekStatus;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
@@ -57,9 +57,12 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.BytesRefHash;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.TestUtil;
+
+import static org.apache.lucene.index.SortedSetDocValues.NO_MORE_ORDS;
 
 /**
  * Abstract class to do basic tests for a docvalues format.
@@ -109,7 +112,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -141,7 +144,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -174,7 +177,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -209,7 +212,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -246,7 +249,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -283,7 +286,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -324,7 +327,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     BytesRef scratch = new BytesRef();
     // Iterate through the results:
@@ -486,7 +489,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     // Iterate through the results:
     for (int i = 0; i < hits.scoreDocs.length; i++) {
@@ -590,7 +593,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     assertEquals(1, isearcher.search(new TermQuery(new Term("fieldname", longTerm)), 1).totalHits);
     Query query = new TermQuery(new Term("fieldname", "text"));
-    TopDocs hits = isearcher.search(query, null, 1);
+    TopDocs hits = isearcher.search(query, 1);
     assertEquals(1, hits.totalHits);
     BytesRef scratch = new BytesRef();
     // Iterate through the results:
@@ -1154,8 +1157,8 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
 
     for (Entry<String, String> entry : entrySet) {
       // pk lookup
-      DocsEnum termDocsEnum = slowR.termDocsEnum(new Term("id", entry.getKey()));
-      int docId = termDocsEnum.nextDoc();
+      PostingsEnum termPostingsEnum = slowR.postings(new Term("id", entry.getKey()));
+      int docId = termPostingsEnum.nextDoc();
       expected = new BytesRef(entry.getValue());
       final BytesRef actual = docValues.get(docId);
       assertEquals(expected, actual);
@@ -2083,7 +2086,7 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
       );
     }
   }
-  
+
   public void testSortedNumericsMultipleValuesVsStoredFields() throws Exception {
     assumeTrue("Codec does not support SORTED_NUMERIC", codecSupportsSortedNumeric());
     int numIterations = atLeast(1);
@@ -2672,9 +2675,12 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
               PrintStream infoStream = new PrintStream(bos, false, IOUtils.UTF_8);
               startingGun.await();
               for (LeafReaderContext leaf : r.leaves()) {
-                CheckIndex.testDocValues(leaf.reader(), infoStream, true);
+                DocValuesStatus status = CheckIndex.testDocValues((SegmentReader)leaf.reader(), infoStream, true);
+                if (status.error != null) {
+                  throw status.error;
+                }
               }
-            } catch (Exception e) {
+            } catch (Throwable e) {
               throw new RuntimeException();
             }
           }
@@ -2945,6 +2951,143 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
     directory.close();
   }
 
+  public void testSortedEnumAdvanceIndependently() throws IOException {
+    Directory directory = newDirectory();
+    Analyzer analyzer = new MockAnalyzer(random());
+    IndexWriterConfig iwconfig = newIndexWriterConfig(analyzer);
+    iwconfig.setMergePolicy(newLogMergePolicy());
+    RandomIndexWriter iwriter = new RandomIndexWriter(random(), directory, iwconfig);
+    
+    Document doc = new Document();
+    SortedDocValuesField field = new SortedDocValuesField("field", new BytesRef("2"));
+    doc.add(field);
+    iwriter.addDocument(doc);
+    field.setBytesValue(new BytesRef("1"));
+    iwriter.addDocument(doc);
+    field.setBytesValue(new BytesRef("3"));
+    iwriter.addDocument(doc);
+
+    iwriter.commit();
+    iwriter.forceMerge(1);
+
+    DirectoryReader ireader = iwriter.getReader();
+    iwriter.close();
+
+    SortedDocValues dv = getOnlySegmentReader(ireader).getSortedDocValues("field");
+    doTestSortedSetEnumAdvanceIndependently(DocValues.singleton(dv));
+
+    ireader.close();
+    directory.close();
+  }
+
+  public void testSortedSetEnumAdvanceIndependently() throws IOException {
+    assumeTrue("Codec does not support SORTED_SET", codecSupportsSortedSet());
+    Directory directory = newDirectory();
+    Analyzer analyzer = new MockAnalyzer(random());
+    IndexWriterConfig iwconfig = newIndexWriterConfig(analyzer);
+    iwconfig.setMergePolicy(newLogMergePolicy());
+    RandomIndexWriter iwriter = new RandomIndexWriter(random(), directory, iwconfig);
+    
+    Document doc = new Document();
+    SortedSetDocValuesField field1 = new SortedSetDocValuesField("field", new BytesRef("2"));
+    SortedSetDocValuesField field2 = new SortedSetDocValuesField("field", new BytesRef("3"));
+    doc.add(field1);
+    doc.add(field2);
+    iwriter.addDocument(doc);
+    field1.setBytesValue(new BytesRef("1"));
+    iwriter.addDocument(doc);
+    field2.setBytesValue(new BytesRef("2"));
+    iwriter.addDocument(doc);
+
+    iwriter.commit();
+    iwriter.forceMerge(1);
+
+    DirectoryReader ireader = iwriter.getReader();
+    iwriter.close();
+
+    SortedSetDocValues dv = getOnlySegmentReader(ireader).getSortedSetDocValues("field");
+    doTestSortedSetEnumAdvanceIndependently(dv);
+
+    ireader.close();
+    directory.close();
+  }
+
+  protected void doTestSortedSetEnumAdvanceIndependently(SortedSetDocValues dv) throws IOException {
+    if (dv.getValueCount() < 2) {
+      return;
+    }
+    List<BytesRef> terms = new ArrayList<>();
+    TermsEnum te = dv.termsEnum();
+    terms.add(BytesRef.deepCopyOf(te.next()));
+    terms.add(BytesRef.deepCopyOf(te.next()));
+
+    // Make sure that calls to next() does not modify the term of the other enum
+    TermsEnum enum1 = dv.termsEnum();
+    TermsEnum enum2 = dv.termsEnum();
+    BytesRefBuilder term1 = new BytesRefBuilder();
+    BytesRefBuilder term2 = new BytesRefBuilder();
+
+    term1.copyBytes(enum1.next());
+    term2.copyBytes(enum2.next());
+    term1.copyBytes(enum1.next());
+
+    assertEquals(term1.get(), enum1.term());
+    assertEquals(term2.get(), enum2.term());
+
+    // Same for seekCeil
+    enum1 = dv.termsEnum();
+    enum2 = dv.termsEnum();
+    term1 = new BytesRefBuilder();
+    term2 = new BytesRefBuilder();
+
+    term2.copyBytes(enum2.next());
+    BytesRefBuilder seekTerm = new BytesRefBuilder();
+    seekTerm.append(terms.get(0));
+    seekTerm.append((byte) 0);
+    enum1.seekCeil(seekTerm.get());
+    term1.copyBytes(enum1.term());
+
+    assertEquals(term1.get(), enum1.term());
+    assertEquals(term2.get(), enum2.term());
+
+    // Same for seekCeil on an exact value
+    enum1 = dv.termsEnum();
+    enum2 = dv.termsEnum();
+    term1 = new BytesRefBuilder();
+    term2 = new BytesRefBuilder();
+
+    term2.copyBytes(enum2.next());
+    enum1.seekCeil(terms.get(1));
+    term1.copyBytes(enum1.term());
+    
+    assertEquals(term1.get(), enum1.term());
+    assertEquals(term2.get(), enum2.term());
+
+    // Same for seekExact
+    enum1 = dv.termsEnum();
+    enum2 = dv.termsEnum();
+    term1 = new BytesRefBuilder();
+    term2 = new BytesRefBuilder();
+
+    term2.copyBytes(enum2.next());
+    final boolean found = enum1.seekExact(terms.get(1));
+    assertTrue(found);
+    term1.copyBytes(enum1.term());
+
+    // Same for seek by ord
+    enum1 = dv.termsEnum();
+    enum2 = dv.termsEnum();
+    term1 = new BytesRefBuilder();
+    term2 = new BytesRefBuilder();
+
+    term2.copyBytes(enum2.next());
+    enum1.seekExact(1);
+    term1.copyBytes(enum1.term());
+
+    assertEquals(term1.get(), enum1.term());
+    assertEquals(term2.get(), enum2.term());
+  }
+
   protected boolean codecAcceptsHugeBinaryValues(String field) {
     return true;
   }
@@ -2964,4 +3107,5 @@ public abstract class BaseDocValuesFormatTestCase extends BaseIndexFileFormatTes
   protected boolean codecSupportsSortedNumeric() {
     return true;
   }
+
 }

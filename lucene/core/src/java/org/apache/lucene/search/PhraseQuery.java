@@ -22,19 +22,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Set;
 
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.DocsAndPositionsEnum;
-import org.apache.lucene.index.DocsEnum;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.IndexReaderContext;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermContext;
 import org.apache.lucene.index.TermState;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.search.similarities.Similarity.SimScorer;
 import org.apache.lucene.search.similarities.Similarity;
+import org.apache.lucene.search.similarities.Similarity.SimScorer;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.ToStringUtils;
@@ -43,12 +42,25 @@ import org.apache.lucene.util.ToStringUtils;
  * A PhraseQuery is built by QueryParser for input like <code>"new york"</code>.
  * 
  * <p>This query may be combined with other terms or queries with a {@link BooleanQuery}.
+ *
+ * <b>NOTE</b>: Leading holes don't have any particular meaning for this query
+ * and will be ignored. For instance this query:
+ * <pre class="prettyprint">
+ * PhraseQuery pq = new PhraseQuery();
+ * pq.add(new Term("body", "one"), 4);
+ * pq.add(new Term("body", "two"), 5);
+ * </pre>
+ * is equivalent to the below query:
+ * <pre class="prettyprint">
+ * PhraseQuery pq = new PhraseQuery();
+ * pq.add(new Term("body", "one"), 0);
+ * pq.add(new Term("body", "two"), 1);
+ * </pre>
  */
 public class PhraseQuery extends Query {
   private String field;
   private ArrayList<Term> terms = new ArrayList<>(4);
   private ArrayList<Integer> positions = new ArrayList<>(4);
-  private int maxPosition = 0;
   private int slop = 0;
 
   /** Constructs an empty phrase query. */
@@ -83,8 +95,9 @@ public class PhraseQuery extends Query {
    */
   public void add(Term term) {
     int position = 0;
-    if(positions.size() > 0)
-        position = positions.get(positions.size()-1).intValue() + 1;
+    if (positions.size() > 0) {
+      position = positions.get(positions.size()-1) + 1;
+    }
 
     add(term, position);
   }
@@ -97,6 +110,16 @@ public class PhraseQuery extends Query {
    * 
    */
   public void add(Term term, int position) {
+    if (positions.size() > 0) {
+      final int previousPosition = positions.get(positions.size()-1);
+      if (position < previousPosition) {
+        throw new IllegalArgumentException("Positions must be added in order. Got position="
+            + position + " while previous position was " + previousPosition);
+      }
+    } else if (position < 0) {
+      throw new IllegalArgumentException("Positions must be positive, got " + position);
+    }
+
     if (terms.size() == 0) {
       field = term.field();
     } else if (!term.field().equals(field)) {
@@ -105,7 +128,6 @@ public class PhraseQuery extends Query {
 
     terms.add(term);
     positions.add(Integer.valueOf(position));
-    if (position > maxPosition) maxPosition = position;
   }
 
   /** Returns the set of terms in this phrase. */
@@ -133,18 +155,31 @@ public class PhraseQuery extends Query {
       TermQuery tq = new TermQuery(terms.get(0));
       tq.setBoost(getBoost());
       return tq;
-    } else
+    } else if (positions.get(0).intValue() != 0) {
+      // PhraseWeight requires that positions start at 0 so we need to rebase
+      // positions
+      final Term[] terms = getTerms();
+      final int[] positions = getPositions();
+      PhraseQuery rewritten = new PhraseQuery();
+      for (int i = 0; i < terms.length; ++i) {
+        rewritten.add(terms[i], positions[i] - positions[0]);
+      }
+      rewritten.setBoost(getBoost());
+      rewritten.setSlop(getSlop());
+      return rewritten;
+    } else {
       return super.rewrite(reader);
+    }
   }
 
   static class PostingsAndFreq implements Comparable<PostingsAndFreq> {
-    final DocsAndPositionsEnum postings;
+    final PostingsEnum postings;
     final int docFreq;
     final int position;
     final Term[] terms;
     final int nTerms; // for faster comparisons
 
-    public PostingsAndFreq(DocsAndPositionsEnum postings, int docFreq, int position, Term... terms) {
+    public PostingsAndFreq(PostingsEnum postings, int docFreq, int position, Term... terms) {
       this.postings = postings;
       this.docFreq = docFreq;
       this.position = position;
@@ -212,10 +247,19 @@ public class PhraseQuery extends Query {
   private class PhraseWeight extends Weight {
     private final Similarity similarity;
     private final Similarity.SimWeight stats;
+    private final boolean needsScores;
     private transient TermContext states[];
 
-    public PhraseWeight(IndexSearcher searcher)
+    public PhraseWeight(IndexSearcher searcher, boolean needsScores)
       throws IOException {
+      super(PhraseQuery.this);
+      final int[] positions = PhraseQuery.this.getPositions();
+      if (positions.length < 2) {
+        throw new IllegalStateException("PhraseWeight does not support less than 2 terms, call rewrite first");
+      } else if (positions[0] != 0) {
+        throw new IllegalStateException("PhraseWeight requires that the first position is 0, call rewrite first");
+      }
+      this.needsScores = needsScores;
       this.similarity = searcher.getSimilarity();
       final IndexReaderContext context = searcher.getTopReaderContext();
       states = new TermContext[terms.size()];
@@ -230,9 +274,6 @@ public class PhraseQuery extends Query {
 
     @Override
     public String toString() { return "weight(" + PhraseQuery.this + ")"; }
-
-    @Override
-    public Query getQuery() { return PhraseQuery.this; }
 
     @Override
     public float getValueForNormalization() {
@@ -267,7 +308,7 @@ public class PhraseQuery extends Query {
           return null;
         }
         te.seekExact(t.bytes(), state);
-        DocsAndPositionsEnum postingsEnum = te.docsAndPositions(liveDocs, null, DocsEnum.FLAG_NONE);
+        PostingsEnum postingsEnum = te.postings(liveDocs, null, PostingsEnum.POSITIONS);
 
         // PhraseQuery on a field that did not index
         // positions.
@@ -276,7 +317,7 @@ public class PhraseQuery extends Query {
           // term does exist, but has no positions
           throw new IllegalStateException("field \"" + t.field() + "\" was indexed without position data; cannot run PhraseQuery (term=" + t.text() + ")");
         }
-        postingsFreqs[i] = new PostingsAndFreq(postingsEnum, te.docFreq(), positions.get(i).intValue(), t);
+        postingsFreqs[i] = new PostingsAndFreq(postingsEnum, te.docFreq(), positions.get(i), t);
       }
 
       // sort by increasing docFreq order
@@ -285,9 +326,9 @@ public class PhraseQuery extends Query {
       }
 
       if (slop == 0) {  // optimize exact case
-        return new ExactPhraseScorer(this, postingsFreqs, similarity.simScorer(stats, context));
+        return new ExactPhraseScorer(this, postingsFreqs, similarity.simScorer(stats, context), needsScores);
       } else {
-        return new SloppyPhraseScorer(this, postingsFreqs, slop, similarity.simScorer(stats, context));
+        return new SloppyPhraseScorer(this, postingsFreqs, slop, similarity.simScorer(stats, context), needsScores);
       }
     }
     
@@ -319,8 +360,8 @@ public class PhraseQuery extends Query {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher) throws IOException {
-    return new PhraseWeight(searcher);
+  public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
+    return new PhraseWeight(searcher, needsScores);
   }
 
   /**
@@ -341,6 +382,12 @@ public class PhraseQuery extends Query {
     }
 
     buffer.append("\"");
+    final int maxPosition;
+    if (positions.isEmpty()) {
+      maxPosition = -1;
+    } else {
+      maxPosition = positions.get(positions.size() - 1);
+    }
     String[] pieces = new String[maxPosition + 1];
     for (int i = 0; i < terms.size(); i++) {
       int pos = positions.get(i).intValue();
@@ -381,7 +428,7 @@ public class PhraseQuery extends Query {
     if (!(o instanceof PhraseQuery))
       return false;
     PhraseQuery other = (PhraseQuery)o;
-    return (this.getBoost() == other.getBoost())
+    return super.equals(o)
       && (this.slop == other.slop)
       &&  this.terms.equals(other.terms)
       && this.positions.equals(other.positions);
@@ -390,7 +437,7 @@ public class PhraseQuery extends Query {
   /** Returns a hash code value for this object.*/
   @Override
   public int hashCode() {
-    return Float.floatToIntBits(getBoost())
+    return super.hashCode()
       ^ slop
       ^ terms.hashCode()
       ^ positions.hashCode();

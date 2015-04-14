@@ -17,6 +17,34 @@ package org.apache.solr.common.cloud;
  * the License.
  */
 
+import org.apache.commons.io.FileUtils;
+import org.apache.solr.common.SolrException;
+import org.apache.solr.common.StringUtils;
+import org.apache.solr.common.cloud.ZkClientConnectionStrategy.ZkUpdate;
+import org.apache.solr.common.util.ExecutorUtil;
+import org.apache.solr.common.util.ObjectReleaseTracker;
+import org.apache.solr.common.util.SolrjNamedThreadFactory;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.NoNodeException;
+import org.apache.zookeeper.KeeperException.NodeExistsException;
+import org.apache.zookeeper.KeeperException.NotEmptyException;
+import org.apache.zookeeper.Op;
+import org.apache.zookeeper.OpResult;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.data.ACL;
+import org.apache.zookeeper.data.Stat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Source;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.transform.stream.StreamSource;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -26,34 +54,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicLong;
-
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Source;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.transform.stream.StreamSource;
-
-import org.apache.commons.io.FileUtils;
-import org.apache.solr.common.SolrException;
-import org.apache.solr.common.StringUtils;
-import org.apache.solr.common.cloud.ZkClientConnectionStrategy.ZkUpdate;
-import org.apache.solr.common.util.ExecutorUtil;
-import org.apache.solr.common.util.SolrjNamedThreadFactory;
-import org.apache.zookeeper.AsyncCallback;
-import org.apache.zookeeper.CreateMode;
-import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.KeeperException.NoNodeException;
-import org.apache.zookeeper.KeeperException.NodeExistsException;
-import org.apache.zookeeper.KeeperException.NotEmptyException;
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.data.ACL;
-import org.apache.zookeeper.data.Stat;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  *
@@ -62,9 +62,6 @@ import org.slf4j.LoggerFactory;
  *
  */
 public class SolrZkClient implements Closeable {
-  // These should *only* be used for debugging or monitoring purposes
-  public static final AtomicLong numOpens = new AtomicLong();
-  public static final AtomicLong numCloses = new AtomicLong();
 
   static final String NEWL = System.getProperty("line.separator");
 
@@ -183,7 +180,7 @@ public class SolrZkClient implements Closeable {
       }
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
     }
-    numOpens.incrementAndGet();
+    assert ObjectReleaseTracker.track(this);
     if (zkACLProvider == null) {
       this.zkACLProvider = createZkACLProvider();
     } else {
@@ -572,6 +569,19 @@ public class SolrZkClient implements Closeable {
     return setData(path, data, retryOnConnLoss);
   }
 
+  public List<OpResult> multi(final Iterable<Op> ops, boolean retryOnConnLoss) throws InterruptedException, KeeperException  {
+    if (retryOnConnLoss) {
+      return zkCmdExecutor.retryOperation(new ZkOperation() {
+        @Override
+        public List<OpResult> execute() throws KeeperException, InterruptedException {
+          return keeper.multi(ops);
+        }
+      });
+    } else {
+      return keeper.multi(ops);
+    }
+  }
+
   /**
    * Fills string with printout of current ZooKeeper layout.
    */
@@ -651,7 +661,7 @@ public class SolrZkClient implements Closeable {
       connManager.close();
       closeCallbackExecutor();
     }
-    numCloses.incrementAndGet();
+    assert ObjectReleaseTracker.release(this);
   }
 
   public boolean isClosed() {
@@ -734,4 +744,25 @@ public class SolrZkClient implements Closeable {
     return zkHost.contains("/");
   }
 
+  /**
+   * Check to see if a Throwable is an InterruptedException, and if it is, set the thread interrupt flag
+   * @param e the Throwable
+   * @return the Throwable
+   */
+  public static Throwable checkInterrupted(Throwable e) {
+    if (e instanceof InterruptedException)
+      Thread.interrupted();
+    return e;
+  }
+
+  /**
+   * @return the address of the zookeeper cluster
+   */
+  public String getZkServerAddress() {
+    return zkServerAddress;
+  }
+
+  public ZkACLProvider getZkACLProvider() {
+    return zkACLProvider;
+  }
 }

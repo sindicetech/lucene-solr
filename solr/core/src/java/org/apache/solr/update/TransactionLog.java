@@ -40,6 +40,7 @@ import org.apache.solr.common.util.DataInputInputStream;
 import org.apache.solr.common.util.FastInputStream;
 import org.apache.solr.common.util.FastOutputStream;
 import org.apache.solr.common.util.JavaBinCodec;
+import org.apache.solr.common.util.ObjectReleaseTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,7 +69,6 @@ public class TransactionLog {
   public final static String END_MESSAGE="SOLR_TLOG_END";
 
   long id;
-  long startVersion; // (absolute) version of the first element of this transaction log
   File tlogFile;
   RandomAccessFile raf;
   FileChannel channel;
@@ -149,8 +149,6 @@ public class TransactionLog {
       // Parse tlog id and start version from the filename
       String filename = tlogFile.getName();
       id = Long.parseLong(filename.substring(filename.indexOf('.') + 1, filename.lastIndexOf('.')));
-      // This will be used to seek more efficiently tlogs
-      startVersion = Math.abs(Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1)));
 
       this.tlogFile = tlogFile;
       raf = new RandomAccessFile(this.tlogFile, "rw");
@@ -172,9 +170,10 @@ public class TransactionLog {
         }
       } else {
         if (start > 0) {
-          log.error("New transaction log already exists:" + tlogFile + " size=" + raf.length());
+          log.warn("New transaction log already exists:" + tlogFile + " size=" + raf.length());
+          return;
         }
-        assert start==0;
+       
         if (start > 0) {
           raf.setLength(0);
         }
@@ -182,6 +181,8 @@ public class TransactionLog {
       }
 
       success = true;
+      
+      assert ObjectReleaseTracker.track(this);
 
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
@@ -499,7 +500,7 @@ public class TransactionLog {
     }
   }
 
-  public boolean try_incref() { // nocommit: not used anymore
+  public boolean try_incref() {
     return refcount.incrementAndGet() > 1;
   }
 
@@ -556,6 +557,8 @@ public class TransactionLog {
       }
     } catch (IOException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
+    } finally {
+      assert ObjectReleaseTracker.release(this);
     }
   }
 
@@ -593,7 +596,7 @@ public class TransactionLog {
 
   public class LogReader {
     protected ChannelFastInputStream fis;
-    protected LogCodec codec = new LogCodec(resolver);
+    private LogCodec codec = new LogCodec(resolver);
 
     public LogReader(long startingPos) {
       incref();

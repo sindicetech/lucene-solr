@@ -18,11 +18,17 @@ package org.apache.lucene.index;
  */
 
 import java.io.IOException;
+import java.util.Objects;
 
+import org.apache.lucene.util.AttributeSource;
 import org.apache.lucene.util.Bits; // javadocs
 import org.apache.lucene.util.BytesRef;
 
-/** Also iterates through positions. */
+/** 
+ * Also iterates through positions. 
+ * @deprecated Use {@link PostingsEnum} instead.
+ */
+@Deprecated
 public abstract class DocsAndPositionsEnum extends DocsEnum {
   
   /** Flag to pass to {@link TermsEnum#docsAndPositions(Bits,DocsAndPositionsEnum,int)}
@@ -59,4 +65,84 @@ public abstract class DocsAndPositionsEnum extends DocsEnum {
    *  (neither members of the returned BytesRef nor bytes 
    *  in the byte[]). */
   public abstract BytesRef getPayload() throws IOException;
+  
+  /** 
+   * Wraps a PostingsEnum with a legacy DocsAndPositionsEnum.
+   */
+  static DocsAndPositionsEnum wrap(final PostingsEnum postings) {
+    return new DocsAndPositionsEnumWrapper(postings);
+  }
+  
+  /**
+   * Unwrap a legacy DocsAndPositionsEnum and return the actual PostingsEnum.
+   * if {@code docs} is null, this returns null for convenience
+   */
+  static PostingsEnum unwrap(final DocsEnum docs) {
+    if (docs instanceof DocsAndPositionsEnumWrapper) {
+      return ((DocsAndPositionsEnumWrapper)docs).in;
+    } else if (docs == null) {
+      return null; // e.g. user is not reusing
+    } else {
+      throw new AssertionError();
+    }
+  }
+  
+  static class DocsAndPositionsEnumWrapper extends DocsAndPositionsEnum {
+    final PostingsEnum in;
+    
+    DocsAndPositionsEnumWrapper(PostingsEnum in) {
+      this.in = Objects.requireNonNull(in);
+    }
+
+    @Override
+    public int nextPosition() throws IOException {
+      return in.nextPosition();
+    }
+
+    @Override
+    public int startOffset() throws IOException {
+      return in.startOffset();
+    }
+
+    @Override
+    public int endOffset() throws IOException {
+      return in.endOffset();
+    }
+
+    @Override
+    public BytesRef getPayload() throws IOException {
+      return in.getPayload();
+    }
+
+    @Override
+    public int freq() throws IOException {
+      return in.freq();
+    }
+
+    @Override
+    public AttributeSource attributes() {
+      return in.attributes();
+    }
+
+    @Override
+    public int docID() {
+      return in.docID();
+    }
+
+    @Override
+    public int nextDoc() throws IOException {
+      return in.nextDoc();
+    }
+
+    @Override
+    public int advance(int target) throws IOException {
+      return in.advance(target);
+    }
+
+    @Override
+    public long cost() {
+      return in.cost();
+    }
+  }
 }
+

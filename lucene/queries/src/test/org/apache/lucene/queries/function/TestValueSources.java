@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.io.IOException;
 
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoubleField;
@@ -92,6 +93,7 @@ import org.junit.BeforeClass;
  */
 public class TestValueSources extends LuceneTestCase {
   static Directory dir;
+  static Analyzer analyzer;
   static IndexReader reader;
   static IndexSearcher searcher;
   
@@ -109,7 +111,8 @@ public class TestValueSources extends LuceneTestCase {
   @BeforeClass
   public static void beforeClass() throws Exception {
     dir = newDirectory();
-    IndexWriterConfig iwConfig = newIndexWriterConfig(new MockAnalyzer(random()));
+    analyzer = new MockAnalyzer(random());
+    IndexWriterConfig iwConfig = newIndexWriterConfig(analyzer);
     iwConfig.setMergePolicy(newLogMergePolicy());
     RandomIndexWriter iw = new RandomIndexWriter(random(), dir, iwConfig);
     Document document = new Document();
@@ -169,6 +172,8 @@ public class TestValueSources extends LuceneTestCase {
     reader = null;
     dir.close();
     dir = null;
+    analyzer.close();
+    analyzer = null;
   }
   
   public void testConst() throws Exception {
@@ -341,7 +346,7 @@ public class TestValueSources extends LuceneTestCase {
       ValueSource vs = new NormValueSource("byte");
       assertHits(new FunctionQuery(vs), new float[] { 0f, 0f });
 
-      // regardless of wether norms exist, value source exists == 0
+      // regardless of whether norms exist, value source exists == 0
       assertAllExist(vs);
 
       vs = new NormValueSource("text");
@@ -486,7 +491,7 @@ public class TestValueSources extends LuceneTestCase {
     assertHits(new FunctionQuery(vs), new float[] { 0f, 1f });
     assertAllExist(vs);
                
-    // regardless of wether norms exist, value source exists == 0
+    // regardless of whether norms exist, value source exists == 0
     vs = new TermFreqValueSource("bogus", "bogus", "bogus", new BytesRef("bogus"));
     assertHits(new FunctionQuery(vs), new float[] { 0F, 0F });
     assertAllExist(vs);
@@ -507,7 +512,7 @@ public class TestValueSources extends LuceneTestCase {
       assertHits(new FunctionQuery(vs), new float[] { 0f, 1f });
       assertAllExist(vs);
       
-      // regardless of wether norms exist, value source exists == 0
+      // regardless of whether norms exist, value source exists == 0
       vs = new TFValueSource("bogus", "bogus", "bogus", new BytesRef("bogus"));
       assertHits(new FunctionQuery(vs), new float[] { 0F, 0F });
       assertAllExist(vs);
@@ -569,7 +574,7 @@ public class TestValueSources extends LuceneTestCase {
       expectedDocs[i] = i;
       expected[i] = new ScoreDoc(i, scores[i]);
     }
-    TopDocs docs = searcher.search(q, null, documents.size(),
+    TopDocs docs = searcher.search(q, documents.size(),
         new Sort(new SortField("id", SortField.Type.STRING)), true, false);
     CheckHits.checkHits(random(), q, "", searcher, expectedDocs);
     CheckHits.checkHitsQuery(q, expected, docs.scoreDocs, expectedDocs);

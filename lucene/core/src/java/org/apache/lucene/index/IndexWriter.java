@@ -47,18 +47,22 @@ import org.apache.lucene.index.DocValuesUpdate.BinaryDocValuesUpdate;
 import org.apache.lucene.index.DocValuesUpdate.NumericDocValuesUpdate;
 import org.apache.lucene.index.FieldInfos.FieldNumbers;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
-import org.apache.lucene.index.MergeState.CheckAbort;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FilterDirectory;
+import org.apache.lucene.store.FlushInfo;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.Lock;
 import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.store.MergeInfo;
+import org.apache.lucene.store.RateLimitedIndexOutput;
 import org.apache.lucene.store.TrackingDirectoryWrapper;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.CloseableThreadLocal;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
@@ -192,7 +196,7 @@ import org.apache.lucene.util.Version;
 public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
   /** Hard limit on maximum number of documents that may be added to the
-   *  index.  If you try to add more than this you'll hit {@code IllegalStateException}. */
+   *  index.  If you try to add more than this you'll hit {@code IllegalArgumentException}. */
   // We defensively subtract 128 to be well below the lowest
   // ArrayUtil.MAX_ARRAY_LENGTH on "typical" JVMs.  We don't just use
   // ArrayUtil.MAX_ARRAY_LENGTH here because this can vary across JVMs:
@@ -214,6 +218,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   static int getActualMaxDocs() {
     return IndexWriter.actualMaxDocs;
   }
+  
+  /** Used only for testing. */
+  boolean enableTestPoints = false;
 
   private static final int UNBOUNDED_MAX_MERGE_SEGMENTS = -1;
   
@@ -228,8 +235,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   public static final String SOURCE_MERGE = "merge";
   /** Source of a segment which results from a flush. */
   public static final String SOURCE_FLUSH = "flush";
-  /** Source of a segment which results from a call to {@link #addIndexes(IndexReader...)}. */
-  public static final String SOURCE_ADDINDEXES_READERS = "addIndexes(IndexReader...)";
+  /** Source of a segment which results from a call to {@link #addIndexes(CodecReader...)}. */
+  public static final String SOURCE_ADDINDEXES_READERS = "addIndexes(CodecReader...)";
 
   /**
    * Absolute hard maximum length for a term, in bytes once
@@ -244,6 +251,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   volatile Throwable tragedy;
 
   private final Directory directory;  // where this index resides
+  private final Directory mergeDirectory;  // used for merging
   private final Analyzer analyzer;    // how to analyze text
 
   private volatile long changeCount; // increments every time a change is completed
@@ -315,6 +323,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  much like how hotels place an "authorization hold" on your credit
    *  card to make sure they can later charge you when you check out. */
   final AtomicLong pendingNumDocs = new AtomicLong();
+
+  final CloseableThreadLocal<MergeRateLimiter> rateLimiters = new CloseableThreadLocal<>();
 
   DirectoryReader getReader() throws IOException {
     return getReader(true);
@@ -392,7 +402,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     poolReaders = true;
     DirectoryReader r = null;
     doBeforeFlush();
-    boolean anySegmentFlushed = false;
+    boolean anyChanges = false;
     /*
      * for releasing a NRT reader we must ensure that 
      * DW doesn't add any segments or deletes until we are
@@ -402,51 +412,50 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
      */
     boolean success2 = false;
     try {
+      boolean success = false;
       synchronized (fullFlushLock) {
-        boolean success = false;
         try {
-          anySegmentFlushed = docWriter.flushAllThreads(this);
-          if (!anySegmentFlushed) {
+          anyChanges = docWriter.flushAllThreads();
+          if (!anyChanges) {
             // prevent double increment since docWriter#doFlush increments the flushcount
             // if we flushed anything.
             flushCount.incrementAndGet();
           }
-          success = true;
           // Prevent segmentInfos from changing while opening the
           // reader; in theory we could instead do similar retry logic,
           // just like we do when loading segments_N
           synchronized(this) {
-            maybeApplyDeletes(applyAllDeletes);
+            anyChanges |= maybeApplyDeletes(applyAllDeletes);
             r = StandardDirectoryReader.open(this, segmentInfos, applyAllDeletes);
             if (infoStream.isEnabled("IW")) {
               infoStream.message("IW", "return reader version=" + r.getVersion() + " reader=" + r);
             }
           }
-        } catch (OutOfMemoryError oom) {
-          tragicEvent(oom, "getReader");
-          // never reached but javac disagrees:
-          return null;
+          success = true;
         } finally {
-          if (!success) {
+          // Done: finish the full flush!
+          docWriter.finishFullFlush(this, success);
+          if (success) {
+            processEvents(false, true);
+            doAfterFlush();
+          } else {
             if (infoStream.isEnabled("IW")) {
               infoStream.message("IW", "hit exception during NRT reader");
             }
           }
-          if (tragedy == null) {
-            // Done: finish the full flush! (unless we hit OOM or something)
-            docWriter.finishFullFlush(success);
-            processEvents(false, true);
-            doAfterFlush();
-          }
         }
       }
-      if (anySegmentFlushed) {
+      if (anyChanges) {
         maybeMerge(config.getMergePolicy(), MergeTrigger.FULL_FLUSH, UNBOUNDED_MAX_MERGE_SEGMENTS);
       }
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "getReader took " + (System.currentTimeMillis() - tStart) + " msec");
       }
       success2 = true;
+    } catch (AbortingException | OutOfMemoryError tragedy) {
+      tragicEvent(tragedy, "getReader");
+      // never reached but javac disagrees:
+      return null;
     } finally {
       if (!success2) {
         IOUtils.closeWhileHandlingException(r);
@@ -462,7 +471,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   }
   
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Collections.emptyList();
   }
 
@@ -634,6 +643,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
      */
     public synchronized ReadersAndUpdates get(SegmentCommitInfo info, boolean create) {
 
+      // Make sure no new readers can be opened if another thread just closed us:
+      ensureOpen(false);
+
       assert info.info.dir == directory: "info.dir=" + info.info.dir + " vs " + directory;
 
       ReadersAndUpdates rld = readerMap.get(info);
@@ -743,10 +755,17 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   public IndexWriter(Directory d, IndexWriterConfig conf) throws IOException {
     conf.setIndexWriter(this); // prevent reuse by other instances
     config = conf;
+
     directory = d;
+
+    // Directory we use for merging, so we can abort running merges, and so
+    // merge schedulers can optionally rate-limit per-merge IO:
+    mergeDirectory = addMergeRateLimiters(d);
+
     analyzer = config.getAnalyzer();
     infoStream = config.getInfoStream();
     mergeScheduler = config.getMergeScheduler();
+    mergeScheduler.setInfoStream(infoStream);
     codec = config.getCodec();
 
     bufferedUpdatesStream = new BufferedUpdatesStream(infoStream);
@@ -825,6 +844,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       }
 
       rollbackSegments = segmentInfos.createBackupSegmentInfos();
+      pendingNumDocs.set(segmentInfos.totalMaxDoc());
 
       // start with previous field numbers, but new FieldInfos
       globalFieldNumberMap = getFieldNumberMap();
@@ -1032,7 +1052,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  @see #numDocs */
   public synchronized int maxDoc() {
     ensureOpen();
-    return docWriter.getNumDocs() + segmentInfos.totalDocCount();
+    return docWriter.getNumDocs() + segmentInfos.totalMaxDoc();
   }
 
   /** Returns total number of docs in this index, including
@@ -1045,7 +1065,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     ensureOpen();
     int count = docWriter.getNumDocs();
     for (final SegmentCommitInfo info : segmentInfos) {
-      count += info.info.getDocCount() - numDeletedDocs(info);
+      count += info.info.maxDoc() - numDeletedDocs(info);
     }
     return count;
   }
@@ -1115,22 +1135,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * @throws IOException if there is a low-level IO error
    */
   public void addDocument(Iterable<? extends IndexableField> doc) throws IOException {
-    addDocument(doc, analyzer);
-  }
-
-  /**
-   * Adds a document to this index, using the provided analyzer instead of the
-   * value of {@link #getAnalyzer()}.
-   *
-   * <p>See {@link #addDocument(Iterable)} for details on
-   * index and IndexWriter state after an Exception, and
-   * flushing/merging temporary free space requirements.</p>
-   *
-   * @throws CorruptIndexException if the index is corrupt
-   * @throws IOException if there is a low-level IO error
-   */
-  public void addDocument(Iterable<? extends IndexableField> doc, Analyzer analyzer) throws IOException {
-    updateDocument(null, doc, analyzer);
+    updateDocument(null, doc);
   }
 
   /**
@@ -1171,22 +1176,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * @lucene.experimental
    */
   public void addDocuments(Iterable<? extends Iterable<? extends IndexableField>> docs) throws IOException {
-    addDocuments(docs, analyzer);
-  }
-
-  /**
-   * Atomically adds a block of documents, analyzed using the
-   * provided analyzer, with sequentially assigned document
-   * IDs, such that an external reader will see all or none
-   * of the documents. 
-   *
-   * @throws CorruptIndexException if the index is corrupt
-   * @throws IOException if there is a low-level IO error
-   *
-   * @lucene.experimental
-   */
-  public void addDocuments(Iterable<? extends Iterable<? extends IndexableField>> docs, Analyzer analyzer) throws IOException {
-    updateDocuments(null, docs, analyzer);
+    updateDocuments(null, docs);
   }
 
   /**
@@ -1203,24 +1193,6 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * @lucene.experimental
    */
   public void updateDocuments(Term delTerm, Iterable<? extends Iterable<? extends IndexableField>> docs) throws IOException {
-    updateDocuments(delTerm, docs, analyzer);
-  }
-
-  /**
-   * Atomically deletes documents matching the provided
-   * delTerm and adds a block of documents, analyzed  using
-   * the provided analyzer, with sequentially
-   * assigned document IDs, such that an external reader
-   * will see all or none of the documents. 
-   *
-   * See {@link #addDocuments(Iterable)}.
-   *
-   * @throws CorruptIndexException if the index is corrupt
-   * @throws IOException if there is a low-level IO error
-   *
-   * @lucene.experimental
-   */
-  public void updateDocuments(Term delTerm, Iterable<? extends Iterable<? extends IndexableField>> docs, Analyzer analyzer) throws IOException {
     ensureOpen();
     try {
       boolean success = false;
@@ -1236,8 +1208,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           }
         }
       }
-    } catch (OutOfMemoryError oom) {
-      tragicEvent(oom, "updateDocuments");
+    } catch (AbortingException | OutOfMemoryError tragedy) {
+      tragicEvent(tragedy, "updateDocuments");
     }
   }
 
@@ -1288,7 +1260,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           rld.initWritableLiveDocs();
           if (rld.delete(docID)) {
             final int fullDelCount = rld.info.getDelCount() + rld.getPendingDeleteCount();
-            if (fullDelCount == rld.info.info.getDocCount()) {
+            if (fullDelCount == rld.info.info.maxDoc()) {
               // If a merge has already registered for this
               // segment, we leave it in the readerPool; the
               // merge will skip merging it and will then drop
@@ -1372,26 +1344,6 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    */
   public void updateDocument(Term term, Iterable<? extends IndexableField> doc) throws IOException {
     ensureOpen();
-    updateDocument(term, doc, analyzer);
-  }
-
-  /**
-   * Updates a document by first deleting the document(s)
-   * containing <code>term</code> and then adding the new
-   * document.  The delete and then add are atomic as seen
-   * by a reader on the same index (flush may happen only after
-   * the add).
-   *
-   * @param term the term to identify the document(s) to be
-   * deleted
-   * @param doc the document to be added
-   * @param analyzer the analyzer to use when analyzing the document
-   * @throws CorruptIndexException if the index is corrupt
-   * @throws IOException if there is a low-level IO error
-   */
-  public void updateDocument(Term term, Iterable<? extends IndexableField> doc, Analyzer analyzer)
-      throws IOException {
-    ensureOpen();
     try {
       boolean success = false;
       try {
@@ -1406,8 +1358,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           }
         }
       }
-    } catch (OutOfMemoryError oom) {
-      tragicEvent(oom, "updateDocument");
+    } catch (AbortingException | OutOfMemoryError tragedy) {
+      tragicEvent(tragedy, "updateDocument");
     }
   }
 
@@ -1538,13 +1490,13 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
   // for test purpose
   final synchronized Collection<String> getIndexFileNames() throws IOException {
-    return segmentInfos.files(directory, true);
+    return segmentInfos.files(true);
   }
 
   // for test purpose
-  final synchronized int getDocCount(int i) {
+  final synchronized int maxDoc(int i) {
     if (i >= 0 && i < segmentInfos.size()) {
-      return segmentInfos.info(i).info.getDocCount();
+      return segmentInfos.info(i).info.maxDoc();
     } else {
       return -1;
     }
@@ -1575,13 +1527,13 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     }
   }
 
-  /** If non-null, information about merges will be printed to this.
+  /** If enabled, information about merges will be printed to this.
    */
   final InfoStream infoStream;
 
   /**
-   * Forces merge policy to merge segments until there are <=
-   * maxNumSegments.  The actual merges to be
+   * Forces merge policy to merge segments until there are
+   * {@code <= maxNumSegments}.  The actual merges to be
    * executed are determined by the {@link MergePolicy}.
    *
    * <p>This is a horribly costly operation, especially when
@@ -1600,7 +1552,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * afterwards, to allow IndexWriter to free up disk space.</p>
    *
    * <p>If some but not all readers re-open while merging
-   * is underway, this will cause > 2X temporary
+   * is underway, this will cause {@code > 2X} temporary
    * space to be consumed as those new readers will then
    * hold open the temporary segments at that time.  It is
    * best not to re-open readers while merging is running.</p>
@@ -1628,11 +1580,6 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * still adding documents and flushing segments, those
    * newly created segments will not be merged unless you
    * call forceMerge again.</p>
-   *
-   * <p><b>NOTE</b>: if you call {@link #abortMerges}, which
-   * aborts all running merges, then any thread still
-   * running this method might hit a {@link
-   * MergePolicy.MergeAbortedException}.
    *
    * @param maxNumSegments maximum number of segments left
    * in the index after merging finishes
@@ -1703,7 +1650,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             for(int i=0;i<size;i++) {
               final MergePolicy.OneMerge merge = mergeExceptions.get(i);
               if (merge.maxNumSegments != -1) {
-                throw new IOException("background merge hit exception: " + merge.segString(directory), merge.getException());
+                throw new IOException("background merge hit exception: " + merge.segString(), merge.getException());
               }
             }
           }
@@ -1746,12 +1693,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  specify whether the call should block until the
    *  operation completes.  This is only meaningful with a
    *  {@link MergeScheduler} that is able to run merges in
-   *  background threads.
-   *
-   * <p><b>NOTE</b>: if you call {@link #abortMerges}, which
-   * aborts all running merges, then any thread still
-   * running this method might hit a {@link
-   * MergePolicy.MergeAbortedException}. */
+   *  background threads. */
   public void forceMergeDeletes(boolean doWait)
     throws IOException {
     ensureOpen();
@@ -1798,7 +1740,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             }
             Throwable t = merge.getException();
             if (t != null) {
-              throw new IOException("background merge hit exception: " + merge.segString(directory), t);
+              throw new IOException("background merge hit exception: " + merge.segString(), t);
             }
           }
 
@@ -1981,6 +1923,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         stopMerges = true;
       }
 
+      rateLimiters.close();
+
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "rollback: done finish merges");
       }
@@ -2095,7 +2039,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * 
    * <p>
    * NOTE: this method will forcefully abort all merges in progress. If other
-   * threads are running {@link #forceMerge}, {@link #addIndexes(IndexReader[])}
+   * threads are running {@link #forceMerge}, {@link #addIndexes(CodecReader[])}
    * or {@link #forceMergeDeletes} methods, they may receive
    * {@link MergePolicy.MergeAbortedException}s.
    */
@@ -2106,24 +2050,27 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     /* hold the full flush lock to prevent concurrency commits / NRT reopens to
      * get in our way and do unnecessary work. -- if we don't lock this here we might
      * get in trouble if */
-    synchronized (fullFlushLock) { 
-      /*
-       * We first abort and trash everything we have in-memory
-       * and keep the thread-states locked, the lockAndAbortAll operation
-       * also guarantees "point in time semantics" ie. the checkpoint that we need in terms
-       * of logical happens-before relationship in the DW. So we do
-       * abort all in memory structures 
-       * We also drop global field numbering before during abort to make
-       * sure it's just like a fresh index.
-       */
-      try {
-        docWriter.lockAndAbortAll(this);
+    /*
+     * We first abort and trash everything we have in-memory
+     * and keep the thread-states locked, the lockAndAbortAll operation
+     * also guarantees "point in time semantics" ie. the checkpoint that we need in terms
+     * of logical happens-before relationship in the DW. So we do
+     * abort all in memory structures 
+     * We also drop global field numbering before during abort to make
+     * sure it's just like a fresh index.
+     */
+    try {
+      synchronized (fullFlushLock) { 
+        long abortedDocCount = docWriter.lockAndAbortAll(this);
+        pendingNumDocs.addAndGet(-abortedDocCount);
+        
         processEvents(false, true);
         synchronized (this) {
           try {
             // Abort any running merges
             abortMerges();
             // Remove all segments
+            pendingNumDocs.addAndGet(-segmentInfos.totalMaxDoc());
             segmentInfos.clear();
             // Ask deleter to locate unreferenced files & remove them:
             deleter.checkpoint(segmentInfos, false);
@@ -2139,8 +2086,10 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             ++changeCount;
             segmentInfos.changed();
             globalFieldNumberMap.clear();
+
             success = true;
           } finally {
+            docWriter.unlockAllAfterAbortAll(this);
             if (!success) {
               if (infoStream.isEnabled("IW")) {
                 infoStream.message("IW", "hit exception during deleteAll");
@@ -2148,18 +2097,16 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             }
           }
         }
-      } catch (OutOfMemoryError oom) {
-        tragicEvent(oom, "deleteAll");
-      } finally {
-        docWriter.unlockAllAfterAbortAll(this);
       }
+    } catch (OutOfMemoryError oom) {
+      tragicEvent(oom, "deleteAll");
     }
   }
 
   /** Aborts running merges.  Be careful when using this
    *  method: when you abort a long-running merge, you lose
    *  a lot of work that must later be redone. */
-  public synchronized void abortMerges() {
+  private synchronized void abortMerges() {
     stopMerges = true;
 
     // Abort all pending & running merges:
@@ -2167,7 +2114,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "now abort pending merge " + segString(merge.segments));
       }
-      merge.abort();
+      merge.rateLimiter.setAbort();
       mergeFinish(merge);
     }
     pendingMerges.clear();
@@ -2176,7 +2123,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "now abort running merge " + segString(merge.segments));
       }
-      merge.abort();
+      merge.rateLimiter.setAbort();
     }
 
     // These merges periodically check whether they have
@@ -2207,7 +2154,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * <p>It is guaranteed that any merges started prior to calling this method
    *    will have completed once this method completes.</p>
    */
-  public void waitForMerges() throws IOException {
+  void waitForMerges() throws IOException {
 
     // Give merge scheduler last chance to run, in case
     // any pending merges are waiting. We can't hold IW's lock
@@ -2380,6 +2327,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * @throws IOException if there is a low-level IO error
    * @throws LockObtainFailedException if we were unable to
    *   acquire the write lock in at least one directory
+   * @throws IllegalArgumentException if addIndexes would cause
+   *   the index to exceed {@link #MAX_DOCS}
    */
   public void addIndexes(Directory... dirs) throws IOException {
     ensureOpen();
@@ -2398,16 +2347,25 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       flush(false, true);
 
       List<SegmentCommitInfo> infos = new ArrayList<>();
-      int totalDocCount = 0;
+
+      // long so we can detect int overflow:
+      long totalMaxDoc = 0;
+      List<SegmentInfos> commits = new ArrayList<>(dirs.length);
+      for (Directory dir : dirs) {
+        if (infoStream.isEnabled("IW")) {
+          infoStream.message("IW", "addIndexes: process directory " + dir);
+        }
+        SegmentInfos sis = SegmentInfos.readLatestCommit(dir); // read infos from dir
+        totalMaxDoc += sis.totalMaxDoc();
+        commits.add(sis);
+      }
+
+      // Best-effort up front check:
+      testReserveDocs(totalMaxDoc);
+        
       boolean success = false;
       try {
-        for (Directory dir : dirs) {
-          if (infoStream.isEnabled("IW")) {
-            infoStream.message("IW", "addIndexes: process directory " + dir);
-          }
-          SegmentInfos sis = SegmentInfos.readLatestCommit(dir); // read infos from dir
-          totalDocCount += sis.totalDocCount();
-
+        for (SegmentInfos sis : commits) {
           for (SegmentCommitInfo info : sis) {
             assert !infos.contains(info): "dup info dir=" + info.info.dir + " name=" + info.info.name;
 
@@ -2417,7 +2375,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
               infoStream.message("IW", "addIndexes: process segment origName=" + info.info.name + " newName=" + newSegName + " info=" + info);
             }
 
-            IOContext context = new IOContext(new MergeInfo(info.info.getDocCount(), info.sizeInBytes(), true, -1));
+            IOContext context = new IOContext(new FlushInfo(info.info.maxDoc(), info.sizeInBytes()));
 
             FieldInfos fis = readFieldInfos(info);
             for(FieldInfo fi : fis) {
@@ -2430,12 +2388,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       } finally {
         if (!success) {
           for(SegmentCommitInfo sipc : infos) {
-            for(String file : sipc.files()) {
-              try {
-                directory.deleteFile(file);
-              } catch (Throwable t) {
-              }
-            }
+            IOUtils.deleteFilesIgnoringExceptions(directory, sipc.files().toArray(new String[0]));
           }
         }
       }
@@ -2444,9 +2397,10 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         success = false;
         try {
           ensureOpen();
-          // Make sure adding the new documents to this index won't
-          // exceed the limit:
-          reserveDocs(totalDocCount);
+
+          // Now reserve the docs, just before we update SIS:
+          reserveDocs(totalMaxDoc);
+
           success = true;
         } finally {
           if (!success) {
@@ -2493,59 +2447,55 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * index.
    * 
    * <p>
-   * <b>NOTE:</b> this method merges all given {@link IndexReader}s in one
+   * <b>NOTE:</b> this method merges all given {@link LeafReader}s in one
    * merge. If you intend to merge a large number of readers, it may be better
    * to call this method multiple times, each time with a small set of readers.
    * In principle, if you use a merge policy with a {@code mergeFactor} or
    * {@code maxMergeAtOnce} parameter, you should pass that many readers in one
    * call.
    * 
-   * <p>
-   * <b>NOTE</b>: if you call {@link #abortMerges}, which
-   * aborts all running merges, then any thread still running this method might
-   * hit a {@link MergePolicy.MergeAbortedException}.
-   * 
    * @throws CorruptIndexException
    *           if the index is corrupt
    * @throws IOException
    *           if there is a low-level IO error
+   * @throws IllegalArgumentException
+   *           if addIndexes would cause the index to exceed {@link #MAX_DOCS}
    */
-  public void addIndexes(IndexReader... readers) throws IOException {
+  public void addIndexes(CodecReader... readers) throws IOException {
     ensureOpen();
-    int numDocs = 0;
+
+    // long so we can detect int overflow:
+    long numDocs = 0;
 
     try {
       if (infoStream.isEnabled("IW")) {
-        infoStream.message("IW", "flush at addIndexes(IndexReader...)");
+        infoStream.message("IW", "flush at addIndexes(CodecReader...)");
       }
       flush(false, true);
 
       String mergedName = newSegmentName();
-      final List<LeafReader> mergeReaders = new ArrayList<>();
-      for (IndexReader indexReader : readers) {
-        numDocs += indexReader.numDocs();
-        for (LeafReaderContext ctx : indexReader.leaves()) {
-          mergeReaders.add(ctx.reader());
-        }
+      for (CodecReader leaf : readers) {
+        numDocs += leaf.numDocs();
       }
-
-      // Make sure adding the new documents to this index won't
-      // exceed the limit:
-      reserveDocs(numDocs);
       
-      final IOContext context = new IOContext(new MergeInfo(numDocs, -1, true, -1));
+      // Best-effort up front check:
+      testReserveDocs(numDocs);
+
+      final IOContext context = new IOContext(new MergeInfo((int) numDocs, -1, false, -1));
 
       // TODO: somehow we should fix this merge so it's
       // abortable so that IW.close(false) is able to stop it
       TrackingDirectoryWrapper trackingDir = new TrackingDirectoryWrapper(directory);
 
       SegmentInfo info = new SegmentInfo(directory, Version.LATEST, mergedName, -1,
-                                         false, codec, null, StringHelper.randomId());
+                                         false, codec, Collections.<String,String>emptyMap(), StringHelper.randomId(), new HashMap<String,String>());
 
-      SegmentMerger merger = new SegmentMerger(mergeReaders, info, infoStream, trackingDir,
-                                               MergeState.CheckAbort.NONE, globalFieldNumberMap, 
+      SegmentMerger merger = new SegmentMerger(Arrays.asList(readers), info, infoStream, trackingDir,
+                                               globalFieldNumberMap, 
                                                context);
       
+      rateLimiters.set(new MergeRateLimiter(null));
+
       if (!merger.shouldMerge()) {
         return;
       }
@@ -2583,8 +2533,11 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       // Now create the compound file if needed
       if (useCompoundFile) {
         Collection<String> filesToDelete = infoPerCommit.files();
+        TrackingDirectoryWrapper trackingCFSDir = new TrackingDirectoryWrapper(mergeDirectory);
+        // TODO: unlike merge, on exception we arent sniping any trash cfs files here?
+        // createCompoundFile tries to cleanup, but it might not always be able to...
         try {
-          createCompoundFile(infoStream, directory, MergeState.CheckAbort.NONE, info, context);
+          createCompoundFile(infoStream, trackingCFSDir, info, context);
         } finally {
           // delete new non cfs files directly: they were never
           // registered with IFD
@@ -2620,11 +2573,15 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           return;
         }
         ensureOpen();
+
+        // Now reserve the docs, just before we update SIS:
+        reserveDocs(numDocs);
+      
         segmentInfos.add(infoPerCommit);
         checkpoint();
       }
     } catch (OutOfMemoryError oom) {
-      tragicEvent(oom, "addIndexes(IndexReader...)");
+      tragicEvent(oom, "addIndexes(CodecReader...)");
     }
     maybeMerge();
   }
@@ -2634,9 +2591,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     
     //System.out.println("copy seg=" + info.info.name + " version=" + info.info.getVersion());
     // Same SI as before but we change directory and name
-    SegmentInfo newInfo = new SegmentInfo(directory, info.info.getVersion(), segName, info.info.getDocCount(),
+    SegmentInfo newInfo = new SegmentInfo(directory, info.info.getVersion(), segName, info.info.maxDoc(),
                                           info.info.getUseCompoundFile(), info.info.getCodec(), 
-                                          info.info.getDiagnostics(), info.info.getId());
+                                          info.info.getDiagnostics(), info.info.getId(), info.info.getAttributes());
     SegmentCommitInfo newInfoPerCommit = new SegmentCommitInfo(newInfo, info.getDelCount(), info.getDelGen(), 
                                                                info.getFieldInfosGen(), info.getDocValuesGen());
     
@@ -2651,7 +2608,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
         assert !slowFileExists(directory, newFileName): "file \"" + newFileName + "\" already exists; newInfo.files=" + newInfo.files();
 
-        info.info.dir.copy(directory, file, newFileName, context);
+        directory.copyFrom(info.info.dir, file, newFileName, context);
       }
       success = true;
     } finally {
@@ -2728,7 +2685,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           boolean flushSuccess = false;
           boolean success = false;
           try {
-            anySegmentsFlushed = docWriter.flushAllThreads(this);
+            anySegmentsFlushed = docWriter.flushAllThreads();
             if (!anySegmentsFlushed) {
               // prevent double increment since docWriter#doFlush increments the flushcount
               // if we flushed anything.
@@ -2756,7 +2713,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
               // we are trying to sync all referenced files, a
               // merge completes which would otherwise have
               // removed the files we are now syncing.    
-              filesToCommit = toCommit.files(directory, false);
+              filesToCommit = toCommit.files(false);
               deleter.incRef(filesToCommit);
             }
             success = true;
@@ -2767,12 +2724,12 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
               }
             }
             // Done: finish the full flush!
-            docWriter.finishFullFlush(flushSuccess);
+            docWriter.finishFullFlush(this, flushSuccess);
             doAfterFlush();
           }
         }
-      } catch (OutOfMemoryError oom) {
-        tragicEvent(oom, "prepareCommit");
+      } catch (AbortingException | OutOfMemoryError tragedy) {
+        tragicEvent(tragedy, "prepareCommit");
       }
      
       boolean success = false;
@@ -2823,7 +2780,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   private final Object commitLock = new Object();
 
   /**
-   * <p>Commits all pending changes (added & deleted
+   * <p>Commits all pending changes (added and deleted
    * documents, segment merges, added
    * indexes, etc.) to the index, and syncs all referenced
    * index files, such that a reader will see the changes
@@ -2835,7 +2792,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *
    * <p> Note that this operation calls Directory.sync on
    * the index files.  That call should not return until the
-   * file contents & metadata are on stable storage.  For
+   * file contents and metadata are on stable storage.  For
    * FSDirectory, this calls the OS's fsync.  But, beware:
    * some hardware devices may in fact cache writes even
    * during fsync, and return before the bits are actually
@@ -2994,6 +2951,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     }
   }
 
+  /** Returns true a segment was flushed or deletes were applied. */
   private boolean doFlush(boolean applyAllDeletes) throws IOException {
     if (tragedy != null) {
       throw new IllegalStateException("this writer hit an unrecoverable error; cannot flush", tragedy);
@@ -3008,30 +2966,30 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         infoStream.message("IW", "  start flush: applyAllDeletes=" + applyAllDeletes);
         infoStream.message("IW", "  index before flush " + segString());
       }
-      final boolean anySegmentFlushed;
+      boolean anyChanges = false;
       
       synchronized (fullFlushLock) {
-      boolean flushSuccess = false;
+        boolean flushSuccess = false;
         try {
-          anySegmentFlushed = docWriter.flushAllThreads(this);
+          anyChanges = docWriter.flushAllThreads();
+          if (!anyChanges) {
+            // flushCount is incremented in flushAllThreads
+            flushCount.incrementAndGet();
+          }
           flushSuccess = true;
         } finally {
-          docWriter.finishFullFlush(flushSuccess);
+          docWriter.finishFullFlush(this, flushSuccess);
           processEvents(false, true);
         }
       }
       synchronized(this) {
-        maybeApplyDeletes(applyAllDeletes);
+        anyChanges |= maybeApplyDeletes(applyAllDeletes);
         doAfterFlush();
-        if (!anySegmentFlushed) {
-          // flushCount is incremented in flushAllThreads
-          flushCount.incrementAndGet();
-        }
         success = true;
-        return anySegmentFlushed;
+        return anyChanges;
       }
-    } catch (OutOfMemoryError oom) {
-      tragicEvent(oom, "doFlush");
+    } catch (AbortingException | OutOfMemoryError tragedy) {
+      tragicEvent(tragedy, "doFlush");
       // never hit
       return false;
     } finally {
@@ -3043,20 +3001,25 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     }
   }
   
-  final synchronized void maybeApplyDeletes(boolean applyAllDeletes) throws IOException {
+  final synchronized boolean maybeApplyDeletes(boolean applyAllDeletes) throws IOException {
     if (applyAllDeletes) {
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "apply all deletes during flush");
       }
-      applyAllDeletesAndUpdates();
+      return applyAllDeletesAndUpdates();
     } else if (infoStream.isEnabled("IW")) {
       infoStream.message("IW", "don't apply deletes now delTermCount=" + bufferedUpdatesStream.numTerms() + " bytesUsed=" + bufferedUpdatesStream.ramBytesUsed());
     }
+
+    return false;
   }
   
-  final synchronized void applyAllDeletesAndUpdates() throws IOException {
+  final synchronized boolean applyAllDeletesAndUpdates() throws IOException {
     flushDeletesCount.incrementAndGet();
     final BufferedUpdatesStream.ApplyDeletesResult result;
+    if (infoStream.isEnabled("IW")) {
+      infoStream.message("IW", "now apply all deletes for all segments maxDoc=" + (docWriter.getNumDocs() + segmentInfos.totalMaxDoc()));
+    }
     result = bufferedUpdatesStream.applyDeletesAndUpdates(readerPool, segmentInfos.asList());
     if (result.anyDeletes) {
       checkpoint();
@@ -3072,13 +3035,14 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         // it once it's done:
         if (!mergingSegments.contains(info)) {
           segmentInfos.remove(info);
-          pendingNumDocs.addAndGet(-info.info.getDocCount());
+          pendingNumDocs.addAndGet(-info.info.maxDoc());
           readerPool.drop(info);
         }
       }
       checkpoint();
     }
     bufferedUpdatesStream.prune(segmentInfos);
+    return result.anyDeletes;
   }
 
   // for testing only
@@ -3124,7 +3088,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       if (mergedDeletesAndUpdates == null) {
         mergedDeletesAndUpdates = readerPool.get(merge.info, true);
         docMap = merge.getDocMap(mergeState);
-        assert docMap.isConsistent(merge.info.info.getDocCount());
+        assert docMap.isConsistent(merge.info.info.maxDoc());
       }
       if (initWritableLiveDocs && !initializedWritableLiveDocs) {
         mergedDeletesAndUpdates.initWritableLiveDocs();
@@ -3188,7 +3152,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     for (int i = 0; i < sourceSegments.size(); i++) {
       SegmentCommitInfo info = sourceSegments.get(i);
       minGen = Math.min(info.getBufferedDeletesGen(), minGen);
-      final int docCount = info.info.getDocCount();
+      final int maxDoc = info.info.maxDoc();
       final Bits prevLiveDocs = merge.readers.get(i).getLiveDocs();
       final ReadersAndUpdates rld = readerPool.get(info, false);
       // We hold a ref so it should still be in the pool:
@@ -3213,7 +3177,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           mergingFields[idx] = field;
           dvFieldUpdates[idx] = mergedDVUpdates.getUpdates(field, updates.type);
           if (dvFieldUpdates[idx] == null) {
-            dvFieldUpdates[idx] = mergedDVUpdates.newUpdates(field, updates.type, mergeState.segmentInfo.getDocCount());
+            dvFieldUpdates[idx] = mergedDVUpdates.newUpdates(field, updates.type, mergeState.segmentInfo.maxDoc());
           }
           updatesIters[idx] = updates.iterator();
           updatesIters[idx].nextDoc(); // advance to first update doc
@@ -3227,8 +3191,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         // If we had deletions on starting the merge we must
         // still have deletions now:
         assert currentLiveDocs != null;
-        assert prevLiveDocs.length() == docCount;
-        assert currentLiveDocs.length() == docCount;
+        assert prevLiveDocs.length() == maxDoc;
+        assert currentLiveDocs.length() == maxDoc;
 
         // There were deletes on this segment when the merge
         // started.  The merge has collapsed away those
@@ -3246,7 +3210,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           // This means this segment received new deletes
           // since we started the merge, so we
           // must merge them:
-          for (int j = 0; j < docCount; j++) {
+          for (int j = 0; j < maxDoc; j++) {
             if (!prevLiveDocs.get(j)) {
               assert !currentLiveDocs.get(j);
             } else {
@@ -3266,7 +3230,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           }
         } else if (mergingFields != null) {
           // need to check each non-deleted document if it has any updates
-          for (int j = 0; j < docCount; j++) {
+          for (int j = 0; j < maxDoc; j++) {
             if (prevLiveDocs.get(j)) {
               // document isn't deleted, check if any of the fields have an update to it
               maybeApplyMergedDVUpdates(merge, mergeState, docUpto, holder, mergingFields, dvFieldUpdates, updatesIters, j);
@@ -3278,13 +3242,13 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             }
           }
         } else {
-          docUpto += info.info.getDocCount() - info.getDelCount() - rld.getPendingDeleteCount();
+          docUpto += info.info.maxDoc() - info.getDelCount() - rld.getPendingDeleteCount();
         }
       } else if (currentLiveDocs != null) {
-        assert currentLiveDocs.length() == docCount;
+        assert currentLiveDocs.length() == maxDoc;
         // This segment had no deletes before but now it
         // does:
-        for (int j = 0; j < docCount; j++) {
+        for (int j = 0; j < maxDoc; j++) {
           if (!currentLiveDocs.get(j)) {
             if (holder.mergedDeletesAndUpdates == null || !holder.initializedWritableLiveDocs) {
               holder.init(readerPool, merge, mergeState, true);
@@ -3300,18 +3264,18 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         }
       } else if (mergingFields != null) {
         // no deletions before or after, but there were updates
-        for (int j = 0; j < docCount; j++) {
+        for (int j = 0; j < maxDoc; j++) {
           maybeApplyMergedDVUpdates(merge, mergeState, docUpto, holder, mergingFields, dvFieldUpdates, updatesIters, j);
           // advance docUpto for every non-deleted document
           docUpto++;
         }
       } else {
         // No deletes or updates before or after
-        docUpto += info.info.getDocCount();
+        docUpto += info.info.maxDoc();
       }
     }
 
-    assert docUpto == merge.info.info.getDocCount();
+    assert docUpto == merge.info.info.maxDoc();
 
     if (mergedDVUpdates.any()) {
 //      System.out.println("[" + Thread.currentThread().getName() + "] IW.commitMergedDeletes: mergedDeletes.info=" + mergedDeletes.info + ", mergedFieldUpdates=" + mergedFieldUpdates);
@@ -3371,7 +3335,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     // deleter.refresh() call that will remove any index
     // file that current segments does not reference), we
     // abort this merge
-    if (merge.isAborted()) {
+    if (merge.rateLimiter.getAbort()) {
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "commitMerge: skip: it was aborted");
       }
@@ -3389,7 +3353,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       return false;
     }
 
-    final ReadersAndUpdates mergedUpdates = merge.info.info.getDocCount() == 0 ? null : commitMergedDeletesAndUpdates(merge, mergeState);
+    final ReadersAndUpdates mergedUpdates = merge.info.info.maxDoc() == 0 ? null : commitMergedDeletesAndUpdates(merge, mergeState);
 //    System.out.println("[" + Thread.currentThread().getName() + "] IW.commitMerge: mergedDeletes=" + mergedDeletes);
 
     // If the doc store we are using has been closed and
@@ -3400,9 +3364,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     assert !segmentInfos.contains(merge.info);
 
     final boolean allDeleted = merge.segments.size() == 0 ||
-      merge.info.info.getDocCount() == 0 ||
+      merge.info.info.maxDoc() == 0 ||
       (mergedUpdates != null &&
-       mergedUpdates.getPendingDeleteCount() == merge.info.info.getDocCount());
+       mergedUpdates.getPendingDeleteCount() == merge.info.info.maxDoc());
 
     if (infoStream.isEnabled("IW")) {
       if (allDeleted) {
@@ -3416,7 +3380,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     // the new segment:
     assert merge.segments.size() > 0 || dropSegment;
 
-    assert merge.info.info.getDocCount() != 0 || keepFullyDeletedSegments || dropSegment;
+    assert merge.info.info.maxDoc() != 0 || keepFullyDeletedSegments || dropSegment;
 
     if (mergedUpdates != null) {
       boolean success = false;
@@ -3445,7 +3409,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
     // Now deduct the deleted docs that we just reclaimed from this
     // merge:
-    int delDocCount = merge.totalDocCount - merge.info.info.getDocCount();
+    int delDocCount = merge.totalMaxDoc - merge.info.info.maxDoc();
     assert delDocCount >= 0;
     pendingNumDocs.addAndGet(-delDocCount);
 
@@ -3530,6 +3494,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
     boolean success = false;
 
+    rateLimiters.set(merge.rateLimiter);
+
     final long t0 = System.currentTimeMillis();
 
     final MergePolicy mergePolicy = config.getMergePolicy();
@@ -3567,7 +3533,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           // This merge (and, generally, any change to the
           // segments) may now enable new merges, so we call
           // merge policy & update pending merges.
-          if (success && !merge.isAborted() && (merge.maxNumSegments != -1 || (!closed && !closing))) {
+          if (success && merge.rateLimiter.getAbort() == false && (merge.maxNumSegments != -1 || (!closed && !closing))) {
             updatePendingMerges(mergePolicy, MergeTrigger.MERGE_FINISHED, merge.maxNumSegments);
           }
         }
@@ -3575,9 +3541,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     } catch (OutOfMemoryError oom) {
       tragicEvent(oom, "merge");
     }
-    if (merge.info != null && !merge.isAborted()) {
+    if (merge.info != null && merge.rateLimiter.getAbort() == false) {
       if (infoStream.isEnabled("IW")) {
-        infoStream.message("IW", "merge time " + (System.currentTimeMillis()-t0) + " msec for " + merge.info.info.getDocCount() + " docs");
+        infoStream.message("IW", "merge time " + (System.currentTimeMillis()-t0) + " msec for " + merge.info.info.maxDoc() + " docs");
       }
     }
   }
@@ -3600,7 +3566,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     assert merge.segments.size() > 0;
 
     if (stopMerges) {
-      merge.abort();
+      merge.rateLimiter.setAbort();
       throw new MergePolicy.MergeAbortedException("merge is aborted: " + segString(merge.segments));
     }
 
@@ -3663,10 +3629,10 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     assert merge.estimatedMergeBytes == 0;
     assert merge.totalMergeBytes == 0;
     for(SegmentCommitInfo info : merge.segments) {
-      if (info.info.getDocCount() > 0) {
+      if (info.info.maxDoc() > 0) {
         final int delCount = numDeletedDocs(info);
-        assert delCount <= info.info.getDocCount();
-        final double delRatio = ((double) delCount)/info.info.getDocCount();
+        assert delCount <= info.info.maxDoc();
+        final double delRatio = ((double) delCount)/info.info.maxDoc();
         merge.estimatedMergeBytes += info.sizeInBytes() * (1.0 - delRatio);
         merge.totalMergeBytes += info.sizeInBytes();
       }
@@ -3711,7 +3677,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       return;
     }
 
-    if (merge.isAborted()) {
+    if (merge.rateLimiter.getAbort()) {
       return;
     }
 
@@ -3719,6 +3685,10 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     // wasteful, because we open these readers, close them,
     // and then open them again for merging.  Maybe  we
     // could pre-pool them somehow in that case...
+
+    if (infoStream.isEnabled("IW")) {
+      infoStream.message("IW", "now apply deletes for " + merge.segments.size() + " merging segments");
+    }
 
     // Lock order: IW -> BD
     final BufferedUpdatesStream.ApplyDeletesResult result = bufferedUpdatesStream.applyDeletesAndUpdates(readerPool, merge.segments);
@@ -3733,7 +3703,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       }
       for(SegmentCommitInfo info : result.allDeleted) {
         segmentInfos.remove(info);
-        pendingNumDocs.addAndGet(-info.info.getDocCount());
+        pendingNumDocs.addAndGet(-info.info.maxDoc());
         if (merge.segments.contains(info)) {
           mergingSegments.remove(info);
           merge.segments.remove(info);
@@ -3747,7 +3717,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     // ConcurrentMergePolicy we keep deterministic segment
     // names.
     final String mergeSegmentName = newSegmentName();
-    SegmentInfo si = new SegmentInfo(directory, Version.LATEST, mergeSegmentName, -1, false, codec, null, StringHelper.randomId());
+    SegmentInfo si = new SegmentInfo(directory, Version.LATEST, mergeSegmentName, -1, false, codec, Collections.<String,String>emptyMap(), StringHelper.randomId(), new HashMap<String,String>());
     Map<String,String> details = new HashMap<>();
     details.put("mergeMaxNumSegments", "" + merge.maxNumSegments);
     details.put("mergeFactor", Integer.toString(merge.segments.size()));
@@ -3856,14 +3826,13 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  instance */
   private int mergeMiddle(MergePolicy.OneMerge merge, MergePolicy mergePolicy) throws IOException {
 
-    merge.checkAborted(directory);
+    merge.rateLimiter.checkAbort();
 
     List<SegmentCommitInfo> sourceSegments = merge.segments;
     
     IOContext context = new IOContext(merge.getMergeInfo());
 
-    final MergeState.CheckAbort checkAbort = new MergeState.CheckAbort(merge, directory);
-    final TrackingDirectoryWrapper dirWrapper = new TrackingDirectoryWrapper(directory);
+    final TrackingDirectoryWrapper dirWrapper = new TrackingDirectoryWrapper(mergeDirectory);
 
     if (infoStream.isEnabled("IW")) {
       infoStream.message("IW", "merging " + segString(merge.segments));
@@ -3918,7 +3887,14 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           // fix the reader's live docs and del count
           assert delCount > reader.numDeletedDocs(); // beware of zombies
 
-          SegmentReader newReader = new SegmentReader(info, reader, liveDocs, info.info.getDocCount() - delCount);
+          SegmentReader newReader;
+
+          synchronized (this) {
+            // We must also sync on IW here, because another thread could be writing
+            // new DV updates / remove old gen field infos files causing FNFE:
+            newReader = new SegmentReader(info, reader, liveDocs, info.info.maxDoc() - delCount);
+          }
+
           boolean released = false;
           try {
             rld.release(reader);
@@ -3933,7 +3909,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         }
 
         merge.readers.add(reader);
-        assert delCount <= info.info.getDocCount(): "delCount=" + delCount + " info.docCount=" + info.info.getDocCount() + " rld.pendingDeleteCount=" + rld.getPendingDeleteCount() + " info.getDelCount()=" + info.getDelCount();
+        assert delCount <= info.info.maxDoc(): "delCount=" + delCount + " info.maxDoc=" + info.info.maxDoc() + " rld.pendingDeleteCount=" + rld.getPendingDeleteCount() + " info.getDelCount()=" + info.getDelCount();
         segUpto++;
       }
 
@@ -3943,10 +3919,12 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       // OneMerge to return a view over the actual segments to merge
       final SegmentMerger merger = new SegmentMerger(merge.getMergeReaders(),
                                                      merge.info.info, infoStream, dirWrapper,
-                                                     checkAbort, globalFieldNumberMap, 
+                                                     globalFieldNumberMap, 
                                                      context);
 
-      merge.checkAborted(directory);
+      merge.rateLimiter.checkAbort();
+
+      merge.mergeStartNS = System.nanoTime();
 
       // This is where all the work happens:
       boolean success3 = false;
@@ -3966,16 +3944,26 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       assert mergeState.segmentInfo == merge.info.info;
       merge.info.info.setFiles(new HashSet<>(dirWrapper.getCreatedFiles()));
 
-      // Record which codec was used to write the segment
-
       if (infoStream.isEnabled("IW")) {
         if (merger.shouldMerge()) {
-          infoStream.message("IW", "merge codec=" + codec + " docCount=" + merge.info.info.getDocCount() + "; merged segment has " +
-                           (mergeState.mergeFieldInfos.hasVectors() ? "vectors" : "no vectors") + "; " +
-                           (mergeState.mergeFieldInfos.hasNorms() ? "norms" : "no norms") + "; " + 
-                           (mergeState.mergeFieldInfos.hasDocValues() ? "docValues" : "no docValues") + "; " + 
-                           (mergeState.mergeFieldInfos.hasProx() ? "prox" : "no prox") + "; " + 
-                           (mergeState.mergeFieldInfos.hasProx() ? "freqs" : "no freqs"));
+          long t1 = System.nanoTime();
+          double sec = (t1-merge.mergeStartNS)/1000000000.;
+          double segmentMB = (merge.info.sizeInBytes()/1024./1024.);
+          double stoppedSec = merge.rateLimiter.getTotalStoppedNS()/1000000000.;
+          double throttleSec = merge.rateLimiter.getTotalPausedNS()/1000000000.;
+          infoStream.message("IW", "merge codec=" + codec + " maxDoc=" + merge.info.info.maxDoc() + "; merged segment has " +
+                             (mergeState.mergeFieldInfos.hasVectors() ? "vectors" : "no vectors") + "; " +
+                             (mergeState.mergeFieldInfos.hasNorms() ? "norms" : "no norms") + "; " + 
+                             (mergeState.mergeFieldInfos.hasDocValues() ? "docValues" : "no docValues") + "; " + 
+                             (mergeState.mergeFieldInfos.hasProx() ? "prox" : "no prox") + "; " + 
+                             (mergeState.mergeFieldInfos.hasProx() ? "freqs" : "no freqs") + "; " +
+                             String.format(Locale.ROOT,
+                                           "%.1f sec (%.1f sec stopped, %.1f sec paused) to merge segment [%.2f MB, %.2f MB/sec]",
+                                           sec,
+                                           stoppedSec,
+                                           throttleSec,
+                                           segmentMB,
+                                           segmentMB / sec));
         } else {
           infoStream.message("IW", "skip merging fully deleted segments");
         }
@@ -3983,12 +3971,12 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
       if (merger.shouldMerge() == false) {
         // Merge would produce a 0-doc segment, so we do nothing except commit the merge to remove all the 0-doc segments that we "merged":
-        assert merge.info.info.getDocCount() == 0;
+        assert merge.info.info.maxDoc() == 0;
         commitMerge(merge, mergeState);
         return 0;
       }
 
-      assert merge.info.info.getDocCount() > 0;
+      assert merge.info.info.maxDoc() > 0;
 
       // Very important to do this before opening the reader
       // because codec must know if prox was written for
@@ -4002,15 +3990,14 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       if (useCompoundFile) {
         success = false;
 
-        String cfsFiles[] = merge.info.info.getCodec().compoundFormat().files(merge.info.info);
         Collection<String> filesToRemove = merge.info.files();
-
+        TrackingDirectoryWrapper trackingCFSDir = new TrackingDirectoryWrapper(mergeDirectory);
         try {
-          filesToRemove = createCompoundFile(infoStream, directory, checkAbort, merge.info.info, context);
+          createCompoundFile(infoStream, trackingCFSDir, merge.info.info, context);
           success = true;
         } catch (IOException ioe) {
           synchronized(this) {
-            if (merge.isAborted()) {
+            if (merge.rateLimiter.getAbort()) {
               // This can happen if rollback or close(false)
               // is called -- fall through to logic below to
               // remove the partially created CFS:
@@ -4027,6 +4014,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             }
 
             synchronized(this) {
+              Set<String> cfsFiles = new HashSet<>(trackingCFSDir.getCreatedFiles());
               for (String cfsFile : cfsFiles) {
                 deleter.deleteFile(cfsFile);
               }
@@ -4046,10 +4034,11 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
           // registered with IFD
           deleter.deleteNewFiles(filesToRemove);
 
-          if (merge.isAborted()) {
+          if (merge.rateLimiter.getAbort()) {
             if (infoStream.isEnabled("IW")) {
               infoStream.message("IW", "abort merge after building CFS");
             }
+            Set<String> cfsFiles = new HashSet<>(trackingCFSDir.getCreatedFiles());
             for (String cfsFile : cfsFiles) {
               deleter.deleteFile(cfsFile);
             }
@@ -4119,7 +4108,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       }
     }
 
-    return merge.info.info.getDocCount();
+    return merge.info.info.maxDoc();
   }
 
   synchronized void addMergeException(MergePolicy.OneMerge merge) {
@@ -4172,7 +4161,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *
    * @lucene.internal */
   public synchronized String segString(SegmentCommitInfo info) {
-    return info.toString(info.info.dir, numDeletedDocs(info) - info.getDelCount());
+    return info.toString(numDeletedDocs(info) - info.getDelCount());
   }
 
   private synchronized void doWait() {
@@ -4205,7 +4194,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   // called only from assert
   private boolean filesExist(SegmentInfos toSync) throws IOException {
     
-    Collection<String> files = toSync.files(directory, false);
+    Collection<String> files = toSync.files(false);
     for(final String fileName: files) {
       assert slowFileExists(directory, fileName): "file " + fileName + " does not exist; files=" + Arrays.toString(directory.listAll());
       // If this trips it means we are missing a call to
@@ -4258,7 +4247,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
       synchronized(this) {
 
-        assert lastCommitChangeCount <= changeCount: "lastCommitChangeCount=" + lastCommitChangeCount + " changeCount=" + changeCount;
+        if (lastCommitChangeCount > changeCount) {
+          throw new IllegalStateException("lastCommitChangeCount=" + lastCommitChangeCount + ",changeCount=" + changeCount);
+        }
 
         if (pendingCommitChangeCount == lastCommitChangeCount) {
           if (infoStream.isEnabled("IW")) {
@@ -4308,7 +4299,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         boolean success = false;
         final Collection<String> filesToSync;
         try {
-          filesToSync = toSync.files(directory, false);
+          filesToSync = toSync.files(false);
           directory.sync(filesToSync);
           success = true;
         } finally {
@@ -4386,31 +4377,53 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     public abstract void warm(LeafReader reader) throws IOException;
   }
 
-  private void tragicEvent(Throwable tragedy, String location) {
+  void tragicEvent(Throwable tragedy, String location) throws IOException {
+    // unbox our internal AbortingException
+    if (tragedy instanceof AbortingException) {
+      tragedy = tragedy.getCause();
+    }
     // We cannot hold IW's lock here else it can lead to deadlock:
     assert Thread.holdsLock(this) == false;
 
+    // How can it be a tragedy when nothing happened?
+    assert tragedy != null;
+
     if (infoStream.isEnabled("IW")) {
-      infoStream.message("IW", "hit " + tragedy.getClass().getSimpleName() + " inside " + location);
+      infoStream.message("IW", "hit tragic " + tragedy.getClass().getSimpleName() + " inside " + location);
     }
+
     synchronized (this) {
-      // its possible you could have a really bad day
+      // it's possible you could have a really bad day
       if (this.tragedy == null) {
         this.tragedy = tragedy;
       }
     }
+
     // if we are already closed (e.g. called by rollback), this will be a no-op.
     synchronized(commitLock) {
       if (closing == false) {
         try {
           rollback();
         } catch (Throwable ignored) {
-          // it would be confusing to addSuppressed here, its unrelated to the disaster,
-          // and its possible our internal state is amiss anyway.
+          // it would be confusing to addSuppressed here, it's unrelated to the disaster,
+          // and it's possible our internal state is amiss anyway.
         }
       }
     }
-    IOUtils.reThrowUnchecked(tragedy);
+
+    IOUtils.reThrow(tragedy);
+  }
+
+  /** If this {@code IndexWriter} was closed as a side-effect of a tragic exception,
+   *  e.g. disk full while flushing a new segment, this returns the root cause exception.
+   *  Otherwise (no tragic exception has occurred) it returns null. */
+  public Throwable getTragicException() {
+    return tragedy;
+  }
+
+  /** Returns {@code true} if this {@code IndexWriter} is still open. */
+  public boolean isOpen() {
+    return closing == false && closed == false;
   }
 
   // Used for testing.  Current points:
@@ -4425,7 +4438,8 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   //   startMergeInit
   //   DocumentsWriter.ThreadState.init start
   private final void testPoint(String message) {
-    if (infoStream.isEnabled("TP")) {
+    if (enableTestPoints) {
+      assert infoStream.isEnabled("TP"); // don't enable unless you need them.
       infoStream.message("TP", message);
     }
   }
@@ -4487,36 +4501,34 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * deletion files, this SegmentInfo must not reference such files when this
    * method is called, because they are not allowed within a compound file.
    */
-  static final Collection<String> createCompoundFile(InfoStream infoStream, Directory directory, CheckAbort checkAbort, final SegmentInfo info, IOContext context)
+  static final void createCompoundFile(InfoStream infoStream, TrackingDirectoryWrapper directory, final SegmentInfo info, IOContext context)
           throws IOException {
 
-    // TODO: use trackingdirectorywrapper instead of files() to know which files to delete when things fail:
-    String cfsFiles[] = info.getCodec().compoundFormat().files(info);
+    // maybe this check is not needed, but why take the risk?
+    if (!directory.getCreatedFiles().isEmpty()) {
+      throw new IllegalStateException("pass a clean trackingdir for CFS creation");
+    }
     
     if (infoStream.isEnabled("IW")) {
       infoStream.message("IW", "create compound file");
     }
-    // Now merge all added files
-    Collection<String> files = info.files();
-    
+    // Now merge all added files    
     boolean success = false;
     try {
-      info.getCodec().compoundFormat().write(directory, info, files, checkAbort, context);
+      info.getCodec().compoundFormat().write(directory, info, context);
       success = true;
     } finally {
       if (!success) {
-        IOUtils.deleteFilesIgnoringExceptions(directory, cfsFiles);
+        Set<String> cfsFiles = new HashSet<>(directory.getCreatedFiles());
+        for (String file : cfsFiles) {
+          IOUtils.deleteFilesIgnoringExceptions(directory, file);
+        }
       }
     }
 
     // Replace all previous files with the CFS/CFE files:
-    Set<String> siFiles = new HashSet<>();
-    for (String cfsFile : cfsFiles) {
-      siFiles.add(cfsFile);
-    }
+    Set<String> siFiles = new HashSet<>(directory.getCreatedFiles());
     info.setFiles(siFiles);
-
-    return files;
   }
   
   /**
@@ -4545,7 +4557,9 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
     try {
       purge(forcePurge);
     } finally {
-      applyAllDeletesAndUpdates();
+      if (applyAllDeletesAndUpdates()) {
+        maybeMerge(config.getMergePolicy(), MergeTrigger.SEGMENT_FLUSH, UNBOUNDED_MAX_MERGE_SEGMENTS);
+      }
       flushCount.incrementAndGet();
     }
   }
@@ -4576,18 +4590,20 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   }
   
   private boolean processEvents(Queue<Event> queue, boolean triggerMerge, boolean forcePurge) throws IOException {
-    Event event;
     boolean processed = false;
-    while((event = queue.poll()) != null)  {
-      processed = true;
-      event.process(this, triggerMerge, forcePurge);
+    if (tragedy == null) {
+      Event event;
+      while((event = queue.poll()) != null)  {
+        processed = true;
+        event.process(this, triggerMerge, forcePurge);
+      }
     }
     return processed;
   }
   
   /**
    * Interface for internal atomic events. See {@link DocumentsWriter} for details. Events are executed concurrently and no order is guaranteed.
-   * Each event should only rely on the serializeability within it's process method. All actions that must happen before or after a certain action must be
+   * Each event should only rely on the serializeability within its process method. All actions that must happen before or after a certain action must be
    * encoded inside the {@link #process(IndexWriter, boolean, boolean)} method.
    *
    */
@@ -4624,12 +4640,52 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
   /** Anything that will add N docs to the index should reserve first to
    *  make sure it's allowed.  This will throw {@code
-   *  IllegalStateException} if it's not allowed. */ 
-  private void reserveDocs(int numDocs) {
-    if (pendingNumDocs.addAndGet(numDocs) > actualMaxDocs) {
-      // Reserve failed
-      pendingNumDocs.addAndGet(-numDocs);
-      throw new IllegalStateException("number of documents in the index cannot exceed " + actualMaxDocs);
+   *  IllegalArgumentException} if it's not allowed. */ 
+  private void reserveDocs(long addedNumDocs) {
+    assert addedNumDocs >= 0;
+    if (pendingNumDocs.addAndGet(addedNumDocs) > actualMaxDocs) {
+      // Reserve failed: put the docs back and throw exc:
+      pendingNumDocs.addAndGet(-addedNumDocs);
+      tooManyDocs(addedNumDocs);
     }
+  }
+
+  /** Does a best-effort check, that the current index would accept this many additional docs, but does not actually reserve them.
+   *
+   * @throws IllegalArgumentException if there would be too many docs */
+  private void testReserveDocs(long addedNumDocs) {
+    assert addedNumDocs >= 0;
+    if (pendingNumDocs.get() + addedNumDocs > actualMaxDocs) {
+      tooManyDocs(addedNumDocs);
+    }
+  }
+
+  private void tooManyDocs(long addedNumDocs) {
+    assert addedNumDocs >= 0;
+    throw new IllegalArgumentException("number of documents in the index cannot exceed " + actualMaxDocs + " (current document count is " + pendingNumDocs.get() + "; added numDocs is " + addedNumDocs + ")");
+  }
+
+  /** Wraps the incoming {@link Directory} so that we assign a per-thread
+   *  {@link MergeRateLimiter} to all created {@link IndexOutput}s. */
+  private Directory addMergeRateLimiters(Directory in) {
+    return new FilterDirectory(in) {
+      @Override
+      public IndexOutput createOutput(String name, IOContext context) throws IOException {
+        ensureOpen();
+
+        // Paranoia defense: if this trips we have a bug somewhere...
+        IndexWriter.this.ensureOpen(false);
+
+        // This Directory is only supposed to be used during merging,
+        // so all writes should have MERGE context, else there is a bug 
+        // somewhere that is failing to pass down the right IOContext:
+        assert context.context == IOContext.Context.MERGE: "got context=" + context.context;
+
+        MergeRateLimiter rateLimiter = rateLimiters.get();
+        assert rateLimiter != null;
+
+        return new RateLimitedIndexOutput(rateLimiter, in.createOutput(name, context));
+      }
+    };
   }
 }

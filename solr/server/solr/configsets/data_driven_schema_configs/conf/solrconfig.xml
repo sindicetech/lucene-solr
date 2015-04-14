@@ -123,7 +123,7 @@
        index format, but hooks into the schema to provide per-field customization of
        the postings lists and per-document values in the fieldType element
        (postingsFormat/docValuesFormat). Note that most of the alternative implementations
-       are experimental, so if you choose to customize the index format, its a good
+       are experimental, so if you choose to customize the index format, it's a good
        idea to convert back to the official format e.g. via IndexWriter.addIndexes(IndexReader)
        before upgrading to a newer version to avoid unnecessary reindexing.
   -->
@@ -134,7 +134,7 @@
        <schemaFactory class="ClassicIndexSchemaFactory"/>
 
        When ManagedIndexSchemaFactory is specified instead, Solr will load the schema from
-       he resource named in 'managedSchemaResourceName', rather than from schema.xml.
+       the resource named in 'managedSchemaResourceName', rather than from schema.xml.
        Note that the managed schema resource CANNOT be named schema.xml.  If the managed
        schema does not exist, Solr will create it after reading schema.xml, then rename
        'schema.xml' to 'schema.xml.bak'. 
@@ -254,15 +254,6 @@
      -->
     <!--
     <unlockOnStartup>false</unlockOnStartup>
-      -->
-
-    <!-- If true, IndexReaders will be opened/reopened from the IndexWriter
-         instead of from the Directory. Hosts in a master/slave setup
-         should have this set to false while those in a SolrCloud
-         cluster need to be set to true. Default: true
-      -->
-    <!-- 
-    <nrtMode>true</nrtMode>
       -->
 
     <!-- Commit Deletion Policy
@@ -861,29 +852,12 @@
   </requestHandler>
 
 
-  <requestHandler name="/browse" class="solr.SearchHandler">
+  <requestHandler name="/browse" class="solr.SearchHandler" useParams="query,facets,velocity,browse">
     <lst name="defaults">
       <str name="echoParams">explicit</str>
-
-      <!-- VelocityResponseWriter settings -->
-      <str name="wt">velocity</str>
-      <str name="v.template">browse</str>
-      <str name="v.layout">layout</str>
-
-      <!-- Query settings -->
-      <str name="defType">edismax</str>
-      <str name="q.alt">*:*</str>
-
-      <!-- Facet settings -->
-      <str name="facet">on</str>
-
     </lst>
-
-    <!-- append spellchecking to our list of components -->
-    <arr name="last-components">
-      <str>spellcheck</str>
-    </arr>
   </requestHandler>
+
 
   <initParams path="/update/**,/query,/select,/tvrh,/elevate,/spell,/browse">
     <lst name="defaults">
@@ -907,12 +881,8 @@
                   class="solr.extraction.ExtractingRequestHandler" >
     <lst name="defaults">
       <str name="lowernames">true</str>
-      <str name="uprefix">ignored_</str>
-
-      <!-- capture link hrefs but ignore div attributes -->
-      <str name="captureAttr">true</str>
-      <str name="fmap.a">links</str>
-      <str name="fmap.div">ignored_</str>
+      <str name="fmap.meta">ignored_</str>
+      <str name="fmap.content">_text</str>
     </lst>
   </requestHandler>
 
@@ -1354,6 +1324,10 @@
     <processor class="solr.LogUpdateProcessorFactory"/>
     <processor class="solr.DistributedUpdateProcessorFactory"/>
     <processor class="solr.RemoveBlankFieldUpdateProcessorFactory"/>
+    <processor class="solr.FieldNameMutatingUpdateProcessorFactory">
+      <str name="pattern">[^\w-\.]</str>
+      <str name="replacement">_</str>
+    </processor>
     <processor class="solr.ParseBooleanFieldUpdateProcessorFactory"/>
     <processor class="solr.ParseLongFieldUpdateProcessorFactory"/>
     <processor class="solr.ParseDoubleFieldUpdateProcessorFactory"/>
@@ -1379,7 +1353,7 @@
       </arr>
     </processor>
     <processor class="solr.AddSchemaFieldsUpdateProcessorFactory">
-      <str name="defaultFieldType">text_general</str>
+      <str name="defaultFieldType">strings</str>
       <lst name="typeMapping">
         <str name="valueClass">java.lang.Boolean</str>
         <str name="fieldType">booleans</str>
@@ -1502,8 +1476,9 @@
   <!--
      Custom response writers can be declared as needed...
     -->
-  <queryResponseWriter name="velocity" class="solr.VelocityResponseWriter" startup="lazy"/>
-
+  <queryResponseWriter name="velocity" class="solr.VelocityResponseWriter" startup="lazy">
+    <str name="template.base.dir">${velocity.template.base.dir:}</str>
+  </queryResponseWriter>
 
   <!-- XSLT response writer transforms the XML output by any xslt file found
        in Solr's conf/xslt directory.  Changes to xslt files are checked for

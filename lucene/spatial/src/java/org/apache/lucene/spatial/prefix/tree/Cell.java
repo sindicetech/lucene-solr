@@ -51,7 +51,6 @@ public interface Cell {
    * Some cells are flagged as leaves, which are indexed as such. A leaf cell is either within some
    * shape or it both intersects and the cell is at an accuracy threshold such that no smaller cells
    * for the shape will be represented.
-   * further cells with this prefix for the shape (always true at maxLevels).
    */
   boolean isLeaf();
 
@@ -62,16 +61,16 @@ public interface Cell {
   void setLeaf();
 
   /**
-   * Returns the bytes for this cell, with a leaf byte if this is a leaf cell.
-   * The result param is used to save object allocation, though it's bytes aren't used.
+   * Returns the bytes for this cell, with a leaf byte <em>if this is a leaf cell</em>.
+   * The result param is used to save object allocation, though its bytes aren't used.
    * @param result where the result goes, or null to create new
    */
   BytesRef getTokenBytesWithLeaf(BytesRef result);
 
   /**
-   * Returns the bytes for this cell, without leaf set. The bytes should sort before
+   * Returns the bytes for this cell, without a leaf set. The bytes should sort before
    * {@link #getTokenBytesWithLeaf(org.apache.lucene.util.BytesRef)}.
-   * The result param is used to save object allocation, though it's bytes aren't used.
+   * The result param is used to save object allocation, though its bytes aren't used.
    * @param result where the result goes, or null to create new
    */
   BytesRef getTokenBytesNoLeaf(BytesRef result);
@@ -86,9 +85,9 @@ public interface Cell {
    * {@code shapeFilter}. The returned cells should have {@link #getShapeRel()} set to
    * their relation with {@code shapeFilter}.  In addition, for non-points {@link #isLeaf()}
    * must be true when that relation is WITHIN.
-   * <p/>
+   * <p>
    * IMPORTANT: Cells returned from this iterator can be shared, as well as the bytes.
-   * <p/>
+   * <p>
    * Precondition: Never called when getLevel() == maxLevel.
    *
    * @param shapeFilter an optional filter for the returned cells.

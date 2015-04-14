@@ -21,9 +21,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.solr.client.solrj.SolrServer;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.CloudSolrServer;
+import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
@@ -36,14 +36,14 @@ import org.apache.solr.update.processor.DistributedUpdateProcessor;
 public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
   private static final String vfield = DistributedUpdateProcessor.VERSION_FIELD;
-  SolrServer solrServer;
+  SolrClient solrServer;
 
   public CdcrVersionReplicationTest() {
     schemaString = "schema15.xml";      // we need a string id
     super.createTargetCollection = false;
   }
 
-  SolrServer createClientRandomly() throws Exception {
+  SolrClient createClientRandomly() throws Exception {
     int r = random().nextInt(100);
 
     // testing the smart cloud client (requests to leaders) is more important than testing the forwarding logic
@@ -60,7 +60,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
   @Override
   public void doTest() throws Exception {
-    SolrServer client = createClientRandomly();
+    SolrClient client = createClientRandomly();
     try {
       handle.clear();
       handle.put("timestamp", SKIPVAL);
@@ -69,14 +69,14 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
 
       commit(SOURCE_COLLECTION); // work arround SOLR-5628
     } finally {
-      client.shutdown();
+      client.close();
     }
   }
 
-  private void doTestCdcrDocVersions(SolrServer solrServer) throws Exception {
-    this.solrServer = solrServer;
+  private void doTestCdcrDocVersions(SolrClient solrClient) throws Exception {
+    this.solrServer = solrClient;
 
-    log.info("### STARTING doCdcrTestDocVersions - Add commands, client: " + solrServer);
+    log.info("### STARTING doCdcrTestDocVersions - Add commands, client: " + solrClient);
 
     vadd("doc1", 10, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "10");
     vadd("doc2", 11, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "11");
@@ -85,7 +85,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit(SOURCE_COLLECTION);
 
     // versions are preserved and verifiable both by query and by real-time get
-    doQuery(solrServer, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
+    doQuery(solrClient, "doc1,10,doc2,11,doc3,10,doc4,11", "q","*:*");
     doRealTimeGet("doc1,doc2,doc3,doc4", "10,11,10,11");
 
     vadd("doc1", 5, CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, "5");
@@ -112,7 +112,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit(SOURCE_COLLECTION);
 
     // versions are still as they were
-    doQuery(solrServer, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
+    doQuery(solrClient, "doc1,12,doc2,12,doc3,12,doc4,12", "q","*:*");
 
     // query all shard replicas individually
     doQueryShardReplica(SHARD1, "doc1,12,doc2,12,doc3,12,doc4,12", "q", "*:*");
@@ -122,7 +122,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     vadd("doc4", 12);
     commit(SOURCE_COLLECTION);
 
-    QueryResponse rsp = solrServer.query(params("qt","/get", "ids", "doc4"));
+    QueryResponse rsp = solrClient.query(params("qt","/get", "ids", "doc4"));
     long version = (long) rsp.getResults().get(0).get(vfield);
 
     // update accepted and a new version number was generated
@@ -152,7 +152,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     doQueryShardReplica(SHARD2, "doc2,12,doc3,12", "q", "*:*");
 
     // version conflict thanks to optimistic locking
-    if (solrServer instanceof CloudSolrServer) // TODO: it seems that optimistic locking doesn't work with forwarding, test with shard2 client
+    if (solrClient instanceof CloudSolrClient) // TODO: it seems that optimistic locking doesn't work with forwarding, test with shard2 client
       vdeleteFail("doc2", 50, 409);
 
     // cleanup after ourselves for the next run
@@ -161,13 +161,13 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     commit(SOURCE_COLLECTION);
 
     // deleteByQuery with a version lower than anything else should have no effect
-    doQuery(solrServer, "doc2,12,doc3,12", "q", "*:*");
+    doQuery(solrClient, "doc2,12,doc3,12", "q", "*:*");
 
     doDeleteByQuery("id:doc*", CdcrUpdateProcessor.CDCR_UPDATE, "", vfield, Long.toString(51));
     commit(SOURCE_COLLECTION);
 
     // deleteByQuery with a version higher than everything else should delete all remaining docs
-    doQuery(solrServer, "", "q", "*:*");
+    doQuery(solrClient, "", "q", "*:*");
 
     // check that replicas are as expected too
     doQueryShardReplica(SHARD1, "", "q", "*:*");
@@ -250,7 +250,7 @@ public class CdcrVersionReplicationTest extends AbstractCdcrDistributedZkTest {
     assertTrue(failed);
   }
 
-  void doQuery(SolrServer ss, String expectedDocs, String... queryParams) throws Exception {
+  void doQuery(SolrClient ss, String expectedDocs, String... queryParams) throws Exception {
 
     List<String> strs = StrUtils.splitSmart(expectedDocs, ",", true);
     Map<String, Object> expectedIds = new HashMap<>();

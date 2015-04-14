@@ -17,21 +17,16 @@ package org.apache.solr.handler.component;
  * limitations under the License.
  */
 
-import java.util.Date;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.io.IOException;
 
 import org.apache.solr.BaseDistributedSearchTestCase;
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.response.FieldStatsInfo;
 import org.apache.solr.client.solrj.response.PivotField;
 import org.apache.solr.common.params.FacetParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.junit.Test;
 
 /**
  * test demonstrating how overrequesting helps finds top-terms in the "long tail" 
@@ -45,11 +40,6 @@ import org.apache.solr.common.params.ModifiableSolrParams;
  */
 public class DistributedFacetPivotLongTailTest extends BaseDistributedSearchTestCase {
   
-  public DistributedFacetPivotLongTailTest(){
-    this.fixShardCount = true;
-    this.shardCount = 3;
-  }
-
   private int docNumber = 0;
   
   public int getDocNum() {
@@ -57,12 +47,13 @@ public class DistributedFacetPivotLongTailTest extends BaseDistributedSearchTest
     return docNumber;
   }
 
-  @Override
-  public void doTest() throws Exception {
+  @Test
+  @ShardsFixed(num = 3)
+  public void test() throws Exception {
 
-    final SolrServer shard0 = clients.get(0);
-    final SolrServer shard1 = clients.get(1);
-    final SolrServer shard2 = clients.get(2);
+    final SolrClient shard0 = clients.get(0);
+    final SolrClient shard1 = clients.get(1);
+    final SolrClient shard2 = clients.get(2);
     
     // the 5 top foo_s terms have 100 docs each on every shard
     for (int i = 0; i < 100; i++) {

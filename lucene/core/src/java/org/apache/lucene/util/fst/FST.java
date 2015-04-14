@@ -22,9 +22,10 @@ import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.ArrayList;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,8 +41,6 @@ import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.Accountables;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.Constants;
-import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.fst.Builder.UnCompiledNode;
@@ -79,19 +78,18 @@ public final class FST<T> implements Accountable {
   /** Specifies allowed range of each int input label for
    *  this FST. */
   public static enum INPUT_TYPE {BYTE1, BYTE2, BYTE4};
-  public final INPUT_TYPE inputType;
 
-  final static int BIT_FINAL_ARC = 1 << 0;
-  final static int BIT_LAST_ARC = 1 << 1;
-  final static int BIT_TARGET_NEXT = 1 << 2;
+  static final int BIT_FINAL_ARC = 1 << 0;
+  static final int BIT_LAST_ARC = 1 << 1;
+  static final int BIT_TARGET_NEXT = 1 << 2;
 
   // TODO: we can free up a bit if we can nuke this:
-  final static int BIT_STOP_NODE = 1 << 3;
+  static final int BIT_STOP_NODE = 1 << 3;
 
   /** This flag is set if the arc has an output. */
-  public final static int BIT_ARC_HAS_OUTPUT = 1 << 4;
+  public static final int BIT_ARC_HAS_OUTPUT = 1 << 4;
 
-  final static int BIT_ARC_HAS_FINAL_OUTPUT = 1 << 5;
+  static final int BIT_ARC_HAS_FINAL_OUTPUT = 1 << 5;
 
   // Arcs are stored as fixed-size (per entry) array, so
   // that we can find an arc using binary search.  We do
@@ -99,55 +97,61 @@ public final class FST<T> implements Accountable {
 
   // If set, the target node is delta coded vs current
   // position:
-  private final static int BIT_TARGET_DELTA = 1 << 6;
+  private static final int BIT_TARGET_DELTA = 1 << 6;
 
   // We use this as a marker (because this one flag is
   // illegal by itself ...):
-  private final static byte ARCS_AS_FIXED_ARRAY = BIT_ARC_HAS_FINAL_OUTPUT;
+  private static final byte ARCS_AS_FIXED_ARRAY = BIT_ARC_HAS_FINAL_OUTPUT;
 
   /**
    * @see #shouldExpand(UnCompiledNode)
    */
-  final static int FIXED_ARRAY_SHALLOW_DISTANCE = 3; // 0 => only root node.
+  static final int FIXED_ARRAY_SHALLOW_DISTANCE = 3; // 0 => only root node.
 
   /**
    * @see #shouldExpand(UnCompiledNode)
    */
-  final static int FIXED_ARRAY_NUM_ARCS_SHALLOW = 5;
+  static final int FIXED_ARRAY_NUM_ARCS_SHALLOW = 5;
 
   /**
    * @see #shouldExpand(UnCompiledNode)
    */
-  final static int FIXED_ARRAY_NUM_ARCS_DEEP = 10;
+  static final int FIXED_ARRAY_NUM_ARCS_DEEP = 10;
 
-  private int[] bytesPerArc = new int[0];
+  // Reused temporarily while building the FST:
+  private int[] reusedBytesPerArc = new int[0];
 
   // Increment version to change it
-  private final static String FILE_FORMAT_NAME = "FST";
-  private final static int VERSION_START = 0;
+  private static final String FILE_FORMAT_NAME = "FST";
+  private static final int VERSION_START = 0;
 
   /** Changed numBytesPerArc for array'd case from byte to int. */
-  private final static int VERSION_INT_NUM_BYTES_PER_ARC = 1;
+  private static final int VERSION_INT_NUM_BYTES_PER_ARC = 1;
 
   /** Write BYTE2 labels as 2-byte short, not vInt. */
-  private final static int VERSION_SHORT_BYTE2_LABELS = 2;
+  private static final int VERSION_SHORT_BYTE2_LABELS = 2;
 
   /** Added optional packed format. */
-  private final static int VERSION_PACKED = 3;
+  private static final int VERSION_PACKED = 3;
 
   /** Changed from int to vInt for encoding arc targets. 
    *  Also changed maxBytesPerArc from int to vInt in the array case. */
-  private final static int VERSION_VINT_TARGET = 4;
+  private static final int VERSION_VINT_TARGET = 4;
 
-  private final static int VERSION_CURRENT = VERSION_VINT_TARGET;
+  private static final int VERSION_CURRENT = VERSION_VINT_TARGET;
 
   // Never serialized; just used to represent the virtual
   // final node w/ no arcs:
-  private final static long FINAL_END_NODE = -1;
+  private static final long FINAL_END_NODE = -1;
 
   // Never serialized; just used to represent the virtual
   // non-final node w/ no arcs:
-  private final static long NON_FINAL_END_NODE = 0;
+  private static final long NON_FINAL_END_NODE = 0;
+
+  /** If arc has this label then that arc is final/accepted */
+  public static final int END_LABEL = -1;
+
+  public final INPUT_TYPE inputType;
 
   // if non-null, this FST accepts the empty string and
   // produces this output
@@ -174,17 +178,12 @@ public final class FST<T> implements Accountable {
   private final boolean packed;
   private PackedInts.Reader nodeRefToAddress;
 
-  /** If arc has this label then that arc is final/accepted */
-  public static final int END_LABEL = -1;
-
   private final boolean allowArrayArcs;
 
   private Arc<T> cachedRootArcs[];
-  private Arc<T> assertingCachedRootArcs[]; // only set wit assert
-
 
   /** Represents a single arc. */
-  public final static class Arc<T> {
+  public static final class Arc<T> {
     public int label;
     public T output;
 
@@ -443,12 +442,12 @@ public final class FST<T> implements Accountable {
       size += inCounts.ramBytesUsed();
     }
     size += cachedArcsBytesUsed;
-    size += RamUsageEstimator.sizeOf(bytesPerArc);
+    size += RamUsageEstimator.sizeOf(reusedBytesPerArc);
     return size;
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     if (packed) {
       resources.add(Accountables.namedAccountable("node ref to address", nodeRefToAddress));
@@ -487,26 +486,22 @@ public final class FST<T> implements Accountable {
     }
   }
   
-  // Caches first 128 labels
+  // Optionally caches first 128 labels
   @SuppressWarnings({"rawtypes","unchecked"})
   private void cacheRootArcs() throws IOException {
-    cachedRootArcs = (Arc<T>[]) new Arc[0x80];
-    readRootArcs(cachedRootArcs);
-    cachedArcsBytesUsed += ramBytesUsed(cachedRootArcs);
-    
-    assert setAssertingRootArcs(cachedRootArcs);
-    assert assertRootArcs();
-  }
-  
-  public void readRootArcs(Arc<T>[] arcs) throws IOException {
+    // We should only be called once per FST:
+    assert cachedArcsBytesUsed == 0;
+
     final Arc<T> arc = new Arc<>();
     getFirstArc(arc);
-    final BytesReader in = getBytesReader();
     if (targetHasArcs(arc)) {
+      final BytesReader in = getBytesReader();
+      Arc<T>[] arcs = (Arc<T>[]) new Arc[0x80];
       readFirstRealTargetArc(arc.target, arc, in);
+      int count = 0;
       while(true) {
         assert arc.label != END_LABEL;
-        if (arc.label < cachedRootArcs.length) {
+        if (arc.label < arcs.length) {
           arcs[arc.label] = new Arc<T>().copyFrom(arc);
         } else {
           break;
@@ -515,43 +510,19 @@ public final class FST<T> implements Accountable {
           break;
         }
         readNextRealArc(arc, in);
+        count++;
+      }
+
+      int cacheRAM = (int) ramBytesUsed(arcs);
+
+      // Don't cache if there are only a few arcs or if the cache would use > 20% RAM of the FST itself:
+      if (count >= FIXED_ARRAY_NUM_ARCS_SHALLOW && cacheRAM < ramBytesUsed()/5) {
+        cachedRootArcs = arcs;
+        cachedArcsBytesUsed = cacheRAM;
       }
     }
   }
   
-  @SuppressWarnings({"rawtypes","unchecked"})
-  private boolean setAssertingRootArcs(Arc<T>[] arcs) throws IOException {
-    assertingCachedRootArcs = (Arc<T>[]) new Arc[arcs.length];
-    readRootArcs(assertingCachedRootArcs);
-    cachedArcsBytesUsed *= 2;
-    return true;
-  }
-  
-  private boolean assertRootArcs() {
-    assert cachedRootArcs != null;
-    assert assertingCachedRootArcs != null;
-    for (int i = 0; i < cachedRootArcs.length; i++) {
-      final Arc<T> root = cachedRootArcs[i];
-      final Arc<T> asserting = assertingCachedRootArcs[i];
-      if (root != null) { 
-        assert root.arcIdx == asserting.arcIdx;
-        assert root.bytesPerArc == asserting.bytesPerArc;
-        assert root.flags == asserting.flags;
-        assert root.label == asserting.label;
-        assert root.nextArc == asserting.nextArc;
-        assert root.nextFinalOutput.equals(asserting.nextFinalOutput);
-        assert root.node == asserting.node;
-        assert root.numArcs == asserting.numArcs;
-        assert root.output.equals(asserting.output);
-        assert root.posArcsStart == asserting.posArcsStart;
-        assert root.target == asserting.target;
-      } else {
-        assert root == null && asserting == null;
-      } 
-    }
-    return true;
-  }
-
   public T getEmptyOutput() {
     return emptyOutput;
   }
@@ -701,8 +672,8 @@ public final class FST<T> implements Accountable {
     final boolean doFixedArray = shouldExpand(nodeIn);
     if (doFixedArray) {
       //System.out.println("  fixedArray");
-      if (bytesPerArc.length < nodeIn.numArcs) {
-        bytesPerArc = new int[ArrayUtil.oversize(nodeIn.numArcs, 1)];
+      if (reusedBytesPerArc.length < nodeIn.numArcs) {
+        reusedBytesPerArc = new int[ArrayUtil.oversize(nodeIn.numArcs, 1)];
       }
     }
 
@@ -776,10 +747,10 @@ public final class FST<T> implements Accountable {
       // but record how many bytes each one took, and max
       // byte size:
       if (doFixedArray) {
-        bytesPerArc[arcIdx] = (int) (bytes.getPosition() - lastArcStart);
+        reusedBytesPerArc[arcIdx] = (int) (bytes.getPosition() - lastArcStart);
         lastArcStart = bytes.getPosition();
-        maxBytesPerArc = Math.max(maxBytesPerArc, bytesPerArc[arcIdx]);
-        //System.out.println("    bytes=" + bytesPerArc[arcIdx]);
+        maxBytesPerArc = Math.max(maxBytesPerArc, reusedBytesPerArc[arcIdx]);
+        //System.out.println("    bytes=" + reusedBytesPerArc[arcIdx]);
       }
     }
     
@@ -830,12 +801,12 @@ public final class FST<T> implements Accountable {
         bytes.skipBytes((int) (destPos - srcPos));
         for(int arcIdx=nodeIn.numArcs-1;arcIdx>=0;arcIdx--) {
           destPos -= maxBytesPerArc;
-          srcPos -= bytesPerArc[arcIdx];
+          srcPos -= reusedBytesPerArc[arcIdx];
           //System.out.println("  repack arcIdx=" + arcIdx + " srcPos=" + srcPos + " destPos=" + destPos);
           if (srcPos != destPos) {
-            //System.out.println("  copy len=" + bytesPerArc[arcIdx]);
-            assert destPos > srcPos: "destPos=" + destPos + " srcPos=" + srcPos + " arcIdx=" + arcIdx + " maxBytesPerArc=" + maxBytesPerArc + " bytesPerArc[arcIdx]=" + bytesPerArc[arcIdx] + " nodeIn.numArcs=" + nodeIn.numArcs;
-            bytes.copyBytes(srcPos, destPos, bytesPerArc[arcIdx]);
+            //System.out.println("  copy len=" + reusedBytesPerArc[arcIdx]);
+            assert destPos > srcPos: "destPos=" + destPos + " srcPos=" + srcPos + " arcIdx=" + arcIdx + " maxBytesPerArc=" + maxBytesPerArc + " reusedBytesPerArc[arcIdx]=" + reusedBytesPerArc[arcIdx] + " nodeIn.numArcs=" + nodeIn.numArcs;
+            bytes.copyBytes(srcPos, destPos, reusedBytesPerArc[arcIdx]);
           }
         }
       }
@@ -1185,12 +1156,48 @@ public final class FST<T> implements Accountable {
     return arc;
   }
 
+  // LUCENE-5152: called only from asserts, to validate that the
+  // non-cached arc lookup would produce the same result, to
+  // catch callers that illegally modify shared structures with
+  // the result (we shallow-clone the Arc itself, but e.g. a BytesRef
+  // output is still shared):
+  private boolean assertRootCachedArc(int label, Arc<T> cachedArc) throws IOException {
+    Arc<T> arc = new Arc<>();
+    getFirstArc(arc);
+    BytesReader in = getBytesReader();
+    Arc<T> result = findTargetArc(label, arc, arc, in, false);
+    if (result == null) {
+      assert cachedArc == null;
+    } else {
+      assert cachedArc != null;
+      assert cachedArc.arcIdx == result.arcIdx;
+      assert cachedArc.bytesPerArc == result.bytesPerArc;
+      assert cachedArc.flags == result.flags;
+      assert cachedArc.label == result.label;
+      assert cachedArc.nextArc == result.nextArc;
+      assert cachedArc.nextFinalOutput.equals(result.nextFinalOutput);
+      assert cachedArc.node == result.node;
+      assert cachedArc.numArcs == result.numArcs;
+      assert cachedArc.output.equals(result.output);
+      assert cachedArc.posArcsStart == result.posArcsStart;
+      assert cachedArc.target == result.target;
+    }
+
+    return true;
+  }
+
   // TODO: could we somehow [partially] tableize arc lookups
-  // look automaton?
+  // like automaton?
 
   /** Finds an arc leaving the incoming arc, replacing the arc in place.
    *  This returns null if the arc was not found, else the incoming arc. */
   public Arc<T> findTargetArc(int labelToMatch, Arc<T> follow, Arc<T> arc, BytesReader in) throws IOException {
+    return findTargetArc(labelToMatch, follow, arc, in, true);
+  }
+
+  /** Finds an arc leaving the incoming arc, replacing the arc in place.
+   *  This returns null if the arc was not found, else the incoming arc. */
+  private Arc<T> findTargetArc(int labelToMatch, Arc<T> follow, Arc<T> arc, BytesReader in, boolean useRootArcCache) throws IOException {
 
     if (labelToMatch == END_LABEL) {
       if (follow.isFinal()) {
@@ -1211,12 +1218,13 @@ public final class FST<T> implements Accountable {
     }
 
     // Short-circuit if this arc is in the root arc cache:
-    if (follow.target == startNode && labelToMatch < cachedRootArcs.length) {
-      
+    if (useRootArcCache && cachedRootArcs != null && follow.target == startNode && labelToMatch < cachedRootArcs.length) {
+      final Arc<T> result = cachedRootArcs[labelToMatch];
+
       // LUCENE-5152: detect tricky cases where caller
       // modified previously returned cached root-arcs:
-      assert assertRootArcs();
-      final Arc<T> result = cachedRootArcs[labelToMatch];
+      assert assertRootCachedArc(labelToMatch, result);
+
       if (result == null) {
         return null;
       } else {

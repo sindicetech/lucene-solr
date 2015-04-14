@@ -37,11 +37,6 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.LuceneTestCase;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExpectedException;
 
 public class TestBlockJoinValidation extends LuceneTestCase {
 
@@ -55,11 +50,9 @@ public class TestBlockJoinValidation extends LuceneTestCase {
   private IndexSearcher indexSearcher;
   private BitDocIdSetFilter parentsFilter;
 
-  @Rule
-  public ExpectedException thrown = ExpectedException.none();
-
-  @Before
-  public void before() throws Exception {
+  @Override
+  public void setUp() throws Exception {
+    super.setUp();
     directory = newDirectory();
     final IndexWriterConfig config = new IndexWriterConfig(new MockAnalyzer(random()));
     final IndexWriter indexWriter = new IndexWriter(directory, config);
@@ -74,16 +67,24 @@ public class TestBlockJoinValidation extends LuceneTestCase {
     parentsFilter = new BitDocIdSetCachingWrapperFilter(new QueryWrapperFilter(new WildcardQuery(new Term("parent", "*"))));
   }
 
-  @Test
+  @Override
+  public void tearDown() throws Exception {
+    indexReader.close();
+    directory.close();
+    super.tearDown();
+  }
+
   public void testNextDocValidationForToParentBjq() throws Exception {
     Query parentQueryWithRandomChild = createChildrenQueryWithOneParent(getRandomChildNumber(0));
     ToParentBlockJoinQuery blockJoinQuery = new ToParentBlockJoinQuery(parentQueryWithRandomChild, parentsFilter, ScoreMode.None);
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage("child query must only match non-parent docs");
-    indexSearcher.search(blockJoinQuery, 1);
+    try {
+      indexSearcher.search(blockJoinQuery, 1);
+      fail("didn't get expected exception");
+    } catch (IllegalStateException expected) {
+      assertTrue(expected.getMessage() != null && expected.getMessage().contains("child query must only match non-parent docs"));
+    }
   }
 
-  @Test
   public void testAdvanceValidationForToParentBjq() throws Exception {
     int randomChildNumber = getRandomChildNumber(0);
     // we need to make advance method meet wrong document, so random child number
@@ -96,46 +97,47 @@ public class TestBlockJoinValidation extends LuceneTestCase {
     WildcardQuery childQuery = new WildcardQuery(new Term("child", createFieldValue(randomChildNumber)));
     conjunctionQuery.add(new BooleanClause(childQuery, BooleanClause.Occur.MUST));
     conjunctionQuery.add(new BooleanClause(blockJoinQuery, BooleanClause.Occur.MUST));
-
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage("child query must only match non-parent docs");
-    indexSearcher.search(conjunctionQuery, 1);
+    
+    try {
+      indexSearcher.search(conjunctionQuery, 1);
+      fail("didn't get expected exception");
+    } catch (IllegalStateException expected) {
+      assertTrue(expected.getMessage() != null && expected.getMessage().contains("child query must only match non-parent docs"));
+    }
   }
 
-  @Test
   public void testNextDocValidationForToChildBjq() throws Exception {
     Query parentQueryWithRandomChild = createParentsQueryWithOneChild(getRandomChildNumber(0));
 
-    ToChildBlockJoinQuery blockJoinQuery = new ToChildBlockJoinQuery(parentQueryWithRandomChild, parentsFilter, false);
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage(ToChildBlockJoinQuery.INVALID_QUERY_MESSAGE);
-    indexSearcher.search(blockJoinQuery, 1);
+    ToChildBlockJoinQuery blockJoinQuery = new ToChildBlockJoinQuery(parentQueryWithRandomChild, parentsFilter);
+    
+    try {
+      indexSearcher.search(blockJoinQuery, 1);
+      fail("didn't get expected exception");
+    } catch (IllegalStateException expected) {
+      assertTrue(expected.getMessage() != null && expected.getMessage().contains(ToChildBlockJoinQuery.INVALID_QUERY_MESSAGE));
+    }
   }
 
-  @Test
   public void testAdvanceValidationForToChildBjq() throws Exception {
     int randomChildNumber = getRandomChildNumber(0);
     // we need to make advance method meet wrong document, so random child number
     // in BJQ must be greater than child number in Boolean clause
     int nextRandomChildNumber = getRandomChildNumber(randomChildNumber);
     Query parentQueryWithRandomChild = createParentsQueryWithOneChild(nextRandomChildNumber);
-    ToChildBlockJoinQuery blockJoinQuery = new ToChildBlockJoinQuery(parentQueryWithRandomChild, parentsFilter, false);
+    ToChildBlockJoinQuery blockJoinQuery = new ToChildBlockJoinQuery(parentQueryWithRandomChild, parentsFilter);
     // advance() method is used by ConjunctionScorer, so we need to create Boolean conjunction query
     BooleanQuery conjunctionQuery = new BooleanQuery();
     WildcardQuery childQuery = new WildcardQuery(new Term("child", createFieldValue(randomChildNumber)));
-    conjunctionQuery.add(new BooleanClause(childQuery, BooleanClause.Occur.MUST));
-    conjunctionQuery.add(new BooleanClause(blockJoinQuery, BooleanClause.Occur.MUST));
-
-    thrown.expect(IllegalStateException.class);
-    thrown.expectMessage(ToChildBlockJoinQuery.INVALID_QUERY_MESSAGE);
-    indexSearcher.search(conjunctionQuery, 1);
-  }
-
-
-  @After
-  public void after() throws Exception {
-    indexReader.close();
-    directory.close();
+    conjunctionQuery.add(childQuery, BooleanClause.Occur.MUST);
+    conjunctionQuery.add(blockJoinQuery, BooleanClause.Occur.MUST);
+    
+    try {
+      indexSearcher.search(conjunctionQuery, 1);
+      fail("didn't get expected exception");
+    } catch (IllegalStateException expected) {
+      assertTrue(expected.getMessage() != null && expected.getMessage().contains(ToChildBlockJoinQuery.INVALID_QUERY_MESSAGE));
+    }
   }
 
   private static List<Document> createDocsForSegment(int segmentNumber) {
@@ -163,6 +165,7 @@ public class TestBlockJoinValidation extends LuceneTestCase {
     Document result = new Document();
     result.add(newStringField("id", createFieldValue(segmentNumber * AMOUNT_OF_PARENT_DOCS + parentNumber), Field.Store.YES));
     result.add(newStringField("parent", createFieldValue(parentNumber), Field.Store.NO));
+    result.add(newStringField("common_field", "1", Field.Store.NO));
     return result;
   }
 
@@ -170,6 +173,7 @@ public class TestBlockJoinValidation extends LuceneTestCase {
     Document result = new Document();
     result.add(newStringField("id", createFieldValue(segmentNumber * AMOUNT_OF_PARENT_DOCS + parentNumber, childNumber), Field.Store.YES));
     result.add(newStringField("child", createFieldValue(childNumber), Field.Store.NO));
+    result.add(newStringField("common_field", "1", Field.Store.NO));
     return result;
   }
 
@@ -199,6 +203,10 @@ public class TestBlockJoinValidation extends LuceneTestCase {
     childQueryWithRandomParent.add(new BooleanClause(parentsQuery, BooleanClause.Occur.SHOULD));
     childQueryWithRandomParent.add(new BooleanClause(randomChildQuery(randomChildNumber), BooleanClause.Occur.SHOULD));
     return childQueryWithRandomParent;
+  }
+
+  private static Query createParentQuery() {
+    return new TermQuery(new Term("id", createFieldValue(getRandomParentId())));
   }
 
   private static int getRandomParentId() {

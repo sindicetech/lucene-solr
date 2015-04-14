@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.blocktree;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -204,8 +205,8 @@ public final class Lucene40BlockTreeTermsReader extends FieldsProducer {
         } else {
           minTerm = maxTerm = null;
         }
-        if (docCount < 0 || docCount > state.segmentInfo.getDocCount()) { // #docs with field must be <= #docs
-          throw new CorruptIndexException("invalid docCount: " + docCount + " maxDoc: " + state.segmentInfo.getDocCount(), in);
+        if (docCount < 0 || docCount > state.segmentInfo.maxDoc()) { // #docs with field must be <= #docs
+          throw new CorruptIndexException("invalid docCount: " + docCount + " maxDoc: " + state.segmentInfo.maxDoc(), in);
         }
         if (sumDocFreq < docCount) {  // #postings must be >= #docs with field
           throw new CorruptIndexException("invalid sumDocFreq: " + sumDocFreq + " docCount: " + docCount, in);
@@ -333,7 +334,7 @@ public final class Lucene40BlockTreeTermsReader extends FieldsProducer {
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     resources.addAll(Accountables.namedAccountables("field", fields));
     resources.add(Accountables.namedAccountable("delegate", postingsReader));

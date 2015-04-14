@@ -22,6 +22,7 @@ import static org.apache.lucene.util.BitUtil.zigZagDecode;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.lucene.index.CorruptIndexException;
@@ -53,7 +54,7 @@ public final class Lucene41StoredFieldsIndexReader implements Cloneable, Account
   // It is the responsibility of the caller to close fieldsIndexIn after this constructor
   // has been called
   public Lucene41StoredFieldsIndexReader(IndexInput fieldsIndexIn, SegmentInfo si) throws IOException {
-    maxDoc = si.getDocCount();
+    maxDoc = si.maxDoc();
     int[] docBases = new int[16];
     long[] startPointers = new long[16];
     int[] avgChunkDocs = new int[16];
@@ -189,7 +190,7 @@ public final class Lucene41StoredFieldsIndexReader implements Cloneable, Account
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     
     long docBaseDeltaBytes = RamUsageEstimator.shallowSizeOf(docBasesDeltas);

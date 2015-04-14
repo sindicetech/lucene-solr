@@ -19,8 +19,8 @@ package org.apache.lucene.search.spans;
 
 import java.io.IOException;
 
-import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.similarities.Similarity;
 
 /**
@@ -96,16 +96,17 @@ public class SpanScorer extends Scorer {
   public int freq() throws IOException {
     return numMatches;
   }
-  
+
   /** Returns the intermediate "sloppy freq" adjusted for edit distance 
    *  @lucene.internal */
   // only public so .payloads can see it.
   public float sloppyFreq() throws IOException {
     return freq;
   }
-  
+
   @Override
   public long cost() {
     return spans.cost();
   }
+
 }

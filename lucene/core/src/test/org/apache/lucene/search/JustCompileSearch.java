@@ -19,10 +19,10 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 
+import org.apache.lucene.index.FieldInvertState;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.util.Bits;
-import org.apache.lucene.index.FieldInvertState;
 import org.apache.lucene.util.PriorityQueue;
 
 /**
@@ -52,12 +52,11 @@ final class JustCompileSearch {
     public void setScorer(Scorer scorer) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
-    
+
     @Override
-    public boolean acceptsDocsOutOfOrder() {
+    public boolean needsScores() {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
-
   }
   
   static final class JustCompileDocIdSet extends DocIdSet {
@@ -99,32 +98,7 @@ final class JustCompileSearch {
   static final class JustCompileFieldComparator extends FieldComparator<Object> {
 
     @Override
-    public int compare(int slot1, int slot2) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public int compareBottom(int doc) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public void copy(int slot, int doc) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public void setBottom(int slot) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
     public void setTopValue(Object value) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public FieldComparator<Object> setNextReader(LeafReaderContext context) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 
@@ -134,7 +108,12 @@ final class JustCompileSearch {
     }
 
     @Override
-    public int compareTop(int doc) {
+    public LeafFieldComparator getLeafComparator(LeafReaderContext context) throws IOException {
+      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
+    }
+
+    @Override
+    public int compare(int slot1, int slot2) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
   }
@@ -156,6 +135,11 @@ final class JustCompileSearch {
     @Override
     public DocIdSet getDocIdSet(LeafReaderContext context, Bits acceptDocs) {
       return null;
+    }
+
+    @Override
+    public String toString(String field) {
+      return "JustCompileFilter";
     }
   }
 
@@ -228,7 +212,7 @@ final class JustCompileSearch {
     public int advance(int target) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
-    
+
     @Override
     public long cost() {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
@@ -260,23 +244,8 @@ final class JustCompileSearch {
     }
 
     @Override
-    public void collect(int doc) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    protected void doSetNextReader(LeafReaderContext context) throws IOException {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public void setScorer(Scorer scorer) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-    
-    @Override
-    public boolean acceptsDocsOutOfOrder() {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
+    public LeafCollector getLeafCollector(LeafReaderContext context) throws IOException {
+      throw new UnsupportedOperationException( UNSUPPORTED_MSG );
     }
 
     @Override
@@ -293,18 +262,21 @@ final class JustCompileSearch {
     public TopDocs topDocs( int start, int end ) {
         throw new UnsupportedOperationException( UNSUPPORTED_MSG );
     }
-    
+
+    @Override
+    public boolean needsScores() {
+      throw new UnsupportedOperationException( UNSUPPORTED_MSG );
+    }
   }
 
   static final class JustCompileWeight extends Weight {
 
-    @Override
-    public Explanation explain(LeafReaderContext context, int doc) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
+    protected JustCompileWeight() {
+      super(null);
     }
 
     @Override
-    public Query getQuery() {
+    public Explanation explain(LeafReaderContext context, int doc) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 

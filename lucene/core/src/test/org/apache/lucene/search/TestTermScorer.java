@@ -24,8 +24,8 @@ import java.util.List;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.RandomIndexWriter;
 import org.apache.lucene.index.SlowCompositeReaderWrapper;
 import org.apache.lucene.index.Term;
@@ -75,10 +75,10 @@ public class TestTermScorer extends LuceneTestCase {
     Term allTerm = new Term(FIELD, "all");
     TermQuery termQuery = new TermQuery(allTerm);
     
-    Weight weight = indexSearcher.createNormalizedWeight(termQuery);
+    Weight weight = indexSearcher.createNormalizedWeight(termQuery, true);
     assertTrue(indexSearcher.getTopReaderContext() instanceof LeafReaderContext);
     LeafReaderContext context = (LeafReaderContext)indexSearcher.getTopReaderContext();
-    BulkScorer ts = weight.bulkScorer(context, true, context.reader().getLiveDocs());
+    BulkScorer ts = weight.bulkScorer(context, context.reader().getLiveDocs());
     // we have 2 documents with the term all in them, one document for all the
     // other values
     final List<TestHit> docs = new ArrayList<>();
@@ -109,7 +109,7 @@ public class TestTermScorer extends LuceneTestCase {
       }
       
       @Override
-      public boolean acceptsDocsOutOfOrder() {
+      public boolean needsScores() {
         return true;
       }
     });
@@ -137,7 +137,7 @@ public class TestTermScorer extends LuceneTestCase {
     Term allTerm = new Term(FIELD, "all");
     TermQuery termQuery = new TermQuery(allTerm);
     
-    Weight weight = indexSearcher.createNormalizedWeight(termQuery);
+    Weight weight = indexSearcher.createNormalizedWeight(termQuery, true);
     assertTrue(indexSearcher.getTopReaderContext() instanceof LeafReaderContext);
     LeafReaderContext context = (LeafReaderContext) indexSearcher.getTopReaderContext();
     Scorer ts = weight.scorer(context, context.reader().getLiveDocs());
@@ -156,7 +156,7 @@ public class TestTermScorer extends LuceneTestCase {
     Term allTerm = new Term(FIELD, "all");
     TermQuery termQuery = new TermQuery(allTerm);
     
-    Weight weight = indexSearcher.createNormalizedWeight(termQuery);
+    Weight weight = indexSearcher.createNormalizedWeight(termQuery, true);
     assertTrue(indexSearcher.getTopReaderContext() instanceof LeafReaderContext);
     LeafReaderContext context = (LeafReaderContext) indexSearcher.getTopReaderContext();
     Scorer ts = weight.scorer(context, context.reader().getLiveDocs());

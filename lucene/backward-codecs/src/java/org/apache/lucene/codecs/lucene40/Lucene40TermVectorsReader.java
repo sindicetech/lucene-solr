@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.lucene40;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -28,12 +29,11 @@ import java.util.NoSuchElementException;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.TermVectorsReader;
 import org.apache.lucene.index.CorruptIndexException;
-import org.apache.lucene.index.DocsAndPositionsEnum;
-import org.apache.lucene.index.DocsEnum;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -104,7 +104,7 @@ final class Lucene40TermVectorsReader extends TermVectorsReader implements Close
   public Lucene40TermVectorsReader(Directory d, SegmentInfo si, FieldInfos fieldInfos, IOContext context)
     throws IOException {
     final String segment = si.name;
-    final int size = si.getDocCount();
+    final int size = si.maxDoc();
     
     boolean success = false;
 
@@ -489,7 +489,23 @@ final class Lucene40TermVectorsReader extends TermVectorsReader implements Close
     }
 
     @Override
-    public DocsEnum docs(Bits liveDocs, DocsEnum reuse, int flags /* ignored */) throws IOException {
+    public PostingsEnum postings(Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
+
+      if (PostingsEnum.featureRequested(flags, PostingsEnum.POSITIONS)) {
+        if (!storePositions && !storeOffsets) {
+          return null;
+        }
+
+        TVPostingsEnum docsAndPositionsEnum;
+        if (reuse != null && reuse instanceof TVPostingsEnum) {
+          docsAndPositionsEnum = (TVPostingsEnum) reuse;
+        } else {
+          docsAndPositionsEnum = new TVPostingsEnum();
+        }
+        docsAndPositionsEnum.reset(liveDocs, positions, startOffsets, endOffsets, payloadOffsets, payloadData);
+        return docsAndPositionsEnum;
+      }
+
       TVDocsEnum docsEnum;
       if (reuse != null && reuse instanceof TVDocsEnum) {
         docsEnum = (TVDocsEnum) reuse;
@@ -500,27 +516,11 @@ final class Lucene40TermVectorsReader extends TermVectorsReader implements Close
       return docsEnum;
     }
 
-    @Override
-    public DocsAndPositionsEnum docsAndPositions(Bits liveDocs, DocsAndPositionsEnum reuse, int flags) throws IOException {
-
-      if (!storePositions && !storeOffsets) {
-        return null;
-      }
-      
-      TVDocsAndPositionsEnum docsAndPositionsEnum;
-      if (reuse != null && reuse instanceof TVDocsAndPositionsEnum) {
-        docsAndPositionsEnum = (TVDocsAndPositionsEnum) reuse;
-      } else {
-        docsAndPositionsEnum = new TVDocsAndPositionsEnum();
-      }
-      docsAndPositionsEnum.reset(liveDocs, positions, startOffsets, endOffsets, payloadOffsets, payloadData);
-      return docsAndPositionsEnum;
-    }
   }
 
   // NOTE: sort of a silly class, since you can get the
   // freq() already by TermsEnum.totalTermFreq
-  private static class TVDocsEnum extends DocsEnum {
+  private static class TVDocsEnum extends PostingsEnum {
     private boolean didNext;
     private int doc = -1;
     private int freq;
@@ -562,9 +562,29 @@ final class Lucene40TermVectorsReader extends TermVectorsReader implements Close
     public long cost() {
       return 1;
     }
+
+    @Override
+    public BytesRef getPayload() throws IOException {
+      return null;
+    }
+    
+    @Override
+    public int nextPosition() throws IOException {
+      return -1;
+    }
+
+    @Override
+    public int startOffset() throws IOException {
+      return -1;
+    }
+
+    @Override
+    public int endOffset() throws IOException {
+      return -1;
+    }
   }
 
-  private static class TVDocsAndPositionsEnum extends DocsAndPositionsEnum {
+  private static class TVPostingsEnum extends PostingsEnum {
     private boolean didNext;
     private int doc = -1;
     private int nextPos;
@@ -712,7 +732,7 @@ final class Lucene40TermVectorsReader extends TermVectorsReader implements Close
   }
   
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Collections.emptyList();
   }
 

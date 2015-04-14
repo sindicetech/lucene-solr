@@ -72,7 +72,10 @@ public class TestBulkSchemaAPI extends RestTestBase {
       jetty.stop();
       jetty = null;
     }
-    server = null;
+    client = null;
+    if (restTestHarness != null) {
+      restTestHarness.close();
+    }
     restTestHarness = null;
   }
 

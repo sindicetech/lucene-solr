@@ -49,7 +49,7 @@ import org.apache.lucene.util.BytesRefIterator;
 
 /**
  * <p>
- *   Spell Checker class  (Main class) <br/>
+ *   Spell Checker class  (Main class).<br>
  *  (initially inspired by the David Spencer code).
  * </p>
  *
@@ -364,7 +364,7 @@ public class SpellChecker implements java.io.Closeable {
       int maxHits = 10 * numSug;
 
   //    System.out.println("Q: " + query);
-      ScoreDoc[] hits = indexSearcher.search(query, null, maxHits).scoreDocs;
+      ScoreDoc[] hits = indexSearcher.search(query, maxHits).scoreDocs;
   //    System.out.println("HITS: " + hits.length());
       SuggestWordQueue sugQueue = new SuggestWordQueue(numSug, comparator);
 
@@ -568,7 +568,7 @@ public class SpellChecker implements java.io.Closeable {
 
   private static Document createDocument(String text, int ng1, int ng2) {
     Document doc = new Document();
-    // the word field is never queried on... its indexed so it can be quickly
+    // the word field is never queried on... it's indexed so it can be quickly
     // checked for rebuild (and stored for retrieval). Doesn't need norms or TF/pos
     Field f = new StringField(F_WORD, text, Field.Store.YES);
     doc.add(f); // orig term

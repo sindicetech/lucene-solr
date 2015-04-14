@@ -41,7 +41,7 @@ public abstract class SpatialPrefixTreeFactory {
 
   /**
    * The factory  is looked up via "prefixTree" in args, expecting "geohash" or "quad".
-   * If its neither of these, then "geohash" is chosen for a geo context, otherwise "quad" is chosen.
+   * If it's neither of these, then "geohash" is chosen for a geo context, otherwise "quad" is chosen.
    */
   public static SpatialPrefixTree makeSPT(Map<String,String> args, ClassLoader classLoader, SpatialContext ctx) {
     SpatialPrefixTreeFactory instance;
@@ -54,7 +54,7 @@ public abstract class SpatialPrefixTreeFactory {
       instance = new QuadPrefixTree.Factory();
     else {
       try {
-        Class c = classLoader.loadClass(cname);
+        Class<?> c = classLoader.loadClass(cname);
         instance = (SpatialPrefixTreeFactory) c.newInstance();
       } catch (Exception e) {
         throw new RuntimeException(e);

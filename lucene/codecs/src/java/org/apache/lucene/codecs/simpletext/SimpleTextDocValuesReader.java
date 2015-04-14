@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.ParseException;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
@@ -86,7 +87,7 @@ class SimpleTextDocValuesReader extends DocValuesProducer {
   public SimpleTextDocValuesReader(SegmentReadState state, String ext) throws IOException {
     // System.out.println("dir=" + state.directory + " seg=" + state.segmentInfo.name + " file=" + IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, ext));
     data = state.directory.openInput(IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, ext), state.context);
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
     while(true) {
       readLine();
       //System.out.println("READ field=" + scratch.utf8ToString());
@@ -180,7 +181,7 @@ class SimpleTextDocValuesReader extends DocValuesProducer {
           } catch (ParseException pe) {
             throw new CorruptIndexException("failed to parse BigDecimal value", in, pe);
           }
-          SimpleTextUtil.readLine(in, scratch); // read the line telling us if its real or not
+          SimpleTextUtil.readLine(in, scratch); // read the line telling us if it's real or not
           return BigInteger.valueOf(field.minValue).add(bd.toBigIntegerExact()).longValue();
         } catch (IOException ioe) {
           throw new RuntimeException(ioe);
@@ -511,7 +512,7 @@ class SimpleTextDocValuesReader extends DocValuesProducer {
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Collections.emptyList();
   }
 
@@ -525,10 +526,16 @@ class SimpleTextDocValuesReader extends DocValuesProducer {
     BytesRefBuilder scratch = new BytesRefBuilder();
     IndexInput clone = data.clone();
     clone.seek(0);
+    // checksum is fixed-width encoded with 20 bytes, plus 1 byte for newline (the space is included in SimpleTextUtil.CHECKSUM):
+    long footerStartPos = data.length() - (SimpleTextUtil.CHECKSUM.length + 21);
     ChecksumIndexInput input = new BufferedChecksumIndexInput(clone);
-    while(true) {
+    while (true) {
       SimpleTextUtil.readLine(input, scratch);
-      if (scratch.get().equals(END)) {
+      if (input.getFilePointer() >= footerStartPos) {
+        // Make sure we landed at precisely the right location:
+        if (input.getFilePointer() != footerStartPos) {
+          throw new CorruptIndexException("SimpleText failure: footer does not start at expected position current=" + input.getFilePointer() + " vs expected=" + footerStartPos, input);
+        }
         SimpleTextUtil.checkFooter(input);
         break;
       }

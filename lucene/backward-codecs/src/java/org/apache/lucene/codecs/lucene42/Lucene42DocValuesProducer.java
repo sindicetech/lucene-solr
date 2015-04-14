@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.lucene42;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -31,12 +32,11 @@ import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.DocValuesType;
-import org.apache.lucene.index.DocsAndPositionsEnum;
-import org.apache.lucene.index.DocsEnum;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
@@ -55,11 +55,11 @@ import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.IntsRefBuilder;
 import org.apache.lucene.util.PagedBytes;
 import org.apache.lucene.util.RamUsageEstimator;
-import org.apache.lucene.util.fst.BytesRefFSTEnum.InputOutput;
 import org.apache.lucene.util.fst.BytesRefFSTEnum;
+import org.apache.lucene.util.fst.BytesRefFSTEnum.InputOutput;
+import org.apache.lucene.util.fst.FST;
 import org.apache.lucene.util.fst.FST.Arc;
 import org.apache.lucene.util.fst.FST.BytesReader;
-import org.apache.lucene.util.fst.FST;
 import org.apache.lucene.util.fst.PositiveIntOutputs;
 import org.apache.lucene.util.fst.Util;
 import org.apache.lucene.util.packed.BlockPackedReader;
@@ -133,7 +133,7 @@ final class Lucene42DocValuesProducer extends DocValuesProducer {
   }
     
   Lucene42DocValuesProducer(SegmentReadState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
-    maxDoc = state.segmentInfo.getDocCount();
+    maxDoc = state.segmentInfo.maxDoc();
     merging = false;
     String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
     // read in the entries from the metadata file.
@@ -262,7 +262,7 @@ final class Lucene42DocValuesProducer extends DocValuesProducer {
   }
   
   @Override
-  public synchronized Iterable<? extends Accountable> getChildResources() {
+  public synchronized Collection<Accountable> getChildResources() {
     List<Accountable> resources = new ArrayList<>();
     resources.addAll(Accountables.namedAccountables("numeric field", numericInfo));
     resources.addAll(Accountables.namedAccountables("binary field", binaryInfo));
@@ -702,13 +702,9 @@ final class Lucene42DocValuesProducer extends DocValuesProducer {
     }
 
     @Override
-    public DocsEnum docs(Bits liveDocs, DocsEnum reuse, int flags) throws IOException {
+    public PostingsEnum postings(Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
       throw new UnsupportedOperationException();
     }
 
-    @Override
-    public DocsAndPositionsEnum docsAndPositions(Bits liveDocs, DocsAndPositionsEnum reuse, int flags) throws IOException {
-      throw new UnsupportedOperationException();
-    }
   }
 }

@@ -42,7 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * <p/> Provides functionality equivalent to the snapshooter script </p>
+ * <p> Provides functionality equivalent to the snapshooter script </p>
  * This is no longer used in standard replication.
  *
  *
@@ -62,8 +62,6 @@ public class SnapShooter {
     else  {
       File base = new File(core.getCoreDescriptor().getInstanceDir());
       snapDir = org.apache.solr.util.FileUtils.resolvePath(base, location).getAbsolutePath();
-      File dir = new File(snapDir);
-      if (!dir.exists())  dir.mkdirs();
     }
     this.snapshotName = snapshotName;
 
@@ -84,8 +82,8 @@ public class SnapShooter {
         if(snapshotName != null) {
           createSnapshot(indexCommit, replicationHandler);
         } else {
-          deleteOldBackups(numberToKeep);
           createSnapshot(indexCommit, replicationHandler);
+          deleteOldBackups(numberToKeep);
         }
       }
     }.start();
@@ -146,7 +144,7 @@ public class SnapShooter {
       details.add("snapshotName", snapshotName);
       LOG.info("Done creating backup snapshot: " + (snapshotName == null ? "<not named>" : snapshotName));
     } catch (Exception e) {
-      SnapPuller.delTree(snapShotDir);
+      IndexFetcher.delTree(snapShotDir);
       LOG.error("Exception while creating snapshot", e);
       details.add("snapShootException", e.getMessage());
     } finally {
@@ -158,23 +156,23 @@ public class SnapShooter {
   private void deleteOldBackups(int numberToKeep) {
     File[] files = new File(snapDir).listFiles();
     List<OldBackupDirectory> dirs = new ArrayList<>();
-    for(File f : files) {
+    for (File f : files) {
       OldBackupDirectory obd = new OldBackupDirectory(f);
       if(obd.dir != null) {
         dirs.add(obd);
       }
     }
-    if(numberToKeep > dirs.size()) {
+    if (numberToKeep > dirs.size() -1) {
       return;
     }
 
     Collections.sort(dirs);
     int i=1;
-    for(OldBackupDirectory dir : dirs) {
-      if( i++ > numberToKeep-1 ) {
-        SnapPuller.delTree(dir.dir);
+    for (OldBackupDirectory dir : dirs) {
+      if (i++ > numberToKeep) {
+        IndexFetcher.delTree(dir.dir);
       }
-    }   
+    }
   }
 
   protected void deleteNamedSnapshot(ReplicationHandler replicationHandler) {
@@ -183,7 +181,7 @@ public class SnapShooter {
     NamedList<Object> details = new NamedList<>();
     boolean isSuccess;
     File f = new File(snapDir, "snapshot." + snapshotName);
-    isSuccess = SnapPuller.delTree(f);
+    isSuccess = IndexFetcher.delTree(f);
 
     if(isSuccess) {
       details.add("status", "success");
@@ -199,7 +197,7 @@ public class SnapShooter {
     File dir;
     Date timestamp;
     final Pattern dirNamePattern = Pattern.compile("^snapshot[.](.*)$");
-    
+
     OldBackupDirectory(File dir) {
       if(dir.isDirectory()) {
         Matcher m = dirNamePattern.matcher(dir.getName());
@@ -221,14 +219,14 @@ public class SnapShooter {
   }
 
   public static final String DATE_FMT = "yyyyMMddHHmmssSSS";
-  
+
 
   private static void copyFiles(Directory sourceDir, Collection<String> files, File destDir) throws IOException {
     try (FSDirectory dir = new SimpleFSDirectory(destDir.toPath(), NoLockFactory.INSTANCE)) {
       for (String indexFile : files) {
-        sourceDir.copy(dir, indexFile, indexFile, DirectoryFactory.IOCONTEXT_NO_CACHE);
+        dir.copyFrom(sourceDir, indexFile, indexFile, DirectoryFactory.IOCONTEXT_NO_CACHE);
       }
     }
   }
-    
+
 }

@@ -17,6 +17,7 @@ package org.apache.lucene.codecs.bloom;
  * limitations under the License.
  */
 import java.io.IOException;
+import java.util.Collection;
 import java.util.Collections;
 
 import org.apache.lucene.search.DocIdSetIterator;
@@ -39,7 +40,6 @@ import org.apache.lucene.util.RamUsageEstimator;
  * </p> 
  * Another application of the set is that it can be used to perform fuzzy counting because
  * it can estimate reasonably accurately how many unique values are contained in the set. 
- * </p>
  * <p>This class is NOT threadsafe.</p>
  * <p>
  * Internally a Bitset is used to record values and once a client has finished recording
@@ -313,7 +313,7 @@ public class FuzzySet implements Accountable {
   }
 
   @Override
-  public Iterable<? extends Accountable> getChildResources() {
+  public Collection<Accountable> getChildResources() {
     return Collections.emptyList();
   }
 

@@ -61,8 +61,11 @@ import org.apache.lucene.util.NumericUtils;
  *
  * <p>This class does not have an constructor, use one of the static factory methods available,
  * that create a correct instance for different data types.
+ *
+ * @deprecated Use {@link DocValuesRangeQuery} instead
  */
 // TODO: use docsWithField to handle empty properly
+@Deprecated
 public abstract class DocValuesRangeFilter<T> extends Filter {
   final String field;
   final T lowerVal;
@@ -373,7 +376,7 @@ public abstract class DocValuesRangeFilter<T> extends Filter {
   }
   
   @Override
-  public final String toString() {
+  public final String toString(String defaultField) {
     final StringBuilder sb = new StringBuilder(field).append(":");
     return sb.append(includeLower ? '[' : '{')
       .append((lowerVal == null) ? "*" : lowerVal.toString())

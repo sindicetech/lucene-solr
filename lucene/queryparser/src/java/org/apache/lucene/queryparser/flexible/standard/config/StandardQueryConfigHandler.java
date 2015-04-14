@@ -38,7 +38,7 @@ import org.apache.lucene.search.MultiTermQuery.RewriteMethod;
  * This query configuration handler is used for almost every processor defined
  * in the {@link StandardQueryNodeProcessorPipeline} processor pipeline. It holds
  * configuration methods that reproduce the configuration methods that could be set on the old
- * lucene 2.4 QueryParser class. <br/>
+ * lucene 2.4 QueryParser class.
  * 
  * @see StandardQueryNodeProcessorPipeline
  */
@@ -208,7 +208,7 @@ public class StandardQueryConfigHandler extends QueryConfigHandler {
     set(ConfigurationKeys.FIELD_BOOST_MAP, new LinkedHashMap<String, Float>());
     set(ConfigurationKeys.FUZZY_CONFIG, new FuzzyConfig());
     set(ConfigurationKeys.LOCALE, Locale.getDefault());
-    set(ConfigurationKeys.MULTI_TERM_REWRITE_METHOD, MultiTermQuery.CONSTANT_SCORE_FILTER_REWRITE);
+    set(ConfigurationKeys.MULTI_TERM_REWRITE_METHOD, MultiTermQuery.CONSTANT_SCORE_REWRITE);
     set(ConfigurationKeys.FIELD_DATE_RESOLUTION_MAP, new HashMap<CharSequence, DateTools.Resolution>());
     
   }

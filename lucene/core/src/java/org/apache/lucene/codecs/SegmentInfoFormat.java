@@ -26,8 +26,6 @@ import org.apache.lucene.store.IOContext;
 /**
  * Expert: Controls the format of the 
  * {@link SegmentInfo} (segment metadata file).
- * <p>
- * 
  * @see SegmentInfo
  * @lucene.experimental
  */
@@ -48,7 +46,8 @@ public abstract class SegmentInfoFormat {
   public abstract SegmentInfo read(Directory directory, String segmentName, byte segmentID[], IOContext context) throws IOException;
 
   /**
-   * Write {@link SegmentInfo} data. 
+   * Write {@link SegmentInfo} data.
+   * The codec must add its SegmentInfo filename(s) to {@code info} before doing i/o. 
    * @throws IOException If an I/O error occurs
    */
   public abstract void write(Directory dir, SegmentInfo info, IOContext ioContext) throws IOException;

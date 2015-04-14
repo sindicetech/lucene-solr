@@ -17,26 +17,23 @@
 
 package org.apache.solr.client.solrj.request;
 
-import java.io.IOException;
-import java.util.Collection;
-import java.util.concurrent.TimeUnit;
-
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
-import org.apache.solr.client.solrj.SolrServer;
-import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.response.SolrPingResponse;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.ContentStream;
 
+import java.util.Collection;
+
 /**
- * Verify that there is a working Solr core at the URL of a {@link SolrServer}.
+ * Verify that there is a working Solr core at the URL of a {@link org.apache.solr.client.solrj.SolrClient}.
  * To use this class, the solrconfig.xml for the relevant core must include the
  * request handler for <code>/admin/ping</code>.
  * 
  * @since solr 1.3
  */
-public class SolrPing extends SolrRequest {
+public class SolrPing extends SolrRequest<SolrPingResponse> {
   
   /** serialVersionUID. */
   private static final long serialVersionUID = 5828246236669090017L;
@@ -56,21 +53,15 @@ public class SolrPing extends SolrRequest {
   public Collection<ContentStream> getContentStreams() {
     return null;
   }
-  
+
+  @Override
+  protected SolrPingResponse createResponse(SolrClient client) {
+    return new SolrPingResponse();
+  }
+
   @Override
   public ModifiableSolrParams getParams() {
     return params;
-  }
-  
-  @Override
-  public SolrPingResponse process(SolrServer server)
-      throws SolrServerException, IOException {
-    long startTime = TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
-    SolrPingResponse res = new SolrPingResponse();
-    res.setResponse(server.request(this));
-    long endTime = TimeUnit.MILLISECONDS.convert(System.nanoTime(), TimeUnit.NANOSECONDS);
-    res.setElapsedTime(endTime - startTime);
-    return res;
   }
   
   /**

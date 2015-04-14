@@ -19,8 +19,9 @@ package org.apache.solr.update;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -50,6 +51,8 @@ public class CdcrUpdateLog extends UpdateLog {
    */
   private CdcrLogReader bufferToggle;
 
+  public static String LOG_FILENAME_PATTERN = "%s.%019d.%1d";
+
   protected static Logger log = LoggerFactory.getLogger(CdcrUpdateLog.class);
 
   @Override
@@ -62,6 +65,11 @@ public class CdcrUpdateLog extends UpdateLog {
 
     // init
     super.init(uhandler, core);
+  }
+
+  @Override
+  public TransactionLog newTransactionLog(File tlogFile, Collection<String> globalStrings, boolean openExisting) {
+    return new CdcrTransactionLog(tlogFile, globalStrings, openExisting);
   }
 
   @Override
@@ -128,6 +136,53 @@ public class CdcrUpdateLog extends UpdateLog {
     return false;
   }
 
+  @Override
+  public long getLastLogId() {
+    if (id != -1) return id;
+    if (tlogFiles.length == 0) return -1;
+    String last = tlogFiles[tlogFiles.length-1];
+    return Long.parseLong(last.substring(TLOG_NAME.length() + 1, last.lastIndexOf('.')));
+  }
+
+  @Override
+  public void add(AddUpdateCommand cmd, boolean clearCaches) {
+    // Ensure we create a new tlog file following our filename format,
+    // the variable tlog will be not null, and the ensureLog of the parent will be skipped
+    synchronized (this) {
+      if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
+        ensureLog(cmd.getVersion());
+      }
+    }
+    // Then delegate to parent method
+    super.add(cmd, clearCaches);
+  }
+
+  @Override
+  public void delete(DeleteUpdateCommand cmd) {
+    // Ensure we create a new tlog file following our filename format
+    // the variable tlog will be not null, and the ensureLog of the parent will be skipped
+    synchronized (this) {
+      if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
+        ensureLog(cmd.getVersion());
+      }
+    }
+    // Then delegate to parent method
+    super.delete(cmd);
+  }
+
+  @Override
+  public void deleteByQuery(DeleteUpdateCommand cmd) {
+    // Ensure we create a new tlog file following our filename format
+    // the variable tlog will be not null, and the ensureLog of the parent will be skipped
+    synchronized (this) {
+      if ((cmd.getFlags() & UpdateCommand.REPLAY) == 0) {
+        ensureLog(cmd.getVersion());
+      }
+    }
+    // Then delegate to parent method
+    super.deleteByQuery(cmd);
+  }
+
   /**
    * Creates a new {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}
    * initialised with the current list of tlogs.
@@ -167,11 +222,13 @@ public class CdcrUpdateLog extends UpdateLog {
     return bufferToggle == null ? false : true;
   }
 
-  @Override
   protected void ensureLog(long startVersion) {
     if (tlog == null) {
       long absoluteVersion = Math.abs(startVersion); // version is negative for deletes
-      super.ensureLog(absoluteVersion);
+      if (tlog == null) {
+        String newLogName = String.format(Locale.ROOT, LOG_FILENAME_PATTERN, TLOG_NAME, id, absoluteVersion);
+        tlog = new CdcrTransactionLog(new File(tlogDir, newLogName), globalStrings);
+      }
 
       // push the new tlog to the opened readers
       for (CdcrLogReader reader : logPointers.keySet()) {
@@ -254,7 +311,7 @@ public class CdcrUpdateLog extends UpdateLog {
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
         numRecordsReadInCurrentTlog = 0;
-        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+        log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
     }
 
@@ -268,7 +325,7 @@ public class CdcrUpdateLog extends UpdateLog {
         tlogReader = currentTlog.getReader(0);
         pointer.set(currentTlog.tlogFile);
         numRecordsReadInCurrentTlog = 0;
-        log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+        log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
       }
     }
 
@@ -353,7 +410,7 @@ public class CdcrUpdateLog extends UpdateLog {
           tlogReader = currentTlog.getReader(0);
           pointer.set(currentTlog.tlogFile);
           numRecordsReadInCurrentTlog = 0;
-          log.info("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
+          log.debug("Init new tlog reader for {} - tlogReader = {}", currentTlog.tlogFile, tlogReader);
         }
         else {
           // the only tlog left is the new tlog which is currently being written,
@@ -408,7 +465,7 @@ public class CdcrUpdateLog extends UpdateLog {
      */
     private boolean seekTLog(long targetVersion) {
       // if the target version is lower than the oldest known entry, we have probably a gap.
-      if (targetVersion < tlogs.peekLast().startVersion) {
+      if (targetVersion < ((CdcrTransactionLog) tlogs.peekLast()).startVersion) {
         return false;
       }
 
@@ -418,7 +475,7 @@ public class CdcrUpdateLog extends UpdateLog {
       // iterates over the queue and removes old tlogs
       TransactionLog last = null;
       while (tlogs.size() > 1) {
-        if (tlogs.peekLast().startVersion >= targetVersion) {
+        if (((CdcrTransactionLog) tlogs.peekLast()).startVersion >= targetVersion) {
           break;
         }
         last = tlogs.pollLast();

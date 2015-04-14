@@ -28,7 +28,7 @@ import org.apache.lucene.facet.taxonomy.writercache.LruTaxonomyWriterCache;
 import org.apache.lucene.facet.taxonomy.writercache.TaxonomyWriterCache;
 import org.apache.lucene.index.CorruptIndexException; // javadocs
 import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.DocsEnum;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
@@ -382,14 +382,14 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
     try {
       final BytesRef catTerm = new BytesRef(FacetsConfig.pathToString(categoryPath.components, categoryPath.length));
       TermsEnum termsEnum = null; // reuse
-      DocsEnum docs = null; // reuse
+      PostingsEnum docs = null; // reuse
       for (LeafReaderContext ctx : reader.leaves()) {
         Terms terms = ctx.reader().terms(Consts.FULL);
         if (terms != null) {
           termsEnum = terms.iterator(termsEnum);
           if (termsEnum.seekExact(catTerm)) {
             // liveDocs=null because the taxonomy has no deletes
-            docs = termsEnum.docs(null, docs, 0 /* freqs not required */);
+            docs = termsEnum.postings(null, docs, 0 /* freqs not required */);
             // if the term was found, we know it has exactly one document.
             doc = docs.nextDoc() + ctx.docBase;
             break;
@@ -529,9 +529,9 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
      * Note that when TermPositions.nextPosition() is later used to
      * retrieve this value, val-1 will be returned, not val.
      * <P>
-     * IMPORTANT NOTE: Before Lucene 2.9, val>=0 were safe (for val==0,
+     * IMPORTANT NOTE: Before Lucene 2.9, val&gt;=0 were safe (for val==0,
      * the retrieved position would be -1). But starting with Lucene 2.9,
-     * this unfortunately changed, and only val>0 are safe. val=0 can
+     * this unfortunately changed, and only val&gt;0 are safe. val=0 can
      * still be used, but don't count on the value you retrieve later
      * (it could be 0 or -1, depending on circumstances or versions).
      * This change is described in Lucene's JIRA: LUCENE-1542. 
@@ -675,7 +675,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
     DirectoryReader reader = readerManager.acquire();
     try {
       TermsEnum termsEnum = null;
-      DocsEnum docsEnum = null;
+      PostingsEnum postingsEnum = null;
       for (LeafReaderContext ctx : reader.leaves()) {
         Terms terms = ctx.reader().terms(Consts.FULL);
         if (terms != null) { // cannot really happen, but be on the safe side
@@ -689,8 +689,8 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
               // is sufficient to call next(), and then doc(), exactly once with no
               // 'validation' checks.
               FacetLabel cp = new FacetLabel(FacetsConfig.stringToPath(t.utf8ToString()));
-              docsEnum = termsEnum.docs(null, docsEnum, DocsEnum.FLAG_NONE);
-              boolean res = cache.put(cp, docsEnum.nextDoc() + ctx.docBase);
+              postingsEnum = termsEnum.postings(null, postingsEnum, PostingsEnum.NONE);
+              boolean res = cache.put(cp, postingsEnum.nextDoc() + ctx.docBase);
               assert !res : "entries should not have been evicted from the cache";
             } else {
               // the cache is full and the next put() will evict entries from it, therefore abort the iteration.
@@ -771,7 +771,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
       ordinalMap.setSize(size);
       int base = 0;
       TermsEnum te = null;
-      DocsEnum docs = null;
+      PostingsEnum docs = null;
       for (final LeafReaderContext ctx : r.leaves()) {
         final LeafReader ar = ctx.reader();
         final Terms terms = ar.terms(Consts.FULL);
@@ -779,7 +779,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
         while (te.next() != null) {
           FacetLabel cp = new FacetLabel(FacetsConfig.stringToPath(te.term().utf8ToString()));
           final int ordinal = addCategory(cp);
-          docs = te.docs(null, docs, DocsEnum.FLAG_NONE);
+          docs = te.postings(null, docs, PostingsEnum.NONE);
           ordinalMap.addMapping(docs.nextDoc() + base, ordinal);
         }
         base += ar.maxDoc(); // no deletions, so we're ok
