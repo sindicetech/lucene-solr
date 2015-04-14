@@ -115,6 +115,8 @@ import static org.apache.solr.handler.ReplicationHandler.INTERNAL;
 import static org.apache.solr.handler.ReplicationHandler.MASTER_URL;
 import static org.apache.solr.handler.ReplicationHandler.OFFSET;
 import static org.apache.solr.handler.ReplicationHandler.SIZE;
+import static org.apache.solr.handler.ReplicationHandler.TLOG_FILE;
+import static org.apache.solr.handler.ReplicationHandler.TLOG_FILES;
 
 /**
  * <p> Provides functionality of downloading changed index files as well as config files and a timer for scheduling fetches from the
