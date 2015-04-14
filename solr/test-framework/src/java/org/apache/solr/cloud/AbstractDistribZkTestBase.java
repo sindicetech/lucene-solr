@@ -154,11 +154,9 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
               + shard.getValue().getStr(ZkStateReader.STATE_PROP)
               + " live:"
               + clusterState.liveNodesContain(shard.getValue().getNodeName()));
-          String state = shard.getValue().getStr(ZkStateReader.STATE_PROP);
-          if ((state.equals(ZkStateReader.RECOVERING) || state
-              .equals(ZkStateReader.SYNC) || state.equals(ZkStateReader.DOWN))
-              && clusterState.liveNodesContain(shard.getValue().getStr(
-              ZkStateReader.NODE_NAME_PROP))) {
+          final Replica.State state = shard.getValue().getState();
+          if ((state == Replica.State.RECOVERING || state == Replica.State.DOWN)
+              && clusterState.liveNodesContain(shard.getValue().getStr(ZkStateReader.NODE_NAME_PROP))) {
             sawLiveRecovering = true;
           }
         }
@@ -199,9 +197,9 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
         Map<String,Replica> shards = entry.getValue().getReplicasMap();
         for (Map.Entry<String,Replica> shard : shards.entrySet()) {
 
-          String state = shard.getValue().getStr(ZkStateReader.STATE_PROP);
-          if (!state.equals(ZkStateReader.ACTIVE)) {
-            fail("Not all shards are ACTIVE - found a shard that is: " + state);
+          final Replica.State state = shard.getValue().getState();
+          if (state != Replica.State.ACTIVE) {
+            fail("Not all shards are ACTIVE - found a shard that is: " + state.toString());
           }
         }
       }
@@ -231,5 +229,14 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
     SolrZkClient zkClient = new SolrZkClient(zkServer.getZkHost(), AbstractZkTestCase.TIMEOUT);
     zkClient.printLayoutToStdOut();
     zkClient.close();
+  }
+
+  protected void restartZk(int pauseMillis) throws Exception {
+    log.info("Restarting ZK with a pause of {}ms in between", pauseMillis);
+    zkServer.shutdown();
+    // disconnect enough to test stalling, if things stall, then clientSoTimeout w""ill be hit
+    Thread.sleep(pauseMillis);
+    zkServer = new ZkTestServer(zkServer.getZkDir(), zkServer.getPort());
+    zkServer.run();
   }
 }

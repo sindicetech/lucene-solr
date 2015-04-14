@@ -56,49 +56,25 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
-import com.carrotsearch.randomizedtesting.JUnit4MethodProvider;
-import com.carrotsearch.randomizedtesting.LifecycleScope;
-import com.carrotsearch.randomizedtesting.MixWithSuiteName;
-import com.carrotsearch.randomizedtesting.RandomizedContext;
-import com.carrotsearch.randomizedtesting.RandomizedRunner;
-import com.carrotsearch.randomizedtesting.RandomizedTest;
-import com.carrotsearch.randomizedtesting.annotations.Listeners;
-import com.carrotsearch.randomizedtesting.annotations.SeedDecorators;
-import com.carrotsearch.randomizedtesting.annotations.TestGroup;
-import com.carrotsearch.randomizedtesting.annotations.TestMethodProviders;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction.Action;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakGroup;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakGroup.Group;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies;
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies.Consequence;
-import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite;
-import com.carrotsearch.randomizedtesting.generators.RandomPicks;
-import com.carrotsearch.randomizedtesting.rules.NoClassHooksShadowingRule;
-import com.carrotsearch.randomizedtesting.rules.NoInstanceHooksOverridesRule;
-import com.carrotsearch.randomizedtesting.rules.StaticFieldsInvariantRule;
-
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.*;
 import org.apache.lucene.index.IndexReader.ReaderClosedListener;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.TermsEnum.SeekStatus;
 import org.apache.lucene.search.AssertingIndexSearcher;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LRUQueryCache;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryCache;
 import org.apache.lucene.search.QueryCachingPolicy;
-import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.QueryUtils.FCInvisibleMultiReader;
 import org.apache.lucene.store.BaseDirectoryWrapper;
 import org.apache.lucene.store.Directory;
@@ -108,8 +84,8 @@ import org.apache.lucene.store.FlushInfo;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.LockFactory;
 import org.apache.lucene.store.MergeInfo;
-import org.apache.lucene.store.MockDirectoryWrapper;
 import org.apache.lucene.store.MockDirectoryWrapper.Throttling;
+import org.apache.lucene.store.MockDirectoryWrapper;
 import org.apache.lucene.store.NRTCachingDirectory;
 import org.apache.lucene.store.RawDirectoryWrapper;
 import org.apache.lucene.util.automaton.AutomatonTestUtil;
@@ -126,6 +102,31 @@ import org.junit.Test;
 import org.junit.rules.RuleChain;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
+import com.carrotsearch.randomizedtesting.JUnit4MethodProvider;
+import com.carrotsearch.randomizedtesting.LifecycleScope;
+import com.carrotsearch.randomizedtesting.MixWithSuiteName;
+import com.carrotsearch.randomizedtesting.RandomizedContext;
+import com.carrotsearch.randomizedtesting.RandomizedRunner;
+import com.carrotsearch.randomizedtesting.RandomizedTest;
+import com.carrotsearch.randomizedtesting.annotations.Listeners;
+import com.carrotsearch.randomizedtesting.annotations.SeedDecorators;
+import com.carrotsearch.randomizedtesting.annotations.TestGroup;
+import com.carrotsearch.randomizedtesting.annotations.TestMethodProviders;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction.Action;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakGroup.Group;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakGroup;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies.Consequence;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies;
+import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite;
+import com.carrotsearch.randomizedtesting.generators.RandomPicks;
+import com.carrotsearch.randomizedtesting.rules.NoClassHooksShadowingRule;
+import com.carrotsearch.randomizedtesting.rules.NoInstanceHooksOverridesRule;
+import com.carrotsearch.randomizedtesting.rules.StaticFieldsInvariantRule;
 
 import static com.carrotsearch.randomizedtesting.RandomizedTest.systemPropertyAsBoolean;
 import static com.carrotsearch.randomizedtesting.RandomizedTest.systemPropertyAsInt;
@@ -1336,11 +1337,19 @@ public abstract class LuceneTestCase extends Assert {
     return newField(random(), name, value, stored == Store.YES ? StringField.TYPE_STORED : StringField.TYPE_NOT_STORED);
   }
 
+  public static Field newStringField(String name, BytesRef value, Store stored) {
+    return newField(random(), name, value, stored == Store.YES ? StringField.TYPE_STORED : StringField.TYPE_NOT_STORED);
+  }
+
   public static Field newTextField(String name, String value, Store stored) {
     return newField(random(), name, value, stored == Store.YES ? TextField.TYPE_STORED : TextField.TYPE_NOT_STORED);
   }
   
   public static Field newStringField(Random random, String name, String value, Store stored) {
+    return newField(random, name, value, stored == Store.YES ? StringField.TYPE_STORED : StringField.TYPE_NOT_STORED);
+  }
+
+  public static Field newStringField(Random random, String name, BytesRef value, Store stored) {
     return newField(random, name, value, stored == Store.YES ? StringField.TYPE_STORED : StringField.TYPE_NOT_STORED);
   }
   
@@ -1372,7 +1381,7 @@ public abstract class LuceneTestCase extends Assert {
   // write-once schema sort of helper class then we can
   // remove the sync here.  We can also fold the random
   // "enable norms" (now commented out, below) into that:
-  public synchronized static Field newField(Random random, String name, String value, FieldType type) {
+  public synchronized static Field newField(Random random, String name, Object value, FieldType type) {
 
     // Defeat any consumers that illegally rely on intern'd
     // strings (we removed this from Lucene a while back):
@@ -1388,7 +1397,7 @@ public abstract class LuceneTestCase extends Assert {
         type = mergeTermVectorOptions(type, prevType);
       }
 
-      return new Field(name, value, type);
+      return createField(name, value, type);
     }
 
     // TODO: once all core & test codecs can index
@@ -1434,7 +1443,17 @@ public abstract class LuceneTestCase extends Assert {
     }
     */
     
-    return new Field(name, value, newType);
+    return createField(name, value, newType);
+  }
+
+  private static Field createField(String name, Object value, FieldType fieldType) {
+    if (value instanceof String) {
+      return new Field(name, (String) value, fieldType);
+    } else if (value instanceof BytesRef) {
+      return new Field(name, (BytesRef) value, fieldType);
+    } else {
+      throw new IllegalArgumentException("value must be String or BytesRef");
+    }
   }
 
   /** 
@@ -1651,18 +1670,27 @@ public abstract class LuceneTestCase extends Assert {
     }
   }
 
+  private static final QueryCache DEFAULT_QUERY_CACHE = IndexSearcher.getDefaultQueryCache();
+  private static final QueryCachingPolicy DEFAULT_CACHING_POLICY = IndexSearcher.getDefaultQueryCachingPolicy();
+
   @Before
-  public void resetTestDefaultQueryCache() {
+  public void overrideTestDefaultQueryCache() {
     // Make sure each test method has its own cache
-    resetDefaultQueryCache();
+    overrideDefaultQueryCache();
   }
 
   @BeforeClass
-  public static void resetDefaultQueryCache() {
+  public static void overrideDefaultQueryCache() {
     // we need to reset the query cache in an @BeforeClass so that tests that
     // instantiate an IndexSearcher in an @BeforeClass method use a fresh new cache
     IndexSearcher.setDefaultQueryCache(new LRUQueryCache(10000, 1 << 25));
     IndexSearcher.setDefaultQueryCachingPolicy(MAYBE_CACHE_POLICY);
+  }
+
+  @AfterClass
+  public static void resetDefaultQueryCache() {
+    IndexSearcher.setDefaultQueryCache(DEFAULT_QUERY_CACHE);
+    IndexSearcher.setDefaultQueryCachingPolicy(DEFAULT_CACHING_POLICY);
   }
 
   /**
@@ -1850,8 +1878,8 @@ public abstract class LuceneTestCase extends Assert {
     assertEquals(leftTerms.hasPositions(), rightTerms.hasPositions());
     assertEquals(leftTerms.hasPayloads(), rightTerms.hasPayloads());
 
-    TermsEnum leftTermsEnum = leftTerms.iterator(null);
-    TermsEnum rightTermsEnum = rightTerms.iterator(null);
+    TermsEnum leftTermsEnum = leftTerms.iterator();
+    TermsEnum rightTermsEnum = rightTerms.iterator();
     assertTermsEnumEquals(info, leftReader, leftTermsEnum, rightTermsEnum, true);
     
     assertTermsSeekingEquals(info, leftTerms, rightTerms);
@@ -1985,11 +2013,8 @@ public abstract class LuceneTestCase extends Assert {
    * checks docs + freqs + positions + payloads, sequentially
    */
   public void assertDocsAndPositionsEnumEquals(String info, PostingsEnum leftDocs, PostingsEnum rightDocs) throws IOException {
-    if (leftDocs == null || rightDocs == null) {
-      assertNull(leftDocs);
-      assertNull(rightDocs);
-      return;
-    }
+    assertNotNull(leftDocs);
+    assertNotNull(rightDocs);
     assertEquals(info, -1, leftDocs.docID());
     assertEquals(info, -1, rightDocs.docID());
     int docid;
@@ -2100,18 +2125,18 @@ public abstract class LuceneTestCase extends Assert {
 
   
   private void assertTermsSeekingEquals(String info, Terms leftTerms, Terms rightTerms) throws IOException {
-    TermsEnum leftEnum = null;
-    TermsEnum rightEnum = null;
 
     // just an upper bound
     int numTests = atLeast(20);
     Random random = random();
 
+    TermsEnum leftEnum = null;
+
     // collect this number of terms from the left side
     HashSet<BytesRef> tests = new HashSet<>();
     int numPasses = 0;
     while (numPasses < 10 && tests.size() < numTests) {
-      leftEnum = leftTerms.iterator(leftEnum);
+      leftEnum = leftTerms.iterator();
       BytesRef term = null;
       while ((term = leftEnum.next()) != null) {
         int code = random.nextInt(10);
@@ -2149,16 +2174,16 @@ public abstract class LuceneTestCase extends Assert {
       numPasses++;
     }
 
-    rightEnum = rightTerms.iterator(rightEnum);
+    TermsEnum rightEnum = rightTerms.iterator();
 
     ArrayList<BytesRef> shuffledTests = new ArrayList<>(tests);
     Collections.shuffle(shuffledTests, random);
 
     for (BytesRef b : shuffledTests) {
       if (rarely()) {
-        // reuse the enums
-        leftEnum = leftTerms.iterator(leftEnum);
-        rightEnum = rightTerms.iterator(rightEnum);
+        // make new enums
+        leftEnum = leftTerms.iterator();
+        rightEnum = rightTerms.iterator();
       }
 
       final boolean seekExact = random().nextBoolean();

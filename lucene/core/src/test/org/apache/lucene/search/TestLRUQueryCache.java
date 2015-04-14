@@ -22,11 +22,13 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,6 +47,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.RamUsageTester;
 import org.apache.lucene.util.TestUtil;
@@ -80,7 +83,7 @@ public class TestLRUQueryCache extends LuceneTestCase {
     final RandomIndexWriter w = new RandomIndexWriter(random(), dir);
     final SearcherFactory searcherFactory = new SearcherFactory() {
       @Override
-      public IndexSearcher newSearcher(IndexReader reader) throws IOException {
+      public IndexSearcher newSearcher(IndexReader reader, IndexReader previous) throws IOException {
         IndexSearcher searcher = new IndexSearcher(reader);
         searcher.setQueryCachingPolicy(MAYBE_CACHE_POLICY);
         searcher.setQueryCache(queryCache);
@@ -346,7 +349,7 @@ public class TestLRUQueryCache extends LuceneTestCase {
     public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
       return new ConstantScoreWeight(this) {
         @Override
-        Scorer scorer(LeafReaderContext context, Bits acceptDocs, float score) throws IOException {
+        protected Scorer scorer(LeafReaderContext context, Bits acceptDocs, float score) throws IOException {
           return null;
         }
       };
@@ -932,4 +935,62 @@ public class TestLRUQueryCache extends LuceneTestCase {
     queryCache.assertConsistent();
   }
 
+  private static class BadQuery extends Query {
+
+    int[] i = new int[] {42}; // an array so that clone keeps the reference
+    
+    @Override
+    public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
+      return new ConstantScoreWeight(this) {
+        
+        @Override
+        protected Scorer scorer(LeafReaderContext context, Bits acceptDocs, float score) throws IOException {
+          return null;
+        }
+      };
+    }
+    
+    @Override
+    public String toString(String field) {
+      return "BadQuery";
+    }
+    
+    @Override
+    public int hashCode() {
+      return super.hashCode() ^ i[0];
+    }
+    
+  }
+
+  public void testDetectMutatedQueries() throws IOException {
+    Directory dir = newDirectory();
+    final RandomIndexWriter w = new RandomIndexWriter(random(), dir);
+    w.addDocument(new Document());
+    IndexReader reader = w.getReader();
+
+    // size of 1 so that 2nd query evicts from the cache
+    final LRUQueryCache queryCache = new LRUQueryCache(1, 10000);
+    final IndexSearcher searcher = newSearcher(reader);
+    searcher.setQueryCache(queryCache);
+    searcher.setQueryCachingPolicy(QueryCachingPolicy.ALWAYS_CACHE);
+    
+    BadQuery query = new BadQuery();
+    searcher.count(query);
+    query.i[0] += 1; // change the hashCode!
+    
+    try {
+      // trigger an eviction
+      searcher.count(new MatchAllDocsQuery());
+      fail();
+    } catch (ConcurrentModificationException e) {
+      // expected
+    } catch (RuntimeException e) {
+      // expected: wrapped when executor is in use
+      Throwable cause = e.getCause();
+      assertTrue(cause instanceof ExecutionException);
+      assertTrue(cause.getCause() instanceof ConcurrentModificationException);
+    }
+    
+    IOUtils.close(w, reader, dir);
+  }
 }

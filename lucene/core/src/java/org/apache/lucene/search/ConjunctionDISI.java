@@ -23,8 +23,14 @@ import java.util.Comparator;
 import java.util.List;
 
 import org.apache.lucene.util.CollectionUtil;
+import org.apache.lucene.search.spans.Spans;
 
-class ConjunctionDISI extends DocIdSetIterator {
+/** A conjunction of DocIdSetIterators.
+ * This iterates over the doc ids that are present in each given DocIdSetIterator.
+ * <br>Public only for use in {@link org.apache.lucene.search.spans}.
+ * @lucene.internal
+ */
+public class ConjunctionDISI extends DocIdSetIterator {
 
   /** Create a conjunction over the provided iterators, taking advantage of
    *  {@link TwoPhaseIterator}. */
@@ -32,18 +38,16 @@ class ConjunctionDISI extends DocIdSetIterator {
     final List<DocIdSetIterator> allIterators = new ArrayList<>();
     final List<TwoPhaseIterator> twoPhaseIterators = new ArrayList<>();
     for (DocIdSetIterator iterator : iterators) {
-      if (iterator instanceof Scorer) {
-        // if we have a scorer, check if it supports two-phase iteration
-        TwoPhaseIterator twoPhaseIterator = ((Scorer) iterator).asTwoPhaseIterator();
-        if (twoPhaseIterator != null) {
-          // Note: 
-          allIterators.add(twoPhaseIterator.approximation());
-          twoPhaseIterators.add(twoPhaseIterator);
-        } else {
-          allIterators.add(iterator);
-        }
-      } else {
-        // no approximation support, use the iterator as-is
+      TwoPhaseIterator twoPhaseIterator = null;
+      if (iterator instanceof Scorer) { 
+        twoPhaseIterator = ((Scorer) iterator).asTwoPhaseIterator();
+      } else if (iterator instanceof Spans) {
+        twoPhaseIterator = ((Spans) iterator).asTwoPhaseIterator();
+      }
+      if (twoPhaseIterator != null) {
+        allIterators.add(twoPhaseIterator.approximation());
+        twoPhaseIterators.add(twoPhaseIterator);
+      } else { // no approximation support, use the iterator as-is
         allIterators.add(iterator);
       }
     }
@@ -140,18 +144,12 @@ class ConjunctionDISI extends DocIdSetIterator {
    */
   private static class TwoPhaseConjunctionDISI extends TwoPhaseIterator {
 
-    private final ConjunctionDISI approximation;
     private final TwoPhaseIterator[] twoPhaseIterators;
 
     private TwoPhaseConjunctionDISI(List<? extends DocIdSetIterator> iterators, List<TwoPhaseIterator> twoPhaseIterators) {
-      approximation = new ConjunctionDISI(iterators);
+      super(new ConjunctionDISI(iterators));
       assert twoPhaseIterators.size() > 0;
-      this.twoPhaseIterators = twoPhaseIterators.toArray(new TwoPhaseIterator[0]);
-    }
-
-    @Override
-    public DocIdSetIterator approximation() {
-      return approximation;
+      this.twoPhaseIterators = twoPhaseIterators.toArray(new TwoPhaseIterator[twoPhaseIterators.size()]);
     }
 
     @Override

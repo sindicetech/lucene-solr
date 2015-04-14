@@ -77,11 +77,32 @@ solrAdminServices.factory('System',
   }])
 .factory('Update',
   ['$resource', function($resource) {
-    return $resource('/solr/:core/update', {core: '@core', wt:'json', _:Date.now()}, {
+    return $resource('/solr/:core/:handler', {core: '@core', wt:'json', _:Date.now(), handler:'/update'}, {
       "optimize": {params: { optimize: "true"}},
-      "commit": {params: {commit: "true"}}
+      "commit": {params: {commit: "true"}},
+      "post": {method: "POST", params: {handler: '@handler'}}
     });
   }])
+.service('FileUpload', function ($http) {
+    this.upload = function(params, file, success, error){
+        var url = "/solr/" + params.core + "/" + params.handler + "?";
+        raw = params.raw;
+        delete params.core;
+        delete params.handler;
+        delete params.raw;
+        url += $.param(params);
+        if (raw && raw.length>0) {
+            if (raw[0] != "&") raw = "&" + raw;
+            url += raw;
+        }
+        var fd = new FormData();
+        fd.append('file', file);
+        $http.post(url, fd, {
+            transformRequest: angular.identity,
+            headers: {'Content-Type': undefined}
+        }).success(success).error(error);
+    }
+})
 .factory('Luke',
   ['$resource', function($resource) {
     return $resource('/solr/:core/admin/luke', {core: '@core', wt:'json', _:Date.now()}, {
@@ -104,11 +125,30 @@ solrAdminServices.factory('System',
   }])
 .factory('Mbeans',
   ['$resource', function($resource) {
-    return $resource('/solr/:core/admin/mbeans', {'wt':'json', 'stats': true, '_':Date.now()}); // @core
+    return $resource('/solr/:core/admin/mbeans', {'wt':'json', core: '@core', '_':Date.now()}, {
+        stats: {params: {stats: true}},
+        reference: {
+            params: {wt: "xml", stats: true}, transformResponse: function (data) {
+                return {reference: data}
+            }
+        },
+        delta: {method: "POST",
+                params: {stats: true, diff:true},
+                headers: {'Content-type': 'application/x-www-form-urlencoded'},
+                transformRequest: function(data) {
+                    return "stream.body=" + encodeURIComponent(data);
+                }
+        }
+    });
   }])
 .factory('Files',
   ['$resource', function($resource) {
-    return $resource('/solr/:core/admin/file', {'wt':'json', '_':Date.now()}); // @core
+    return $resource('/solr/:core/admin/file', {'wt':'json', core: '@core', '_':Date.now()}, {
+      "list": {},
+      "get": {method: "GET", interceptor: {
+          response: function(config) {return config;}
+      }}
+    });
   }])
 .factory('Query', // use $http for Query, as we need complete control over the URL
   ['$http', '$location', function($http, $location) {

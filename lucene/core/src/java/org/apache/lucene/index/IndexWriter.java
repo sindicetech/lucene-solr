@@ -32,8 +32,8 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,6 +47,7 @@ import org.apache.lucene.index.DocValuesUpdate.BinaryDocValuesUpdate;
 import org.apache.lucene.index.DocValuesUpdate.NumericDocValuesUpdate;
 import org.apache.lucene.index.FieldInfos.FieldNumbers;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
@@ -254,7 +255,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
   private final Directory mergeDirectory;  // used for merging
   private final Analyzer analyzer;    // how to analyze text
 
-  private volatile long changeCount; // increments every time a change is completed
+  private final AtomicLong changeCount = new AtomicLong(); // increments every time a change is completed
   private volatile long lastCommitChangeCount; // last changeCount that was committed
 
   private List<SegmentCommitInfo> rollbackSegments;      // list of segmentInfo we will fallback to if the commit fails
@@ -1320,6 +1321,15 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    */
   public void deleteDocuments(Query... queries) throws IOException {
     ensureOpen();
+
+    // LUCENE-6379: Specialize MatchAllDocsQuery
+    for(Query query : queries) {
+      if (query.getClass() == MatchAllDocsQuery.class) {
+        deleteAll();
+        return;
+      }
+    }
+
     try {
       if (docWriter.deleteQueries(queries)) {
         processEvents(true, false);
@@ -1521,7 +1531,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
       // could close, re-open and re-return the same segment
       // name that was previously returned which can cause
       // problems at least with ConcurrentMergeScheduler.
-      changeCount++;
+      changeCount.incrementAndGet();
       segmentInfos.changed();
       return "_" + Integer.toString(segmentInfos.counter++, Character.MAX_RADIX);
     }
@@ -1542,14 +1552,15 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    * longer be changed).</p>
    *
    * <p>Note that this requires free space that is proportional
-   * to the size of the index in your Directory (2X if you're
-   * using compound file format). For example, if your index
-   * size is 10 MB then you need an additional 10 MB free for
-   * this to complete (20 MB if you're using compound file
-   * format). This is also affected by the {@link Codec} that
-   * is used to execute the merge, and may result in even a
-   * bigger index. Also, it's best to call {@link #commit()}
-   * afterwards, to allow IndexWriter to free up disk space.</p>
+   * to the size of the index in your Directory: 2X if you are
+   * not using compound file format, and 3X if you are.
+   * For example, if your index size is 10 MB then you need
+   * an additional 20 MB free for this to complete (30 MB if
+   * you're using compound file format). This is also affected
+   * by the {@link Codec} that is used to execute the merge,
+   * and may result in even a bigger index. Also, it's best
+   * to call {@link #commit()} afterwards, to allow IndexWriter
+   * to free up disk space.</p>
    *
    * <p>If some but not all readers re-open while merging
    * is underway, this will cause {@code > 2X} temporary
@@ -1968,7 +1979,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
         deleter.checkpoint(segmentInfos, false);
         deleter.refresh();
 
-        lastCommitChangeCount = changeCount;
+        lastCommitChangeCount = changeCount.get();
         
         deleter.close();
 
@@ -2083,7 +2094,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
             // Don't bother saving any changes in our segmentInfos
             readerPool.dropAll(false);
             // Mark that the index has changed
-            ++changeCount;
+            changeCount.incrementAndGet();
             segmentInfos.changed();
             globalFieldNumberMap.clear();
 
@@ -2196,13 +2207,13 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  close/commit we will write a new segments file, but
    *  does NOT bump segmentInfos.version. */
   synchronized void checkpointNoSIS() throws IOException {
-    changeCount++;
+    changeCount.incrementAndGet();
     deleter.checkpoint(segmentInfos, false);
   }
 
   /** Called internally if any index state has changed. */
   synchronized void changed() {
-    changeCount++;
+    changeCount.incrementAndGet();
     segmentInfos.changed();
   }
 
@@ -2706,7 +2717,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
               // sneak into the commit point:
               toCommit = segmentInfos.clone();
 
-              pendingCommitChangeCount = changeCount;
+              pendingCommitChangeCount = changeCount.get();
 
               // This protects the segmentInfos we are now going
               // to commit.  This is important in case, eg, while
@@ -2764,7 +2775,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    */
   public final synchronized void setCommitData(Map<String,String> commitUserData) {
     segmentInfos.setUserData(new HashMap<>(commitUserData));
-    ++changeCount;
+    changeCount.incrementAndGet();
   }
   
   /**
@@ -2820,7 +2831,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
    *  merged finished, this method may return true right
    *  after you had just called {@link #commit}. */
   public final boolean hasUncommittedChanges() {
-    return changeCount != lastCommitChangeCount || docWriter.anyChanges() || bufferedUpdatesStream.any();
+    return changeCount.get() != lastCommitChangeCount || docWriter.anyChanges() || bufferedUpdatesStream.any();
   }
 
   private final void commitInternal(MergePolicy mergePolicy) throws IOException {
@@ -4247,7 +4258,7 @@ public class IndexWriter implements Closeable, TwoPhaseCommit, Accountable {
 
       synchronized(this) {
 
-        if (lastCommitChangeCount > changeCount) {
+        if (lastCommitChangeCount > changeCount.get()) {
           throw new IllegalStateException("lastCommitChangeCount=" + lastCommitChangeCount + ",changeCount=" + changeCount);
         }
 

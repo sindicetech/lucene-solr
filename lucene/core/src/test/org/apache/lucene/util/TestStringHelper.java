@@ -18,6 +18,43 @@ package org.apache.lucene.util;
  */
 
 public class TestStringHelper extends LuceneTestCase {
+  
+  public void testBytesDifference() {
+    BytesRef left = new BytesRef("foobar");
+    BytesRef right = new BytesRef("foozo");
+    assertEquals(3, StringHelper.bytesDifference(left, right));
+  }
+
+  public void testEquals() {
+    assertTrue(StringHelper.equals("foo", "foo"));
+    assertFalse(StringHelper.equals("foo", null));
+    assertFalse(StringHelper.equals(null, "foo"));
+    assertTrue(StringHelper.equals(null, null));
+  }
+  
+  public void testStartsWith() {
+    BytesRef ref = new BytesRef("foobar");
+    BytesRef slice = new BytesRef("foo");
+    assertTrue(StringHelper.startsWith(ref, slice));
+  }
+  
+  public void testEndsWith() {
+    BytesRef ref = new BytesRef("foobar");
+    BytesRef slice = new BytesRef("bar");
+    assertTrue(StringHelper.endsWith(ref, slice));
+  }
+
+  public void testStartsWithWhole() {
+    BytesRef ref = new BytesRef("foobar");
+    BytesRef slice = new BytesRef("foobar");
+    assertTrue(StringHelper.startsWith(ref, slice));
+  }
+  
+  public void testEndsWithWhole() {
+    BytesRef ref = new BytesRef("foobar");
+    BytesRef slice = new BytesRef("foobar");
+    assertTrue(StringHelper.endsWith(ref, slice));
+  }
 
   public void testMurmurHash3() throws Exception {
     // Hashes computed using murmur3_32 from https://code.google.com/p/pyfasthash

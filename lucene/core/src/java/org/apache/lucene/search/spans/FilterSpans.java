@@ -19,58 +19,110 @@ package org.apache.lucene.search.spans;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Objects;
+
+import org.apache.lucene.search.TwoPhaseIterator;
 
 /**
- * A {@link Spans} implementation which allows wrapping another spans instance
- * and override some selected methods.
+ * A {@link Spans} implementation wrapping another spans instance,
+ * allowing to filter spans matches easily by implementing {@link #accept}
  */
-public class FilterSpans extends Spans {
+public abstract class FilterSpans extends Spans {
  
   /** The wrapped spans instance. */
   protected final Spans in;
   
+  private boolean atFirstInCurrentDoc = false;
+  private int startPos = -1;
+  
   /** Wrap the given {@link Spans}. */
-  public FilterSpans(Spans in) {
-    this.in = in;
+  protected FilterSpans(Spans in) {
+    this.in = Objects.requireNonNull(in);
+  }
+  
+  /** 
+   * Returns YES if the candidate should be an accepted match,
+   * NO if it should not, and NO_MORE_IN_CURRENT_DOC if iteration
+   * should move on to the next document.
+   */
+  protected abstract AcceptStatus accept(Spans candidate) throws IOException;
+  
+  @Override
+  public final int nextDoc() throws IOException {
+    while (true) {
+      int doc = in.nextDoc();
+      if (doc == NO_MORE_DOCS) {
+        return NO_MORE_DOCS;
+      } else if (twoPhaseCurrentDocMatches()) {
+        return doc;
+      }
+    }
+  }
+
+  @Override
+  public final int advance(int target) throws IOException {
+    int doc = in.advance(target);
+    while (doc != NO_MORE_DOCS) {
+      if (twoPhaseCurrentDocMatches()) {
+        break;
+      }
+      doc = in.nextDoc();
+    }
+
+    return doc;
+  }
+
+  @Override
+  public final int docID() {
+    return in.docID();
+  }
+
+  @Override
+  public final int nextStartPosition() throws IOException {
+    if (atFirstInCurrentDoc) {
+      atFirstInCurrentDoc = false;
+      return startPos;
+    }
+
+    for (;;) {
+      startPos = in.nextStartPosition();
+      if (startPos == NO_MORE_POSITIONS) {
+        return NO_MORE_POSITIONS;
+      }
+      switch(accept(in)) {
+        case YES:
+          return startPos;
+        case NO:
+          break;
+        case NO_MORE_IN_CURRENT_DOC:
+          return startPos = NO_MORE_POSITIONS; // startPos ahead for the current doc.
+      }
+    }
+  }
+
+  @Override
+  public final int startPosition() {
+    return atFirstInCurrentDoc ? -1 : startPos;
+  }
+
+  @Override
+  public final int endPosition() {
+    return atFirstInCurrentDoc ? -1
+          : (startPos != NO_MORE_POSITIONS) ? in.endPosition() : NO_MORE_POSITIONS;
   }
   
   @Override
-  public boolean next() throws IOException {
-    return in.next();
-  }
-
-  @Override
-  public boolean skipTo(int target) throws IOException {
-    return in.skipTo(target);
-  }
-
-  @Override
-  public int doc() {
-    return in.doc();
-  }
-
-  @Override
-  public int start() {
-    return in.start();
-  }
-
-  @Override
-  public int end() {
-    return in.end();
-  }
-  
-  @Override
-  public Collection<byte[]> getPayload() throws IOException {
+  public final Collection<byte[]> getPayload() throws IOException {
     return in.getPayload();
   }
 
   @Override
-  public boolean isPayloadAvailable() throws IOException {
+  public final boolean isPayloadAvailable() throws IOException {
     return in.isPayloadAvailable();
   }
   
   @Override
-  public long cost() {
+  public final long cost() {
     return in.cost();
   }
   
@@ -79,4 +131,74 @@ public class FilterSpans extends Spans {
     return "Filter(" + in.toString() + ")";
   }
   
+  @Override
+  public final TwoPhaseIterator asTwoPhaseIterator() {
+    final TwoPhaseIterator inner = in.asTwoPhaseIterator();
+    if (inner != null) {
+      // wrapped instance has an approximation
+      return new TwoPhaseIterator(inner.approximation()) {
+        @Override
+        public boolean matches() throws IOException {
+          return inner.matches() && twoPhaseCurrentDocMatches();
+        }
+      };
+    } else {
+      // wrapped instance has no approximation, but 
+      // we can still defer matching until absolutely needed.
+      return new TwoPhaseIterator(in) {
+        @Override
+        public boolean matches() throws IOException {
+          return twoPhaseCurrentDocMatches();
+        }
+      };
+    }
+  }
+  
+  /**
+   * Returns true if the current document matches.
+   * <p>
+   * This is called during two-phase processing.
+   */
+  // return true if the current document matches
+  @SuppressWarnings("fallthrough")
+  private final boolean twoPhaseCurrentDocMatches() throws IOException {
+    atFirstInCurrentDoc = false;
+    startPos = in.nextStartPosition();
+    assert startPos != NO_MORE_POSITIONS;
+    for (;;) {
+      switch(accept(in)) {
+        case YES:
+          atFirstInCurrentDoc = true;
+          return true;
+        case NO:
+          startPos = in.nextStartPosition();
+          if (startPos != NO_MORE_POSITIONS) {
+            break;
+          }
+          // else fallthrough
+        case NO_MORE_IN_CURRENT_DOC:
+          startPos = -1;
+          return false;
+      }
+    }
+  }
+  
+  /**
+   * Status returned from {@link FilterSpans#accept(Spans)} that indicates
+   * whether a candidate match should be accepted, rejected, or rejected
+   * and move on to the next document.
+   */
+  public static enum AcceptStatus {
+    /** Indicates the match should be accepted */
+    YES,
+
+    /** Indicates the match should be rejected */
+    NO,
+
+    /**
+     * Indicates the match should be rejected, and the enumeration may continue
+     * with the next document.
+     */
+    NO_MORE_IN_CURRENT_DOC
+  };
 }

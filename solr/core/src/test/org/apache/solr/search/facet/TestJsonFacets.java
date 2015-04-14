@@ -17,6 +17,7 @@ package org.apache.solr.search.facet;
  * limitations under the License.
  */
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -24,7 +25,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 
+import com.tdunning.math.stats.AVLTreeDigest;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.packed.GrowableWriter;
+import org.apache.lucene.util.packed.PackedInts;
 import org.apache.solr.JSONTestUtil;
 import org.apache.solr.SolrTestCaseHS;
 import org.apache.solr.common.SolrInputDocument;
@@ -258,6 +262,17 @@ public class TestJsonFacets extends SolrTestCaseHS {
 
     // multi-valued strings
     doStatsTemplated(client, params(p, "facet","true", "rows","0", "noexist","noexist_ss", "cat_s","cat_ss", "where_s","where_ss", "num_d","num_d", "num_i","num_i", "super_s","super_ss", "val_b","val_b", "sparse_s","sparse_ss", "multi_ss","multi_ss") );
+
+    // single valued docvalues for strings, and single valued numeric doc values for numeric fields
+    doStatsTemplated(client, params(p,                "rows","0", "noexist","noexist_sd",  "cat_s","cat_sd", "where_s","where_sd", "num_d","num_dd", "num_i","num_id", "super_s","super_sd", "val_b","val_b", "sparse_s","sparse_sd"    ,"multi_ss","multi_sds") );
+
+    // multi-valued docvalues
+    FacetFieldProcessorDV.unwrap_singleValued_multiDv = false;  // better multi-valued coverage
+    doStatsTemplated(client, params(p,                "rows","0", "noexist","noexist_sds",  "cat_s","cat_sds", "where_s","where_sds", "num_d","num_d", "num_i","num_i", "super_s","super_sds", "val_b","val_b", "sparse_s","sparse_sds"    ,"multi_ss","multi_sds") );
+
+    // multi-valued docvalues
+    FacetFieldProcessorDV.unwrap_singleValued_multiDv = true;
+    doStatsTemplated(client, params(p,                "rows","0", "noexist","noexist_sds",  "cat_s","cat_sds", "where_s","where_sds", "num_d","num_d", "num_i","num_i", "super_s","super_sds", "val_b","val_b", "sparse_s","sparse_sds"    ,"multi_ss","multi_sds") );
   }
 
   public static void doStatsTemplated(Client client, ModifiableSolrParams p) throws Exception {
@@ -275,7 +290,7 @@ public class TestJsonFacets extends SolrTestCaseHS {
     client.deleteByQuery("*:*", null);
 
     client.add(sdoc("id", "1", cat_s, "A", where_s, "NY", num_d, "4", num_i, "2", super_s, "zodiac", val_b, "true", sparse_s, "one"), null);
-    client.add(sdoc("id", "2", cat_s, "B", where_s, "NJ", num_d, "-9", num_i, "-5", super_s,"superman", val_b, "false"                , multi_ss,"a", "multi_ss","b" ), null);
+    client.add(sdoc("id", "2", cat_s, "B", where_s, "NJ", num_d, "-9", num_i, "-5", super_s,"superman", val_b, "false"                , multi_ss,"a", multi_ss,"b" ), null);
     client.add(sdoc("id", "3"), null);
     client.commit();
     client.add(sdoc("id", "4", cat_s, "A", where_s, "NJ", num_d, "2", num_i, "3",   super_s,"spiderman"                               , multi_ss, "b"), null);
@@ -364,6 +379,30 @@ public class TestJsonFacets extends SolrTestCaseHS {
         , "facets=={ 'count':6, " +
             "  f1:{  'buckets':[{ val:'A', count:2, n1:6.0 }, { val:'B', count:3, n1:-3.0}]}" +
             ", f2:{  'buckets':[{ val:'B', count:3, n1:-3.0}, { val:'A', count:2, n1:6.0 }]} }"
+    );
+
+    // percentiles 0,10,50,90,100
+    // catA: 2.0 2.2 3.0 3.8 4.0
+    // catB: -9.0 -8.2 -5.0 7.800000000000001 11.0
+    // all: -9.0 -7.3999999999999995 2.0 8.200000000000001 11.0
+    // test sorting by single percentile
+    client.testJQ(params(p, "q", "*:*"
+            , "json.facet", "{f1:{terms:{field:'${cat_s}', sort:'n1 desc', facet:{n1:'percentile(${num_d},50)'}  }}" +
+                " , f2:{terms:{field:'${cat_s}', sort:'n1 asc', facet:{n1:'percentile(${num_d},50)'}  }} }"
+        )
+        , "facets=={ 'count':6, " +
+            "  f1:{  'buckets':[{ val:'A', count:2, n1:3.0 }, { val:'B', count:3, n1:-5.0}]}" +
+            ", f2:{  'buckets':[{ val:'B', count:3, n1:-5.0}, { val:'A', count:2, n1:3.0 }]} }"
+    );
+
+    // test sorting by multiple percentiles (sort is by first)
+    client.testJQ(params(p, "q", "*:*"
+            , "json.facet", "{f1:{terms:{field:'${cat_s}', sort:'n1 desc', facet:{n1:'percentile(${num_d},50,0,100)'}  }}" +
+                " , f2:{terms:{field:'${cat_s}', sort:'n1 asc', facet:{n1:'percentile(${num_d},50,0,100)'}  }} }"
+        )
+        , "facets=={ 'count':6, " +
+            "  f1:{  'buckets':[{ val:'A', count:2, n1:[3.0,2.0,4.0] }, { val:'B', count:3, n1:[-5.0,-9.0,11.0] }]}" +
+            ", f2:{  'buckets':[{ val:'B', count:3, n1:[-5.0,-9.0,11.0]}, { val:'A', count:2, n1:[3.0,2.0,4.0] }]} }"
     );
 
     // test sorting by count/index order
@@ -465,7 +504,7 @@ public class TestJsonFacets extends SolrTestCaseHS {
 
     // test missing with stats
     client.testJQ(params(p, "q", "*:*"
-            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, facet:{x:'sum(num_d)'}   }}}"
+            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, facet:{x:'sum(${num_d})'}   }}}"
         )
         , "facets=={ 'count':6, " +
             "'f1':{ 'buckets':[{val:one, count:1, x:4.0}, {val:two, count:1, x:11.0}], missing:{count:4, x:-12.0}   } } "
@@ -473,7 +512,7 @@ public class TestJsonFacets extends SolrTestCaseHS {
 
     // test that the missing bucket is not affected by any prefix
     client.testJQ(params(p, "q", "*:*"
-            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, prefix:on, facet:{x:'sum(num_d)'}   }}}"
+            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, prefix:on, facet:{x:'sum(${num_d})'}   }}}"
         )
         , "facets=={ 'count':6, " +
             "'f1':{ 'buckets':[{val:one, count:1, x:4.0}], missing:{count:4, x:-12.0}   } } "
@@ -481,7 +520,7 @@ public class TestJsonFacets extends SolrTestCaseHS {
 
     // test missing with prefix that doesn't exist
     client.testJQ(params(p, "q", "*:*"
-            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, prefix:ppp, facet:{x:'sum(num_d)'}   }}}"
+            , "json.facet", "{f1:{terms:{field:${sparse_s}, missing:true, prefix:ppp, facet:{x:'sum(${num_d})'}   }}}"
         )
         , "facets=={ 'count':6, " +
             "'f1':{ 'buckets':[], missing:{count:4, x:-12.0}   } } "
@@ -557,15 +596,15 @@ public class TestJsonFacets extends SolrTestCaseHS {
 
     // stats at top level
     client.testJQ(params(p, "q", "*:*"
-            , "json.facet", "{ sum1:'sum(${num_d})', sumsq1:'sumsq(${num_d})', avg1:'avg(${num_d})', min1:'min(${num_d})', max1:'max(${num_d})', numwhere:'unique(${where_s})' }"
+            , "json.facet", "{ sum1:'sum(${num_d})', sumsq1:'sumsq(${num_d})', avg1:'avg(${num_d})', min1:'min(${num_d})', max1:'max(${num_d})', numwhere:'unique(${where_s})', med:'percentile(${num_d},50)', perc:'percentile(${num_d},0,50.0,100)' }"
         )
         , "facets=={ 'count':6, " +
-            "sum1:3.0, sumsq1:247.0, avg1:0.5, min1:-9.0, max1:11.0, numwhere:2  }"
+            "sum1:3.0, sumsq1:247.0, avg1:0.5, min1:-9.0, max1:11.0, numwhere:2, med:2.0, perc:[-9.0,2.0,11.0]  }"
     );
 
     // stats at top level, no matches
     client.testJQ(params(p, "q", "id:DOESNOTEXIST"
-            , "json.facet", "{ sum1:'sum(${num_d})', sumsq1:'sumsq(${num_d})', avg1:'avg(${num_d})', min1:'min(${num_d})', max1:'max(${num_d})', numwhere:'unique(${where_s})' }"
+            , "json.facet", "{ sum1:'sum(${num_d})', sumsq1:'sumsq(${num_d})', avg1:'avg(${num_d})', min1:'min(${num_d})', max1:'max(${num_d})', numwhere:'unique(${where_s})', med:'percentile(${num_d},50)', perc:'percentile(${num_d},0,50.0,100)' }"
         )
         , "facets=={count:0 " +
             "/* ,sum1:0.0, sumsq1:0.0, avg1:0.0, min1:'NaN', max1:'NaN', numwhere:0 */ }"
@@ -591,6 +630,14 @@ public class TestJsonFacets extends SolrTestCaseHS {
             "x:2," +
             "y:{count:1, x:2}" +  // single document should yield 2 unique values
             " }"
+    );
+
+    // test allBucket multi-valued
+    client.testJQ(params(p, "q", "*:*"
+            , "json.facet", "{x:{terms:{field:'${multi_ss}',allBuckets:true}}}"
+        )
+        , "facets=={ count:6, " +
+            "x:{ buckets:[{val:a, count:3}, {val:b, count:3}] , allBuckets:{count:6} } }"
     );
 
 
@@ -629,7 +676,7 @@ public class TestJsonFacets extends SolrTestCaseHS {
     client.testJQ(params(p, "q", "*:*"
             // , "json.facet", "{f1:{terms:{field:'${cat_s}', sort:'n1 desc', facet:{n1:'sum(${num_d})'}  }}" +
             //    " , f2:{terms:{field:'${cat_s}', sort:'n1 asc', facet:{n1:'sum(${num_d})'}  }} }"
-            , "facet","true", "facet.version", "2", "facet.field","{!key=f1}${cat_s}", "f.f1.facet.sort","n1 desc", "facet.stat","n1:sum(num_d)"
+            , "facet","true", "facet.version", "2", "facet.field","{!key=f1}${cat_s}", "f.f1.facet.sort","n1 desc", "facet.stat","n1:sum(${num_d})"
             , "facet.field","{!key=f2}${cat_s}", "f.f1.facet.sort","n1 asc"
         )
         , "facets=={ 'count':6, " +
@@ -671,4 +718,85 @@ public class TestJsonFacets extends SolrTestCaseHS {
     doStats( client, params() );
   }
 
+
+  public void XtestPercentiles() {
+    AVLTreeDigest catA = new AVLTreeDigest(100);
+    catA.add(4);
+    catA.add(2);
+
+    AVLTreeDigest catB = new AVLTreeDigest(100);
+    catB.add(-9);
+    catB.add(11);
+    catB.add(-5);
+
+    AVLTreeDigest all = new AVLTreeDigest(100);
+    all.add(catA);
+    all.add(catB);
+
+    System.out.println(str(catA));
+    System.out.println(str(catB));
+    System.out.println(str(all));
+
+    // 2.0 2.2 3.0 3.8 4.0
+    // -9.0 -8.2 -5.0 7.800000000000001 11.0
+    // -9.0 -7.3999999999999995 2.0 8.200000000000001 11.0
+  }
+
+  private static String str(AVLTreeDigest digest) {
+    StringBuilder sb = new StringBuilder();
+    for (double d : new double[] {0,.1,.5,.9,1}) {
+      sb.append(" ").append(digest.quantile(d));
+    }
+    return sb.toString();
+  }
+
+  /*** test code to ensure TDigest is working as we expect. */
+
+  public void XtestTDigest() throws Exception {
+    AVLTreeDigest t1 = new AVLTreeDigest(100);
+    t1.add(10, 1);
+    t1.add(90, 1);
+    t1.add(50, 1);
+
+    System.out.println(t1.quantile(0.1));
+    System.out.println(t1.quantile(0.5));
+    System.out.println(t1.quantile(0.9));
+
+    assertEquals(t1.quantile(0.5), 50.0, 0.01);
+
+    AVLTreeDigest t2 = new AVLTreeDigest(100);
+    t2.add(130, 1);
+    t2.add(170, 1);
+    t2.add(90, 1);
+
+    System.out.println(t2.quantile(0.1));
+    System.out.println(t2.quantile(0.5));
+    System.out.println(t2.quantile(0.9));
+
+    AVLTreeDigest top = new AVLTreeDigest(100);
+
+    t1.compress();
+    ByteBuffer buf = ByteBuffer.allocate(t1.byteSize()); // upper bound
+    t1.asSmallBytes(buf);
+    byte[] arr1 = Arrays.copyOf(buf.array(), buf.position());
+
+    ByteBuffer rbuf = ByteBuffer.wrap(arr1);
+    top.add(AVLTreeDigest.fromBytes(rbuf));
+
+    System.out.println(top.quantile(0.1));
+    System.out.println(top.quantile(0.5));
+    System.out.println(top.quantile(0.9));
+
+    t2.compress();
+    ByteBuffer buf2 = ByteBuffer.allocate(t2.byteSize()); // upper bound
+    t2.asSmallBytes(buf2);
+    byte[] arr2 = Arrays.copyOf(buf2.array(), buf2.position());
+
+    ByteBuffer rbuf2 = ByteBuffer.wrap(arr2);
+    top.add(AVLTreeDigest.fromBytes(rbuf2));
+
+    System.out.println(top.quantile(0.1));
+    System.out.println(top.quantile(0.5));
+    System.out.println(top.quantile(0.9));
+  }
 }

@@ -17,6 +17,7 @@ package org.apache.lucene.index;
  * limitations under the License.
  */
 
+import org.apache.lucene.codecs.BlockTermState;
 import org.apache.lucene.util.BytesRef;
 
 import java.io.IOException;
@@ -89,7 +90,7 @@ public final class TermContext {
       //if (DEBUG) System.out.println("  r=" + leaves[i].reader);
       final Terms terms = ctx.reader().terms(field);
       if (terms != null) {
-        final TermsEnum termsEnum = terms.iterator(null);
+        final TermsEnum termsEnum = terms.iterator();
         if (termsEnum.seekExact(bytes)) { 
           final TermState termState = termsEnum.termState();
           //if (DEBUG) System.out.println("    found");
@@ -164,5 +165,31 @@ public final class TermContext {
    * @lucene.internal */
   public void setDocFreq(int docFreq) {
     this.docFreq = docFreq;
+  }
+
+  /** Returns true if all terms stored here are real (e.g., not auto-prefix terms).
+   *
+   *  @lucene.internal */
+  public boolean hasOnlyRealTerms() {
+    for(TermState termState : states) {
+      if (termState instanceof BlockTermState && ((BlockTermState) termState).isRealTerm == false) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  @Override
+  public String toString() {
+    StringBuilder sb = new StringBuilder();
+    sb.append("TermContext\n");
+    for(TermState termState : states) {
+      sb.append("  state=");
+      sb.append(termState.toString());
+      sb.append('\n');
+    }
+
+    return sb.toString();
   }
 }

@@ -441,7 +441,7 @@ public class MemoryIndex {
         sliceArray = info.sliceArray;
         sumTotalTermFreq = info.sumTotalTermFreq;
       } else {
-        fieldInfo = new FieldInfo(fieldName, fields.size(), false, false, this.storePayloads,
+        fieldInfo = new FieldInfo(fieldName, fields.size(), true, false, this.storePayloads,
             this.storeOffsets
                 ? IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS : IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
             DocValuesType.NONE, -1, Collections.<String,String>emptyMap());
@@ -480,7 +480,12 @@ public class MemoryIndex {
         }
         if (storePayloads) {
           final BytesRef payload = payloadAtt.getPayload();
-          int pIndex = payload == null ? -1 : payloadsBytesRefs.append(payload);
+          final int pIndex;
+          if (payload == null || payload.length == 0) {
+            pIndex = -1;
+          } else {
+            pIndex = payloadsBytesRefs.append(payload);
+          }
           postingsWriter.writeInt(pIndex);
         }
         sliceArray.end[ord] = postingsWriter.getCurrentOffset();
@@ -835,7 +840,7 @@ public class MemoryIndex {
 
         return new Terms() {
           @Override
-          public TermsEnum iterator(TermsEnum reuse) {
+          public TermsEnum iterator() {
             return new MemoryTermsEnum(info);
           }
 
@@ -949,6 +954,7 @@ public class MemoryIndex {
       public void seekExact(long ord) {
         assert ord < info.terms.size();
         termUpto = (int) ord;
+        info.terms.get(info.sortedTerms[termUpto], br);
       }
       
       @Override

@@ -268,6 +268,19 @@ public class QueryEqualityTest extends SolrTestCaseJ4 {
     }
   }
 
+
+  public void testHash() throws Exception {
+    SolrQueryRequest req = req("partitionKeys","foo_s");
+
+    try {
+      assertQueryEquals("hash", req,
+          "{!hash workers=3 worker=0}");
+
+    } finally {
+      req.close();
+    }
+  }
+
   public void testQueryNested() throws Exception {
     SolrQueryRequest req = req("df", "foo_s");
     try {
@@ -943,6 +956,7 @@ public class QueryEqualityTest extends SolrTestCaseJ4 {
     assertFuncEquals("agg_count()", "agg_count()");
     assertFuncEquals("agg_unique(foo_i)", "agg_unique(foo_i)");
     assertFuncEquals("agg_sumsq(foo_i)", "agg_sumsq(foo_i)");
+    assertFuncEquals("agg_percentile(foo_i,50)", "agg_percentile(foo_i,50)");
     // assertFuncEquals("agg_stdev(foo_i)", "agg_stdev(foo_i)");
     // assertFuncEquals("agg_multistat(foo_i)", "agg_multistat(foo_i)");
   }

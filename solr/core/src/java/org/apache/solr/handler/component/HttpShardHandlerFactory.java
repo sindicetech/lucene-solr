@@ -58,7 +58,7 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
   //
   // Consider CallerRuns policy and a lower max threads to throttle
   // requests at some point (or should we simply return failure?)
-  private ThreadPoolExecutor commExecutor = new ThreadPoolExecutor(
+  private ThreadPoolExecutor commExecutor = new ExecutorUtil.MDCAwareThreadPoolExecutor(
       0,
       Integer.MAX_VALUE,
       5, TimeUnit.SECONDS, // terminate idle threads after 5 sec
@@ -123,21 +123,24 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
 
   @Override
   public void init(PluginInfo info) {
+    StringBuilder sb = new StringBuilder();
     NamedList args = info.initArgs;
-    this.soTimeout = getParameter(args, HttpClientUtil.PROP_SO_TIMEOUT, soTimeout);
-    this.scheme = getParameter(args, INIT_URL_SCHEME, null);
+    this.soTimeout = getParameter(args, HttpClientUtil.PROP_SO_TIMEOUT, soTimeout,sb);
+    this.scheme = getParameter(args, INIT_URL_SCHEME, null,sb);
     if(StringUtils.endsWith(this.scheme, "://")) {
       this.scheme = StringUtils.removeEnd(this.scheme, "://");
     }
-    this.connectionTimeout = getParameter(args, HttpClientUtil.PROP_CONNECTION_TIMEOUT, connectionTimeout);
-    this.maxConnectionsPerHost = getParameter(args, HttpClientUtil.PROP_MAX_CONNECTIONS_PER_HOST, maxConnectionsPerHost);
-    this.maxConnections = getParameter(args, HttpClientUtil.PROP_MAX_CONNECTIONS, maxConnections);
-    this.corePoolSize = getParameter(args, INIT_CORE_POOL_SIZE, corePoolSize);
-    this.maximumPoolSize = getParameter(args, INIT_MAX_POOL_SIZE, maximumPoolSize);
-    this.keepAliveTime = getParameter(args, MAX_THREAD_IDLE_TIME, keepAliveTime);
-    this.queueSize = getParameter(args, INIT_SIZE_OF_QUEUE, queueSize);
-    this.accessPolicy = getParameter(args, INIT_FAIRNESS_POLICY, accessPolicy);
-    this.useRetries = getParameter(args, USE_RETRIES, useRetries);
+
+    this.connectionTimeout = getParameter(args, HttpClientUtil.PROP_CONNECTION_TIMEOUT, connectionTimeout, sb);
+    this.maxConnectionsPerHost = getParameter(args, HttpClientUtil.PROP_MAX_CONNECTIONS_PER_HOST, maxConnectionsPerHost,sb);
+    this.maxConnections = getParameter(args, HttpClientUtil.PROP_MAX_CONNECTIONS, maxConnections,sb);
+    this.corePoolSize = getParameter(args, INIT_CORE_POOL_SIZE, corePoolSize,sb);
+    this.maximumPoolSize = getParameter(args, INIT_MAX_POOL_SIZE, maximumPoolSize,sb);
+    this.keepAliveTime = getParameter(args, MAX_THREAD_IDLE_TIME, keepAliveTime,sb);
+    this.queueSize = getParameter(args, INIT_SIZE_OF_QUEUE, queueSize,sb);
+    this.accessPolicy = getParameter(args, INIT_FAIRNESS_POLICY, accessPolicy,sb);
+    this.useRetries = getParameter(args, USE_RETRIES, useRetries,sb);
+    log.info("created with {}",sb);
     
     // magic sysprop to make tests reproducible: set by SolrTestCaseJ4.
     String v = System.getProperty("tests.shardhandler.randomSeed");
@@ -149,7 +152,7 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
         new SynchronousQueue<Runnable>(this.accessPolicy) :
         new ArrayBlockingQueue<Runnable>(this.queueSize, this.accessPolicy);
 
-    this.commExecutor = new ThreadPoolExecutor(
+    this.commExecutor = new ExecutorUtil.MDCAwareThreadPoolExecutor(
         this.corePoolSize,
         this.maximumPoolSize,
         this.keepAliveTime, TimeUnit.SECONDS,
@@ -185,13 +188,13 @@ public class HttpShardHandlerFactory extends ShardHandlerFactory implements org.
     return new LBHttpSolrClient(httpClient);
   }
 
-  protected <T> T getParameter(NamedList initArgs, String configKey, T defaultValue) {
+  protected <T> T getParameter(NamedList initArgs, String configKey, T defaultValue, StringBuilder sb) {
     T toReturn = defaultValue;
     if (initArgs != null) {
       T temp = (T) initArgs.get(configKey);
       toReturn = (temp != null) ? temp : defaultValue;
     }
-    log.info("Setting {} to: {}", configKey, toReturn);
+    if(sb!=null && toReturn != null) sb.append(configKey).append(" : ").append(toReturn).append(",");
     return toReturn;
   }
 

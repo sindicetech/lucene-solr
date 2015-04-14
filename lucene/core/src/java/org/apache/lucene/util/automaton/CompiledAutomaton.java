@@ -24,9 +24,11 @@ import java.util.List;
 import org.apache.lucene.index.SingleTermsEnum;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.search.PrefixTermsEnum;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
+import org.apache.lucene.util.IntsRef;
+import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.UnicodeUtil;
 
 /**
  * Immutable class holding compiled details for a given
@@ -47,8 +49,6 @@ public class CompiledAutomaton {
     ALL, 
     /** Automaton that accepts only a single fixed string. */
     SINGLE, 
-    /** Automaton that matches all Strings with a constant prefix. */
-    PREFIX, 
     /** Catch-all for any other automata. */
     NORMAL
   };
@@ -57,8 +57,7 @@ public class CompiledAutomaton {
   public final AUTOMATON_TYPE type;
 
   /** 
-   * For {@link AUTOMATON_TYPE#PREFIX}, this is the prefix term; 
-   * for {@link AUTOMATON_TYPE#SINGLE} this is the singleton term.
+   * For {@link AUTOMATON_TYPE#SINGLE} this is the singleton term.
    */
   public final BytesRef term;
 
@@ -79,7 +78,8 @@ public class CompiledAutomaton {
   /**
    * Shared common suffix accepted by the automaton. Only valid
    * for {@link AUTOMATON_TYPE#NORMAL}, and only when the
-   * automaton accepts an infinite language.
+   * automaton accepts an infinite language.  This will be null
+   * if the common prefix is length 0.
    */
   public final BytesRef commonSuffixRef;
 
@@ -90,10 +90,39 @@ public class CompiledAutomaton {
    */
   public final Boolean finite;
 
+  /** Which state, if any, accepts all suffixes, else -1. */
+  public final int sinkState;
+
   /** Create this, passing simplify=true and finite=null, so that we try
    *  to simplify the automaton and determine if it is finite. */
   public CompiledAutomaton(Automaton automaton) {
     this(automaton, null, true);
+  }
+
+  /** Returns sink state, if present, else -1. */
+  private static int findSinkState(Automaton automaton) {
+    int numStates = automaton.getNumStates();
+    Transition t = new Transition();
+    int foundState = -1;
+    for (int s=0;s<numStates;s++) {
+      if (automaton.isAccept(s)) {
+        int count = automaton.initTransition(s, t);
+        boolean isSinkState = false;
+        for(int i=0;i<count;i++) {
+          automaton.getNextTransition(t);
+          if (t.dest == s && t.min == 0 && t.max == 0xff) {
+            isSinkState = true;
+            break;
+          }
+        }
+        if (isSinkState) {
+          foundState = s;
+          break;
+        }
+      }
+    }
+
+    return foundState;
   }
 
   /** Create this.  If finite is null, we use {@link Operations#isFinite}
@@ -101,7 +130,7 @@ public class CompiledAutomaton {
    *  possibly expensive operations to determine if the automaton is one
    *  the cases in {@link CompiledAutomaton.AUTOMATON_TYPE}. */
   public CompiledAutomaton(Automaton automaton, Boolean finite, boolean simplify) {
-    this(automaton, finite, simplify, Operations.DEFAULT_MAX_DETERMINIZED_STATES);
+    this(automaton, finite, simplify, Operations.DEFAULT_MAX_DETERMINIZED_STATES, false);
   }
 
 
@@ -114,7 +143,7 @@ public class CompiledAutomaton {
    *  TooComplexToDeterminizeException.
    */
   public CompiledAutomaton(Automaton automaton, Boolean finite, boolean simplify,
-      int maxDeterminizedStates) {
+                           int maxDeterminizedStates, boolean isBinary) {
     if (automaton.getNumStates() == 0) {
       automaton = new Automaton();
       automaton.createState();
@@ -134,9 +163,20 @@ public class CompiledAutomaton {
         runAutomaton = null;
         this.automaton = null;
         this.finite = null;
+        sinkState = -1;
         return;
+      }
+
+      boolean isTotal;
+
       // NOTE: only approximate, because automaton may not be minimal:
-      } else if (Operations.isTotal(automaton)) {
+      if (isBinary) {
+        isTotal = Operations.isTotal(automaton, 0, 0xff);
+      } else {
+        isTotal = Operations.isTotal(automaton);
+      }
+
+      if (isTotal) {
         // matches all possible strings
         type = AUTOMATON_TYPE.ALL;
         term = null;
@@ -144,44 +184,29 @@ public class CompiledAutomaton {
         runAutomaton = null;
         this.automaton = null;
         this.finite = null;
+        sinkState = -1;
         return;
-      } else {
+      }
 
-        automaton = Operations.determinize(automaton, maxDeterminizedStates);
+      automaton = Operations.determinize(automaton, maxDeterminizedStates);
 
-        final String commonPrefix = Operations.getCommonPrefix(automaton);
-        final String singleton;
+      IntsRef singleton = Operations.getSingleton(automaton);
 
-        if (commonPrefix.length() > 0 && Operations.sameLanguage(automaton, Automata.makeString(commonPrefix))) {
-          singleton = commonPrefix;
+      if (singleton != null) {
+        // matches a fixed string
+        type = AUTOMATON_TYPE.SINGLE;
+        commonSuffixRef = null;
+        runAutomaton = null;
+        this.automaton = null;
+        this.finite = null;
+
+        if (isBinary) {
+          term = StringHelper.intsRefToBytesRef(singleton);
         } else {
-          singleton = null;
+          term = new BytesRef(UnicodeUtil.newString(singleton.ints, singleton.offset, singleton.length));
         }
-
-        if (singleton != null) {
-          // matches a fixed string
-          type = AUTOMATON_TYPE.SINGLE;
-          term = new BytesRef(singleton);
-          commonSuffixRef = null;
-          runAutomaton = null;
-          this.automaton = null;
-          this.finite = null;
-          return;
-        } else if (commonPrefix.length() > 0) {
-          Automaton other = Operations.concatenate(Automata.makeString(commonPrefix), Automata.makeAnyString());
-          other = Operations.determinize(other, maxDeterminizedStates);
-          assert Operations.hasDeadStates(other) == false;
-          if (Operations.sameLanguage(automaton, other)) {
-            // matches a constant prefix
-            type = AUTOMATON_TYPE.PREFIX;
-            term = new BytesRef(commonPrefix);
-            commonSuffixRef = null;
-            runAutomaton = null;
-            this.automaton = null;
-            this.finite = null;
-            return;
-          }
-        }
+        sinkState = -1;
+        return;
       }
     }
 
@@ -194,16 +219,38 @@ public class CompiledAutomaton {
       this.finite = finite;
     }
 
-    Automaton utf8 = new UTF32ToUTF8().convert(automaton);
+    Automaton binary;
+    if (isBinary) {
+      // Caller already built binary automaton themselves, e.g. PrefixQuery
+      // does this since it can be provided with a binary (not necessarily
+      // UTF8!) term:
+      binary = automaton;
+    } else {
+      // Incoming automaton is unicode, and we must convert to UTF8 to match what's in the index:
+      binary = new UTF32ToUTF8().convert(automaton);
+    }
+
     if (this.finite) {
       commonSuffixRef = null;
     } else {
-      // NOTE: this is a very costly operation!  We should test if it's really warranted in practice...
-      commonSuffixRef = Operations.getCommonSuffixBytesRef(utf8, maxDeterminizedStates);
+      // NOTE: this is a very costly operation!  We should test if it's really warranted in practice... we could do a fast match
+      // by looking for a sink state (which means it has no common suffix).  Or maybe we shouldn't do it when simplify is false?:
+      BytesRef suffix = Operations.getCommonSuffixBytesRef(binary, maxDeterminizedStates);
+      if (suffix.length == 0) {
+        commonSuffixRef = null;
+      } else {
+        commonSuffixRef = suffix;
+      }
     }
-    runAutomaton = new ByteRunAutomaton(utf8, true, maxDeterminizedStates);
+
+    // This will determinize the binary automaton for us:
+    runAutomaton = new ByteRunAutomaton(binary, true, maxDeterminizedStates);
 
     this.automaton = runAutomaton.automaton;
+
+    // TODO: this is a bit fragile because if the automaton is not minimized there could be more than 1 sink state but auto-prefix will fail
+    // to run for those:
+    sinkState = findSinkState(this.automaton);
   }
 
   private Transition transition = new Transition();
@@ -282,13 +329,9 @@ public class CompiledAutomaton {
     case NONE:
       return TermsEnum.EMPTY;
     case ALL:
-      return terms.iterator(null);
+      return terms.iterator();
     case SINGLE:
-      return new SingleTermsEnum(terms.iterator(null), term);
-    case PREFIX:
-      // TODO: this is very likely faster than .intersect,
-      // but we should test and maybe cutover
-      return new PrefixTermsEnum(terms.iterator(null), term);
+      return new SingleTermsEnum(terms.iterator(), term);
     case NORMAL:
       return terms.intersect(this, null);
     default:
@@ -410,7 +453,7 @@ public class CompiledAutomaton {
     if (getClass() != obj.getClass()) return false;
     CompiledAutomaton other = (CompiledAutomaton) obj;
     if (type != other.type) return false;
-    if (type == AUTOMATON_TYPE.SINGLE || type == AUTOMATON_TYPE.PREFIX) {
+    if (type == AUTOMATON_TYPE.SINGLE) {
       if (!term.equals(other.term)) return false;
     } else if (type == AUTOMATON_TYPE.NORMAL) {
       if (!runAutomaton.equals(other.runAutomaton)) return false;

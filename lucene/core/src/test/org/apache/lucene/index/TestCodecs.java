@@ -233,7 +233,7 @@ public class TestCodecs extends LuceneTestCase {
     final Terms terms2 = reader.terms(fieldName);
     assertNotNull(terms2);
 
-    final TermsEnum termsEnum = terms2.iterator(null);
+    final TermsEnum termsEnum = terms2.iterator();
 
     PostingsEnum postingsEnum = null;
     for(int i=0;i<NUM_TERMS;i++) {
@@ -362,7 +362,7 @@ public class TestCodecs extends LuceneTestCase {
 
       for(int iter=0;iter<NUM_TEST_ITER;iter++) {
         final FieldData field = fields[random().nextInt(fields.length)];
-        final TermsEnum termsEnum = termsDict.terms(field.fieldInfo.name).iterator(null);
+        final TermsEnum termsEnum = termsDict.terms(field.fieldInfo.name).iterator();
 
         int upto = 0;
         // Test straight enum of the terms:
@@ -452,20 +452,15 @@ public class TestCodecs extends LuceneTestCase {
         do {
           term = field.terms[upto];
           if (random().nextInt(3) == 1) {
-            final PostingsEnum docs;
             final PostingsEnum postings;
             if (!field.omitTF) {
+              // TODO: we should randomize which postings features are available, but
+              // need to coordinate this with the checks below that rely on such features
               postings = termsEnum.postings(null, null, PostingsEnum.ALL);
-              if (postings != null) {
-                docs = postings;
-              } else {
-                docs = TestUtil.docs(random(), termsEnum, null, null, PostingsEnum.FREQS);
-              }
             } else {
-              postings = null;
-              docs = TestUtil.docs(random(), termsEnum, null, null, PostingsEnum.NONE);
+              postings = TestUtil.docs(random(), termsEnum, null, null, PostingsEnum.FREQS);
             }
-            assertNotNull(docs);
+            assertNotNull(postings);
             int upto2 = -1;
             boolean ended = false;
             while(upto2 < term.docs.length-1) {
@@ -476,10 +471,10 @@ public class TestCodecs extends LuceneTestCase {
                 final int inc = 1+random().nextInt(left-1);
                 upto2 += inc;
                 if (random().nextInt(2) == 1) {
-                  doc = docs.advance(term.docs[upto2]);
+                  doc = postings.advance(term.docs[upto2]);
                   assertEquals(term.docs[upto2], doc);
                 } else {
-                  doc = docs.advance(1+term.docs[upto2]);
+                  doc = postings.advance(1+term.docs[upto2]);
                   if (doc == DocIdSetIterator.NO_MORE_DOCS) {
                     // skipped past last doc
                     assert upto2 == term.docs.length-1;
@@ -494,7 +489,7 @@ public class TestCodecs extends LuceneTestCase {
                   }
                 }
               } else {
-                doc = docs.nextDoc();
+                doc = postings.nextDoc();
                 assertTrue(doc != -1);
                 upto2++;
               }
@@ -508,7 +503,7 @@ public class TestCodecs extends LuceneTestCase {
             }
 
             if (!ended) {
-              assertEquals(DocIdSetIterator.NO_MORE_DOCS, docs.nextDoc());
+              assertEquals(DocIdSetIterator.NO_MORE_DOCS, postings.nextDoc());
             }
           }
           upto++;
@@ -576,7 +571,7 @@ public class TestCodecs extends LuceneTestCase {
     }
 
     @Override
-    public TermsEnum iterator(TermsEnum reuse) {
+    public TermsEnum iterator() {
       return new DataTermsEnum(fieldData);
     }
 

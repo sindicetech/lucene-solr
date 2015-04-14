@@ -17,6 +17,32 @@
 
 package org.apache.solr.servlet;
 
+import java.io.ByteArrayInputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Properties;
+import java.util.Set;
+
+import javax.servlet.FilterChain;
+import javax.servlet.FilterConfig;
+import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.Header;
@@ -36,6 +62,7 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
+import org.apache.solr.cloud.CloudDescriptor;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.cloud.Aliases;
@@ -43,7 +70,6 @@ import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.SolrZkClient;
-import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.CommonParams;
@@ -60,6 +86,7 @@ import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrResourceLoader;
 import org.apache.solr.core.SolrXmlConfig;
 import org.apache.solr.handler.ContentStreamHandlerBase;
+import org.apache.solr.logging.MDCUtils;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequestBase;
 import org.apache.solr.request.SolrRequestHandler;
@@ -73,31 +100,9 @@ import org.apache.solr.update.processor.DistributingUpdateProcessorFactory;
 import org.apache.solr.util.RTimer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
-import javax.servlet.FilterChain;
-import javax.servlet.FilterConfig;
-import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.ByteArrayInputStream;
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Properties;
-import java.util.Set;
+import static org.apache.solr.common.cloud.ZkStateReader.NODE_NAME_PROP;
 
 /**
  * This filter looks at the incoming URL maps them to handlers defined in solrconfig.xml
@@ -219,6 +224,11 @@ public class SolrDispatchFilter extends BaseSolrFilter {
   }
   
   public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain, boolean retry) throws IOException, ServletException {
+    MDCUtils.clearMDC();
+
+    if (this.cores.isZooKeeperAware())  {
+      MDC.put(NODE_NAME_PROP, this.cores.getZkController().getNodeName());
+    }
 
     if (abortErrorMessage != null) {
       sendError((HttpServletResponse) response, 500, abortErrorMessage);
@@ -305,11 +315,15 @@ public class SolrDispatchFilter extends BaseSolrFilter {
 
             if (core != null) {
               path = path.substring( idx );
+              addMDCValues(cores, core);
             }
           }
           if (core == null) {
             if (!cores.isZooKeeperAware() ) {
               core = cores.getCore("");
+              if (core != null) {
+                addMDCValues(cores, core);
+              }
             }
           }
         }
@@ -321,6 +335,7 @@ public class SolrDispatchFilter extends BaseSolrFilter {
           if (core != null) {
             // we found a core, update the path
             path = path.substring( idx );
+            addMDCValues(cores, core);
           }
           
           // if we couldn't find it locally, look on other nodes
@@ -355,6 +370,9 @@ public class SolrDispatchFilter extends BaseSolrFilter {
           // try the default core
           if (core == null) {
             core = cores.getCore("");
+            if (core != null) {
+              addMDCValues(cores, core);
+            }
           }
         }
 
@@ -482,6 +500,16 @@ public class SolrDispatchFilter extends BaseSolrFilter {
 
     // Otherwise let the webapp handle the request
     chain.doFilter(request, response);
+  }
+
+  private void addMDCValues(CoreContainer cores, SolrCore core) {
+    MDCUtils.setCore(core.getName());
+    if (cores.isZooKeeperAware()) {
+      CloudDescriptor cloud = core.getCoreDescriptor().getCloudDescriptor();
+      MDCUtils.setCollection(cloud.getCollectionName());
+      MDCUtils.setShard(cloud.getShardId());
+      MDCUtils.setReplica(cloud.getCoreNodeName());
+    }
   }
 
   private Map<String , Integer> checkStateIsValid(CoreContainer cores, String stateVer) {
@@ -666,24 +694,23 @@ public class SolrDispatchFilter extends BaseSolrFilter {
     Set<String> liveNodes = clusterState.getLiveNodes();
     for (Slice slice : slices) {
       Map<String,Replica> sliceShards = slice.getReplicasMap();
-      for (ZkNodeProps nodeProps : sliceShards.values()) {
-        ZkCoreNodeProps coreNodeProps = new ZkCoreNodeProps(nodeProps);
-        if (!activeReplicas || (liveNodes.contains(coreNodeProps.getNodeName())
-            && coreNodeProps.getState().equals(ZkStateReader.ACTIVE))) {
+      for (Replica replica : sliceShards.values()) {
+        if (!activeReplicas || (liveNodes.contains(replica.getNodeName())
+            && replica.getState() == Replica.State.ACTIVE)) {
 
-          if (byCoreName && !collectionName.equals(coreNodeProps.getCoreName())) {
+          if (byCoreName && !collectionName.equals(replica.getStr(ZkStateReader.CORE_NAME_PROP))) {
             // if it's by core name, make sure they match
             continue;
           }
-          if (coreNodeProps.getBaseUrl().equals(cores.getZkController().getBaseUrl())) {
+          if (replica.getStr(ZkStateReader.BASE_URL_PROP).equals(cores.getZkController().getBaseUrl())) {
             // don't count a local core
             continue;
           }
 
           if (origCorename != null) {
-            coreUrl = coreNodeProps.getBaseUrl() + "/" + origCorename;
+            coreUrl = replica.getStr(ZkStateReader.BASE_URL_PROP) + "/" + origCorename;
           } else {
-            coreUrl = coreNodeProps.getCoreUrl();
+            coreUrl = replica.getCoreUrl();
             if (coreUrl.endsWith("/")) {
               coreUrl = coreUrl.substring(0, coreUrl.length() - 1);
             }
