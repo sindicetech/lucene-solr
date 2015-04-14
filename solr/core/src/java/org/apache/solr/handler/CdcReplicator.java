@@ -119,7 +119,7 @@ public class CdcReplicator implements Runnable {
       // we might have read a single commit operation and reached the end of the update logs
       logReader.forwardSeek(subReader);
 
-      log.info("Forwarded {} updates to target {}", counter, state.getTargetCollection());
+      log.debug("Forwarded {} updates to target {}", counter, state.getTargetCollection());
     }
     catch (Exception e) {
       // report error and update error stats
