@@ -9,6 +9,90 @@ caching, replication, and a web administration interface.
 See http://lucene.apache.org/solr for more information.
 
 
+==================  5.2.0 ==================
+
+Consult the LUCENE_CHANGES.txt file for additional, low level, changes in this release
+
+Versions of Major Components
+---------------------
+
+Upgrading from Solr 5.1
+-----------------------
+
+* SOLR-7325: Slice.getState() now returns a State enum instead of a String. This helps
+  clarify the states a Slice can be in, as well comparing the state of a Slice.
+  (Shai Erera)
+  
+* SOLR-7336: Added Replica.getState() and removed ZkStateReader state-related constants.
+  You should use Replica.State to compare a replica's state. (Shai Erera)
+
+Detailed Change List
+----------------------
+
+New Features
+----------------------
+
+* SOLR-6637: Restore a Solr core from a backed up index.
+  Restore API Example -
+    http://localhost:8983/solr/techproducts/replication?command=restore&name=backup_name
+  Restore Status API Example -
+    http://localhost:8983/solr/techproducts/replication?command=restorestatus
+  (Varun Thacker, noble, shalin)
+
+* SOLR-7241, SOLR-7263, SOLR-7279: More functionality moving the Admin UI to Angular JS
+  (Upayavira via Erick)
+
+* SOLR-7372: Limit memory consumed by LRUCache with a new 'maxRamMB' config parameter.
+  (yonik, shalin)
+
+Bug Fixes
+----------------------
+
+* SOLR-6709: Fix QueryResponse to deal with the "expanded" section when using the XMLResponseParser
+  (Varun Thacker, Joel Bernstein)
+
+* SOLR-7066: autoAddReplicas feature has bug when selecting replacement nodes. (Mark Miller)
+
+* SOLR-7370: FSHDFSUtils#recoverFileLease tries to recover the lease every one second after 
+  the first four second wait. (Mark Miller)
+
+* SOLR-7369: AngularJS UI insufficient URLDecoding in cloud/tree view (janhoy)
+
+* SOLR-7380: SearchHandler should not try to load runtime components in inform() (Noble Paul)
+
+* SOLR-7385: The clusterstatus API now returns the config set used to create a collection
+  inside a 'configName' key. (Shai Erera, shalin)
+
+Optimizations
+----------------------
+
+* SOLR-7324: IndexFetcher does not need to call isIndexStale if full copy is already needed
+  (Stephan Lagraulet via Varun Thacker)
+
+Other Changes
+----------------------
+
+* SOLR-6865: Upgrade HttpClient to 4.4.1 (Shawn Heisey)
+
+* SOLR-7358: TestRestoreCore fails in Windows (Ishan Chattopadhyaya via Varun Thacker)
+
+* SOLR-7371: Make DocSet implement Accountable to estimate memory usage. (yonik, shalin)
+
+* SOLR-7381: Improve logging by adding node name in MDC in SolrCloud mode and adding MDC to
+  all thread pools. A new MDCAwareThreadPoolExecutor is introduced and usages of
+  Executors#newFixedThreadPool, #newSingleThreadExecutor, #newCachedThreadPool as well as
+  ThreadPoolExecutor directly is now forbidden in Solr. (shalin)
+
+* SOLR-7384: Fix spurious failures in FullSolrCloudDistribCmdsTest. (shalin)
+
+* SOLR-6692: Default highlighter changes:
+  - hl.maxAnalyzedChars now applies cumulatively on a multi-valied field.
+  - fragment ranking on a multi-valued field should be more relevant.
+  - hl.usePhraseHighlighter is now toggleable on a per-field basis.
+  - Much more extensible (get values from another source; return snippet scores and offsets).
+  - When using hl.maxMultiValuedToMatch with hl.preserveMulti, only count matched snippets.
+  (David Smiley)
+
 ==================  5.1.0 ==================
 
 Consult the LUCENE_CHANGES.txt file for additional, low level, changes in this release
@@ -29,7 +113,7 @@ Upgrading from Solr 5.0
   addition to SolrServerException, to bring them in line with the update
   functions.
 
-* SolrRequest.process() is now final.  Subclasses should instead be parametrized
+* SolrRequest.process() is now final.  Subclasses should instead be parameterized
   by their corresponding SolrResponse type, and implement createResponse()
 
 * The signature of SolrDispatchFilter.createCoreContainer() has changed to take
@@ -37,6 +121,12 @@ Upgrading from Solr 5.0
 
 * Deprecated the 'lib' option added to create-requesthandler as part of SOLR-6801 in 5.0 release.
   Please use the add-runtimelib command
+  
+* Tika's runtime dependency of 'jhighlight' was removed as the latter was found to 
+  contain some LGPL-only code. Until that's resolved by Tika, you can download the
+  .jar yourself and place it under contrib/extraction/lib.
+    
+* The _text catch-all field in data_driven_schema_configs has been renamed to _text_.
 
 Detailed Change List
 ----------------------
@@ -126,11 +216,60 @@ New Features
     json.facet={count1:{query:"price:[10 TO 20]"}, count2:{query:"color:blue AND popularity:[0 TO 50]"} }
     json.facet={categories:{terms:{field:cat, sort:"x desc", facet:{x:"avg(price)", y:"sum(price)"}}}}
   (yonik)
+  
+* SOLR-6141: Schema API: Remove fields, dynamic fields, field types and copy
+  fields; and replace fields, dynamic fields and field types. (Steve Rowe)
 
 * SOLR-7217: HTTP POST body is auto-detected when the client is curl and the content
   type is form data (curl's default), allowing users to use curl to send
   JSON or XML without having to specify the content type. (yonik)
 
+* SOLR-6892: Update processors can now be top-level components and they can be
+  specified in request to create a new custom update chain (Noble Paul)
+
+* SOLR-7216: Solr JSON Request API:
+  - HTTP search requests can have a JSON body.
+  - JSON request can also be passed via the "json" parameter.
+  - Smart merging of multiple JSON parameters: ruery parameters starting with "json."
+    will be merged into the JSON request.
+  - Legacy query parameters can also be passed in the "params" block of
+    the JSON request.
+  (yonik)
+
+* SOLR-7245: Temporary ZK election or connection loss should not stall indexing
+  due to leader initiated recovery (Ramkumar Aiyengar)
+
+* SOLR-6350: StatsComponent now supports Percentiles (Xu Zhang, hossman)
+
+* SOLR-7306: Percentiles support for the new facet module.  Percentiles
+  can be calculated for all facet buckets and field faceting can sort
+  by percentile values.
+  Examples:
+    json.facet={ median_age : "percentile(age,50)" }
+    json.facet={ salary_percentiles : "percentile(salary,25,50,75)" }
+  (yonik)
+
+* SOLR-7307: EmbeddedSolrServer can now be started up by passing a path to a
+  solr home directory, or a NodeConfig object (Alan Woodward, Mike Drob)
+
+* SOLR-1387: Add facet.contains and facet.contains.ignoreCase options (Tom Winch
+  via Alan Woodward)
+
+* SOLR-7082: Streaming Aggregation for SolrCloud (Joel bernstein, Yonik Seeley)
+
+* SOLR-7212: Parameter substitution / macro expansion across entire request.
+  Substitution can contain further expansions and default values are supported.
+  Example: q=price:[ ${low:0} TO ${high} ]&low=100&high=200
+  (yonik)
+
+* SOLR-7226: Make /query/* jmx/* , requestDispatcher/*, <listener> <initParams>
+  properties in solrconfig.xml editable (Noble Paul)
+
+* SOLR-7240: '/' redirects to '/solr/' for convinience (Martijn Koster, hossman)
+
+* SOLR-5911: Added payload support for term vectors. New "termPayloads" option for fields
+  / types in the schema, and "tv.payloads" param for the term vector component.
+  (Mike McCandless, David Smiley)
 
 Bug Fixes
 ----------------------
@@ -198,10 +337,62 @@ Bug Fixes
 * SOLR-6682: Fix response when using EnumField with StatsComponent
   (Xu Zhang via hossman)
 
-* SOLR-6892: Improve the way update processors are used and make it simpler (Noble Paul)
-
 * SOLR-7109: Indexing threads stuck during network partition can put leader into down state.
   (Mark Miller, Anshum Gupta, Ramkumar Aiyengar, yonik, shalin)
+  
+* SOLR-7092: Stop the HDFS lease recovery retries in HdfsTransactionLog on close and try
+  to avoid lease recovery on closed files. (Mark Miller)
+
+* SOLR-7285: ActionThrottle will not pause if getNanoTime first returns 0.
+  (Mark Miller, Gregory Chanan)
+  
+* SOLR-7141: RecoveryStrategy: Raise time that we wait for any updates from the leader before
+  they saw the recovery state to have finished. (Mark Miller)
+
+* SOLR-7248: In legacyCloud=false mode we should check if the core was hosted on the same node before registering it
+  (Varun Thacker, Noble Paul, Mark Miller)
+
+* SOLR-7294: Migrate API fails with 'Invalid status request: notfoundretried 6times' message.
+  (Jessica Cheng Mallet, shalin)
+
+* SOLR-7254: Make an invalid negative start/rows throw a HTTP 400 error (Bad Request) instead
+  of causing a 500 error.  (Ramkumar Aiyengar, Hrishikesh Gadre, yonik)
+
+* SOLR-7305: BlendedInfixLookupFactory swallows root IOException when it occurs.
+  (Stephan Lagraulet via shalin)
+
+* SOLR-7293: Fix bug that Solr server does not listen on IPv6 interfaces by default.
+  (Uwe Schindler, Sebastian Pesman)
+
+* SOLR-7298: Fix Collections API calls (SolrJ) to not add name parameter when not needed.
+  (Shai Erera, Anshum Gupta)
+
+* SOLR-7134: Replication can still cause index corruption. (Mark Miller, shalin, Mike Drob)
+
+* SOLR-7309: Make bin/solr, bin/post work when Solr installation directory contains spaces
+  (Ramkumar Aiyengar, Martijn Koster)
+
+* SOLR-6924: The config API forcefully refreshes all replicas in the collection to ensure all are
+  updated (Noble Paul)
+
+* SOLR-7266: The IgnoreCommitOptimizeUpdateProcessor blocks commit requests from
+  replicas needing to recover. (Jessica Cheng Mallet, Timothy Potter)
+
+* SOLR-7299: bin\solr.cmd doesn't use jetty SSL configuration. (Steve Rowe)
+
+* SOLR-7334: Admin UI does not show "Num Docs" and "Deleted Docs". (Erick Erickson, Timothy Potter)
+
+* SOLR-7338, SOLR-6583: A reloaded core will never register itself as active after a ZK session expiration
+  (Mark Miller, Timothy Potter)
+
+* SOLR-7366: Can't index example XML docs into the cloud example using bin/post due to regression in 
+  ManagedIndexSchema's handling of ResourceLoaderAware objects used by field types (Steve Rowe, Timothy Potter)
+
+* SOLR-7284: HdfsUpdateLog is using hdfs FileSystem.get without turning off the cache.
+  (Mark Miller)
+  
+* SOLR-7286: Using HDFS's FileSystem.newInstance does not guarantee a new instance.
+  (Mark Miller)
 
 Optimizations
 ----------------------
@@ -214,6 +405,8 @@ Optimizations
 
  * SOLR-7239: improved performance of min & max in StatsComponent, as well as situations 
    where local params disable all stats (hossman)
+
+ * SOLR-7110: Optimize JavaBinCodec to minimize string Object creation (Noble Paul)
 
 Other Changes
 ----------------------
@@ -287,12 +480,33 @@ Other Changes
 * SOLR-7258: Forbid MessageFormat.format and MessageFormat single-arg constructor.
   (shalin)
 
+* SOLR-7162: Remove unused SolrSortField interface. (yonik, Connor Warrington via shalin)
+
+* SOLR-6414: Update to Hadoop 2.6.0. (Mark Miller)
+
+* SOLR-6673: MDC based logging of collection, shard, replica, core
+  (Ishan Chattopadhyaya , Noble Paul)
+
+* SOLR-7291: Test indexing on ZK disconnect with ChaosMonkey tests (Ramkumar Aiyengar)
+
+* SOLR-7203: Remove buggy no-op retry code in HttpSolrClient (Alan Woodward,
+  Mark Miller, Greg Solovyev)
+
+* SOLR-7202: Remove deprecated string action types in Overseer and OverseerCollectionProcessor -
+  "deletecollection", "createcollection", "reloadcollection", "removecollection", "removeshard".
+  (Varun Thacker, shalin)
+  
+* SOLR-7290: Rename catchall _text field in data_driven_schema_configs
+  to _text_ (Steve Rowe) 
+
+* SOLR-7346: Stored XSS in Admin UI Schema-Browser page and Analysis page (Mei Wang via Timothy Potter)
+
 ==================  5.0.0 ==================
 
 Consult the LUCENE_CHANGES.txt file for additional, low level, changes in this release.
 
 NOTE: Solr 5.0 only supports creating and removing SolrCloud collections through
-      the collections API, unlike previous versions. While not using the 
+      the collections API, unlike previous versions. While not using the
       collections API may still work in 5.0, it is unsupported, not recommended,
       and the behavior will change in a 5.x release.
 

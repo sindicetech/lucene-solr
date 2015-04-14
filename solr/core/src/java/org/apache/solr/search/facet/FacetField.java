@@ -23,24 +23,29 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.MultiPostingsEnum;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
+import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.UnicodeUtil;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.SimpleOrderedMap;
-import org.apache.solr.request.SimpleFacets;
 import org.apache.solr.schema.FieldType;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.DocIterator;
@@ -115,6 +120,10 @@ public class FacetField extends FacetRequest {
       return new FacetFieldProcessorStream(fcontext, this, sf);
     }
 
+    if (!multiToken || sf.hasDocValues()) {
+      return new FacetFieldProcessorDV(fcontext, this, sf);
+    }
+
     if (multiToken) {
       return new FacetFieldProcessorUIF(fcontext, this, sf);
     } else {
@@ -134,10 +143,12 @@ public class FacetField extends FacetRequest {
 abstract class FacetFieldProcessor extends FacetProcessor<FacetField> {
   SchemaField sf;
   SlotAcc sortAcc;
+  int effectiveMincount;
 
   FacetFieldProcessor(FacetContext fcontext, FacetField freq, SchemaField sf) {
     super(fcontext, freq);
     this.sf = sf;
+    this.effectiveMincount = (int)(fcontext.isShard() ? Math.min(1 , freq.mincount) : freq.mincount);
   }
 
   @Override
@@ -252,7 +263,6 @@ abstract class FacetFieldProcessorFCBase extends FacetFieldProcessor {
     };
 
     Slot bottom = null;
-    int effectiveMincount = (int)(fcontext.isShard() ? Math.min(1 , freq.mincount) : freq.mincount);
     for (int i = (startTermIndex == -1) ? 1 : 0; i < nTerms; i++) {
       if (countAcc.getCount(i) < effectiveMincount) {
         continue;
@@ -304,8 +314,8 @@ abstract class FacetFieldProcessorFCBase extends FacetFieldProcessor {
 
     if (freq.allBuckets) {
       SimpleOrderedMap<Object> allBuckets = new SimpleOrderedMap<>();
+      countAcc.setValues(allBuckets, allBucketsSlot);
       for (SlotAcc acc : accs) {
-        countAcc.setValues(allBuckets, allBucketsSlot);
         acc.setValues(allBuckets, allBucketsSlot);
       }
       res.add("allBuckets", allBuckets);
@@ -615,7 +625,7 @@ class FacetFieldProcessorStream extends FacetFieldProcessor implements Closeable
 
     if (terms != null) {
 
-      termsEnum = terms.iterator(null);
+      termsEnum = terms.iterator();
 
       // TODO: OPT: if seek(ord) is supported for this termsEnum, then we could use it for
       // facet.offset when sorting by index order.
@@ -648,7 +658,6 @@ class FacetFieldProcessorStream extends FacetFieldProcessor implements Closeable
   }
 
   public SimpleOrderedMap<Object> _nextBucket() throws IOException {
-    int effectiveMincount = (int)(fcontext.isShard() ? Math.min(1 , freq.mincount) : freq.mincount);
     DocSet termSet = null;
 
     try {
@@ -809,5 +818,147 @@ class FacetFieldProcessorStream extends FacetFieldProcessor implements Closeable
   }
 
 
+
+}
+
+
+
+class FacetFieldProcessorDV extends FacetFieldProcessorFCBase {
+  static boolean unwrap_singleValued_multiDv = true;  // only set to false for test coverage
+
+  boolean multiValuedField;
+  SortedSetDocValues si;  // only used for term lookups (for both single and multi-valued)
+  MultiDocValues.OrdinalMap ordinalMap = null; // maps per-segment ords to global ords
+
+
+  public FacetFieldProcessorDV(FacetContext fcontext, FacetField freq, SchemaField sf) {
+    super(fcontext, freq, sf);
+    multiValuedField = sf.multiValued() || sf.getType().multiValuedFieldCache();
+  }
+
+  protected BytesRef lookupOrd(int ord) throws IOException {
+    return si.lookupOrd(ord);
+  }
+
+  protected void findStartAndEndOrds() throws IOException {
+    if (multiValuedField) {
+      si = FieldUtil.getSortedSetDocValues(fcontext.qcontext, sf, null);
+      if (si instanceof MultiDocValues.MultiSortedSetDocValues) {
+        ordinalMap = ((MultiDocValues.MultiSortedSetDocValues)si).mapping;
+      }
+    } else {
+      SortedDocValues single = FieldUtil.getSortedDocValues(fcontext.qcontext, sf, null);
+      si = DocValues.singleton(single);  // multi-valued view
+      if (single instanceof MultiDocValues.MultiSortedDocValues) {
+        ordinalMap = ((MultiDocValues.MultiSortedDocValues)single).mapping;
+      }
+    }
+
+    if (si.getValueCount() >= Integer.MAX_VALUE) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Field has too many unique values. field=" + sf + " nterms= " + si.getValueCount());
+    }
+
+    if (prefixRef != null) {
+      startTermIndex = (int)si.lookupTerm(prefixRef.get());
+      if (startTermIndex < 0) startTermIndex = -startTermIndex - 1;
+      prefixRef.append(UnicodeUtil.BIG_TERM);
+      endTermIndex = (int)si.lookupTerm(prefixRef.get());
+      assert endTermIndex < 0;
+      endTermIndex = -endTermIndex - 1;
+    } else {
+      startTermIndex = 0;
+      endTermIndex = (int)si.getValueCount();
+    }
+
+    // optimize collecting the "missing" bucket when startTermindex is 0 (since the "missing" ord is -1)
+    startTermIndex = startTermIndex==0 && freq.missing ? -1 : startTermIndex;
+
+    nTerms = endTermIndex - startTermIndex;
+  }
+
+  @Override
+  protected void collectDocs() throws IOException {
+     if (nTerms <= 0 || fcontext.base.size() < effectiveMincount) { // TODO: what about allBuckets? missing bucket?
+       return;
+     }
+
+    final List<LeafReaderContext> leaves = fcontext.searcher.getIndexReader().leaves();
+    Filter filter = fcontext.base.getTopFilter();
+
+    for (int subIdx = 0; subIdx < leaves.size(); subIdx++) {
+      LeafReaderContext subCtx = leaves.get(subIdx);
+
+      setNextReader(subCtx);
+
+      DocIdSet dis = filter.getDocIdSet(subCtx, null); // solr docsets already exclude any deleted docs
+      DocIdSetIterator disi = dis.iterator();
+
+      SortedDocValues singleDv = null;
+      SortedSetDocValues multiDv = null;
+      if (multiValuedField) {
+        // TODO: get sub from multi?
+        multiDv = subCtx.reader().getSortedSetDocValues(sf.getName());
+        if (multiDv == null) {
+          multiDv = DocValues.emptySortedSet();
+        }
+        // some codecs may optimize SortedSet storage for single-valued fields
+        // this will be null if this is not a wrapped single valued docvalues.
+        if (unwrap_singleValued_multiDv) {
+          singleDv = DocValues.unwrapSingleton(multiDv);
+        }
+      } else {
+        singleDv = subCtx.reader().getSortedDocValues(sf.getName());
+        if (singleDv == null) {
+          singleDv = DocValues.emptySorted();
+        }
+      }
+
+      LongValues toGlobal = ordinalMap == null ? null : ordinalMap.getGlobalOrds(subIdx);
+
+      if (singleDv != null) {
+        collectDocs(singleDv, disi, toGlobal);
+      } else {
+        collectDocs(multiDv, disi, toGlobal);
+      }
+    }
+
+  }
+
+  protected void collectDocs(SortedDocValues singleDv, DocIdSetIterator disi, LongValues toGlobal) throws IOException {
+    int doc;
+    while ((doc = disi.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+      int segOrd = singleDv.getOrd(doc);
+      collect(doc, segOrd, toGlobal);
+    }
+  }
+
+  protected void collectDocs(SortedSetDocValues multiDv, DocIdSetIterator disi, LongValues toGlobal) throws IOException {
+    int doc;
+    while ((doc = disi.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+      multiDv.setDocument(doc);
+      int segOrd = (int)multiDv.nextOrd();
+      collect(doc, segOrd, toGlobal); // collect anything the first time (even -1 for missing)
+      if (segOrd < 0) continue;
+      for(;;) {
+        segOrd = (int)multiDv.nextOrd();
+        if (segOrd < 0) break;
+        collect(doc, segOrd, toGlobal);
+      }
+    }
+  }
+
+  private void collect(int doc, int segOrd, LongValues toGlobal) throws IOException {
+    int ord = (toGlobal != null && segOrd >= 0) ? (int)toGlobal.get(segOrd) : segOrd;
+
+    int arrIdx = ord - startTermIndex;
+    if (arrIdx >= 0 && arrIdx < nTerms) {
+      countAcc.incrementCount(arrIdx, 1);
+      collect(doc, arrIdx);  // per-seg collectors
+      if (allBucketsSlot >= 0 && ord >= 0) {
+        countAcc.incrementCount(allBucketsSlot, 1);
+        collect(doc, allBucketsSlot);  // per-seg collectors
+      }
+    }
+  }
 
 }

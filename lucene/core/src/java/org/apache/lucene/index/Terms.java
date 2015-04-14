@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 
+import org.apache.lucene.codecs.blocktree.BlockTreeTermsWriter;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
@@ -40,19 +41,25 @@ public abstract class Terms {
    *  a previous TermsEnum, for example from a different
    *  field, you can pass it for possible reuse if the
    *  implementation can do so. */
-  public abstract TermsEnum iterator(TermsEnum reuse) throws IOException;
+  public abstract TermsEnum iterator() throws IOException;
 
-  /** Returns a TermsEnum that iterates over all terms that
-   *  are accepted by the provided {@link
+  /** Returns a TermsEnum that iterates over all terms and
+   *  documents that are accepted by the provided {@link
    *  CompiledAutomaton}.  If the <code>startTerm</code> is
-   *  provided then the returned enum will only accept terms
+   *  provided then the returned enum will only return terms
    *  {@code > startTerm}, but you still must call
    *  next() first to get to the first term.  Note that the
    *  provided <code>startTerm</code> must be accepted by
    *  the automaton.
    *
    * <p><b>NOTE</b>: the returned TermsEnum cannot
-   * seek</p>. */
+   * seek</p>.
+   *
+   *  <p><b>NOTE</b>: the terms dictionary is free to
+   *  return arbitrary terms as long as the resulted visited
+   *  docs is the same.  E.g., {@link BlockTreeTermsWriter}
+   *  creates auto-prefix terms during indexing to reduce the
+   *  number of terms visited. */
   public TermsEnum intersect(CompiledAutomaton compiled, final BytesRef startTerm) throws IOException {
     
     // TODO: could we factor out a common interface b/w
@@ -64,13 +71,17 @@ public abstract class Terms {
     // TODO: eventually we could support seekCeil/Exact on
     // the returned enum, instead of only being able to seek
     // at the start
+
+    TermsEnum termsEnum = iterator();
+
     if (compiled.type != CompiledAutomaton.AUTOMATON_TYPE.NORMAL) {
       throw new IllegalArgumentException("please use CompiledAutomaton.getTermsEnum instead");
     }
+
     if (startTerm == null) {
-      return new AutomatonTermsEnum(iterator(null), compiled);
+      return new AutomatonTermsEnum(termsEnum, compiled);
     } else {
-      return new AutomatonTermsEnum(iterator(null), compiled) {
+      return new AutomatonTermsEnum(termsEnum, compiled) {
         @Override
         protected BytesRef nextSeekTerm(BytesRef term) throws IOException {
           if (term == null) {
@@ -131,7 +142,7 @@ public abstract class Terms {
    *  take deleted documents into account.  This returns
    *  null when there are no terms. */
   public BytesRef getMin() throws IOException {
-    return iterator(null).next();
+    return iterator().next();
   }
 
   /** Returns the largest term (in lexicographic order) in the field. 
@@ -148,7 +159,7 @@ public abstract class Terms {
     } else if (size >= 0) {
       // try to seek-by-ord
       try {
-        TermsEnum iterator = iterator(null);
+        TermsEnum iterator = iterator();
         iterator.seekExact(size - 1);
         return iterator.term();
       } catch (UnsupportedOperationException e) {
@@ -157,7 +168,7 @@ public abstract class Terms {
     }
     
     // otherwise: binary search
-    TermsEnum iterator = iterator(null);
+    TermsEnum iterator = iterator();
     BytesRef v = iterator.next();
     if (v == null) {
       // empty: only possible from a FilteredTermsEnum...

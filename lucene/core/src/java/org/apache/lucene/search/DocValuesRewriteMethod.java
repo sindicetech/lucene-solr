@@ -84,12 +84,12 @@ public final class DocValuesRewriteMethod extends MultiTermQuery.RewriteMethod {
     public Weight createWeight(IndexSearcher searcher, boolean needsScores) throws IOException {
       return new ConstantScoreWeight(this) {
         @Override
-        Scorer scorer(LeafReaderContext context, final Bits acceptDocs, final float score) throws IOException {
+        protected Scorer scorer(LeafReaderContext context, final Bits acceptDocs, final float score) throws IOException {
           final SortedSetDocValues fcsi = DocValues.getSortedSet(context.reader(), query.field);
           TermsEnum termsEnum = query.getTermsEnum(new Terms() {
             
             @Override
-            public TermsEnum iterator(TermsEnum reuse) {
+            public TermsEnum iterator() {
               return fcsi.termsEnum();
             }
 
@@ -150,11 +150,7 @@ public final class DocValuesRewriteMethod extends MultiTermQuery.RewriteMethod {
           } while (termsEnum.next() != null);
           
           final DocIdSetIterator approximation = DocIdSetIterator.all(context.reader().maxDoc());
-          final TwoPhaseIterator twoPhaseIterator = new TwoPhaseIterator() {
-            @Override
-            public DocIdSetIterator approximation() {
-              return approximation;
-            }
+          final TwoPhaseIterator twoPhaseIterator = new TwoPhaseIterator(approximation) {
             @Override
             public boolean matches() throws IOException {
               final int doc = approximation.docID();

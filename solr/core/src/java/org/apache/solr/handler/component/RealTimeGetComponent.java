@@ -27,6 +27,7 @@ import java.util.Map;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.solr.client.solrj.SolrResponse;
@@ -38,8 +39,8 @@ import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
+import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.ShardParams;
 import org.apache.solr.common.params.SolrParams;
@@ -96,6 +97,25 @@ public class RealTimeGetComponent extends SearchComponent
 
     val = params.get("getUpdates");
     if (val != null) {
+      // solrcloud_debug
+      if (log.isDebugEnabled()) {
+        try {
+          RefCounted<SolrIndexSearcher> searchHolder = req.getCore()
+              .getNewestSearcher(false);
+          SolrIndexSearcher searcher = searchHolder.get();
+          try {
+            log.debug(req.getCore().getCoreDescriptor()
+                .getCoreContainer().getZkController().getNodeName()
+                + " min count to sync to (from most recent searcher view) "
+                + searcher.search(new MatchAllDocsQuery(), 1).totalHits);
+          } finally {
+            searchHolder.decref();
+          }
+        } catch (Exception e) {
+          log.debug("Error in solrcloud_debug block", e);
+        }
+      }
+      
       processGetUpdates(rb);
       return;
     }
@@ -538,7 +558,7 @@ public class RealTimeGetComponent extends SearchComponent
     boolean onlyIfActive = rb.req.getParams().getBool("onlyIfActive", false);
     
     if (onlyIfActive) {
-      if (!rb.req.getCore().getCoreDescriptor().getCloudDescriptor().getLastPublished().equals(ZkStateReader.ACTIVE)) {
+      if (rb.req.getCore().getCoreDescriptor().getCloudDescriptor().getLastPublished() != Replica.State.ACTIVE) {
         log.info("Last published state was not ACTIVE, cannot sync.");
         rb.rsp.add("sync", "false");
         return;

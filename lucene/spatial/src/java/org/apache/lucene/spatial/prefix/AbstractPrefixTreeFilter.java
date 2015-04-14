@@ -20,13 +20,14 @@ package org.apache.lucene.spatial.prefix;
 import java.io.IOException;
 
 import com.spatial4j.core.shape.Shape;
-import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.spatial.prefix.tree.SpatialPrefixTree;
+import org.apache.lucene.util.BitDocIdSet;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 
@@ -89,7 +90,7 @@ public abstract class AbstractPrefixTreeFilter extends Filter {
       this.maxDoc = reader.maxDoc();
       Terms terms = reader.terms(fieldName);
       if (terms != null)
-        this.termsEnum = terms.iterator(null);
+        this.termsEnum = terms.iterator();
     }
 
     protected void collectDocs(BitSet bitSet) throws IOException {
@@ -98,6 +99,11 @@ public abstract class AbstractPrefixTreeFilter extends Filter {
       bitSet.or(postingsEnum);
     }
 
+    protected void collectDocs(BitDocIdSet.Builder bitSetBuilder) throws IOException {
+      assert termsEnum != null;
+      postingsEnum = termsEnum.postings(acceptDocs, postingsEnum, PostingsEnum.NONE);
+      bitSetBuilder.or(postingsEnum);
+    }
   }
 
 }

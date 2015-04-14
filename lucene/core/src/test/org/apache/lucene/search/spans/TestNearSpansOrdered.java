@@ -20,7 +20,6 @@ package org.apache.lucene.search.spans;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexReaderContext;
@@ -33,6 +32,8 @@ import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.LuceneTestCase;
+
+import static org.apache.lucene.search.spans.SpanTestUtil.*;
 
 public class TestNearSpansOrdered extends LuceneTestCase {
   protected IndexSearcher searcher;
@@ -106,7 +107,7 @@ public class TestNearSpansOrdered extends LuceneTestCase {
   }
 
   public String s(Spans span) {
-    return s(span.doc(), span.start(), span.end());
+    return s(span.docID(), span.startPosition(), span.endPosition());
   }
   public String s(int doc, int start, int end) {
     return "s(" + doc + "," + start + "," + end +")";
@@ -114,12 +115,10 @@ public class TestNearSpansOrdered extends LuceneTestCase {
   
   public void testNearSpansNext() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span = MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.next());
-    assertEquals(s(0,0,3), s(span));
-    assertEquals(true, span.next());
-    assertEquals(s(1,0,4), s(span));
-    assertEquals(false, span.next());
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertNext(span,0,0,3);
+    assertNext(span,1,0,4);
+    assertFinished(span);
   }
 
   /**
@@ -127,51 +126,58 @@ public class TestNearSpansOrdered extends LuceneTestCase {
    * same as next -- it's only applicable in this case since we know doc
    * does not contain more than one span
    */
-  public void testNearSpansSkipToLikeNext() throws Exception {
+  public void testNearSpansAdvanceLikeNext() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span =  MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.skipTo(0));
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertEquals(0, span.advance(0));
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(0,0,3), s(span));
-    assertEquals(true, span.skipTo(1));
+    assertEquals(1, span.advance(1));
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(1,0,4), s(span));
-    assertEquals(false, span.skipTo(2));
+    assertEquals(Spans.NO_MORE_DOCS, span.advance(2));
   }
   
-  public void testNearSpansNextThenSkipTo() throws Exception {
+  public void testNearSpansNextThenAdvance() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span =  MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.next());
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertNotSame(Spans.NO_MORE_DOCS, span.nextDoc());
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(0,0,3), s(span));
-    assertEquals(true, span.skipTo(1));
+    assertNotSame(Spans.NO_MORE_DOCS, span.advance(1));
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(1,0,4), s(span));
-    assertEquals(false, span.next());
+    assertEquals(Spans.NO_MORE_DOCS, span.nextDoc());
   }
   
-  public void testNearSpansNextThenSkipPast() throws Exception {
+  public void testNearSpansNextThenAdvancePast() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span =  MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.next());
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertNotSame(Spans.NO_MORE_DOCS, span.nextDoc());
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(0,0,3), s(span));
-    assertEquals(false, span.skipTo(2));
+    assertEquals(Spans.NO_MORE_DOCS, span.advance(2));
   }
   
-  public void testNearSpansSkipPast() throws Exception {
+  public void testNearSpansAdvancePast() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span =  MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(false, span.skipTo(2));
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertEquals(Spans.NO_MORE_DOCS, span.advance(2));
   }
   
-  public void testNearSpansSkipTo0() throws Exception {
+  public void testNearSpansAdvanceTo0() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span = MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.skipTo(0));
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertEquals(0, span.advance(0));
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(0,0,3), s(span));
   }
 
-  public void testNearSpansSkipTo1() throws Exception {
+  public void testNearSpansAdvanceTo1() throws Exception {
     SpanNearQuery q = makeQuery();
-    Spans span =  MultiSpansWrapper.wrap(searcher.getTopReaderContext(), q);
-    assertEquals(true, span.skipTo(1));
+    Spans span = MultiSpansWrapper.wrap(searcher.getIndexReader(), q);
+    assertEquals(1, span.advance(1));
+    assertEquals(0, span.nextStartPosition());
     assertEquals(s(1,0,4), s(span));
   }
 

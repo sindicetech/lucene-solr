@@ -32,6 +32,7 @@
   
   <property name="dest" location="${common-solr.dir}/build" />
   <property name="build.dir" location="${dest}/${ant.project.name}"/>
+  <property name="jacoco.report.dir" location="${dest}/jacoco"/>
   <property name="dist" location="${common-solr.dir}/dist"/>
   <property name="package.dir" location="${common-solr.dir}/package"/>
   <property name="maven.dist.dir" location="${package.dir}/maven"/>
@@ -496,6 +497,7 @@
       <signaturesFileSet dir="${common.dir}/tools/forbiddenApis">
         <include name="base.txt" />
         <include name="servlet-api.txt" />
+        <include name="solr.txt" />
       </signaturesFileSet>
       <fileset dir="${build.dir}/classes/java" excludes="${forbidden-base-excludes}"/>
       <fileset dir="${build.dir}/classes/test" excludes="${forbidden-tests-excludes}" erroronmissingdir="false"/>

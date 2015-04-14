@@ -39,12 +39,14 @@ import org.apache.solr.schema.ZkIndexSchemaReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.solr.common.params.CommonParams.JSON;
+
 public class SchemaHandler extends RequestHandlerBase {
   private static final Logger log = LoggerFactory.getLogger(SchemaHandler.class);
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
-    SolrConfigHandler.setWt(req, "json");
+    SolrConfigHandler.setWt(req, JSON);
     String httpMethod = (String) req.getContext().get("httpMethod");
     if ("POST".equals(httpMethod)) {
       if (req.getContentStreams() == null) {
@@ -62,11 +64,9 @@ public class SchemaHandler extends RequestHandlerBase {
         }
         break;
       }
-
     } else {
       handleGET(req, rsp);
     }
-
   }
 
   private void handleGET(SolrQueryRequest req, SolrQueryResponse rsp) {
@@ -165,6 +165,6 @@ public class SchemaHandler extends RequestHandlerBase {
 
   @Override
   public String getDescription() {
-    return "Edit schema.xml";
+    return "CRUD operations over the Solr schema";
   }
 }

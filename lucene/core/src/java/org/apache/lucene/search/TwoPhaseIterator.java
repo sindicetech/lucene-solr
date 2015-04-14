@@ -18,15 +18,24 @@ package org.apache.lucene.search;
  */
 
 import java.io.IOException;
+import java.util.Objects;
 
 /**
- * An approximation of a {@link DocIdSetIterator}. When the {@link #approximation()}'s
+ * Returned by {@link Scorer#asTwoPhaseIterator()} to expose an approximation of
+ * a {@link DocIdSetIterator}. When the {@link #approximation()}'s
  * {@link DocIdSetIterator#nextDoc()} or {@link DocIdSetIterator#advance(int)}
  * return, {@link #matches()} needs to be checked in order to know whether the
  * returned doc ID actually matches.
  * @lucene.experimental
  */
 public abstract class TwoPhaseIterator {
+
+  protected final DocIdSetIterator approximation;
+
+  /** Takes the approximation to be returned by {@link #approximation}. Not null. */
+  protected TwoPhaseIterator(DocIdSetIterator approximation) {
+    this.approximation = Objects.requireNonNull(approximation);
+  }
 
   /** Return a {@link DocIdSetIterator} view of the provided
    *  {@link TwoPhaseIterator}. */
@@ -70,10 +79,12 @@ public abstract class TwoPhaseIterator {
   /** Return an approximation. The returned {@link DocIdSetIterator} is a
    *  superset of the matching documents, and each match needs to be confirmed
    *  with {@link #matches()} in order to know whether it matches or not. */
-  public abstract DocIdSetIterator approximation();
+  public DocIdSetIterator approximation() {
+    return approximation;
+  }
 
   /** Return whether the current doc ID that the iterator is on matches. This
-   *  method should only be called when the iterator is positionned -- ie. not
+   *  method should only be called when the iterator is positioned -- ie. not
    *  when {@link DocIdSetIterator#docID()} is {@code -1} or
    *  {@link DocIdSetIterator#NO_MORE_DOCS} -- and at most once. */
   public abstract boolean matches() throws IOException;

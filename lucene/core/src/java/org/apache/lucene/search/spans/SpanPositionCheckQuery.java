@@ -22,13 +22,13 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermContext;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.spans.FilterSpans.AcceptStatus;
 import org.apache.lucene.util.Bits;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 
 
 /**
@@ -37,9 +37,8 @@ import java.util.Set;
 public abstract class SpanPositionCheckQuery extends SpanQuery implements Cloneable {
   protected SpanQuery match;
 
-
   public SpanPositionCheckQuery(SpanQuery match) {
-    this.match = match;
+    this.match = Objects.requireNonNull(match);
   }
 
   /**
@@ -60,44 +59,33 @@ public abstract class SpanPositionCheckQuery extends SpanQuery implements Clonea
     match.extractTerms(terms);
   }
 
-  /** 
-   * Return value for {@link SpanPositionCheckQuery#acceptPosition(Spans)}.
-   */
-  protected static enum AcceptStatus {
-    /** Indicates the match should be accepted */
-    YES,
-    
-    /** Indicates the match should be rejected */
-    NO,
-    
-    /** 
-     * Indicates the match should be rejected, and the enumeration should advance
-     * to the next document.
-     */
-    NO_AND_ADVANCE 
-  };
-  
   /**
    * Implementing classes are required to return whether the current position is a match for the passed in
-   * "match" {@link org.apache.lucene.search.spans.SpanQuery}.
+   * "match" {@link SpanQuery}.
    *
-   * This is only called if the underlying {@link org.apache.lucene.search.spans.Spans#next()} for the
-   * match is successful
+   * This is only called if the underlying last {@link Spans#nextStartPosition()} for the
+   * match indicated a valid start position.
    *
    *
-   * @param spans The {@link org.apache.lucene.search.spans.Spans} instance, positioned at the spot to check
+   * @param spans The {@link Spans} instance, positioned at the spot to check
+   *
    * @return whether the match is accepted, rejected, or rejected and should move to the next doc.
    *
-   * @see org.apache.lucene.search.spans.Spans#next()
+   * @see Spans#nextDoc()
    *
    */
   protected abstract AcceptStatus acceptPosition(Spans spans) throws IOException;
 
   @Override
   public Spans getSpans(final LeafReaderContext context, Bits acceptDocs, Map<Term,TermContext> termContexts) throws IOException {
-    return new PositionCheckSpan(context, acceptDocs, termContexts);
+    Spans matchSpans = match.getSpans(context, acceptDocs, termContexts);
+    return (matchSpans == null) ? null : new FilterSpans(matchSpans) {
+      @Override
+      protected AcceptStatus accept(Spans candidate) throws IOException {
+        return acceptPosition(candidate);
+      }
+    };
   }
-
 
   @Override
   public Query rewrite(IndexReader reader) throws IOException {
@@ -116,79 +104,18 @@ public abstract class SpanPositionCheckQuery extends SpanQuery implements Clonea
     }
   }
 
-  protected class PositionCheckSpan extends Spans {
-    private Spans spans;
+  /** Returns true iff <code>o</code> is equal to this. */
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null) return false;
+    if (getClass() != o.getClass()) return false;
+    final SpanPositionCheckQuery spcq = (SpanPositionCheckQuery) o;
+    return match.equals(spcq.match);
+  }
 
-    public PositionCheckSpan(LeafReaderContext context, Bits acceptDocs, Map<Term,TermContext> termContexts) throws IOException {
-      spans = match.getSpans(context, acceptDocs, termContexts);
-    }
-
-    @Override
-    public boolean next() throws IOException {
-      if (!spans.next())
-        return false;
-      
-      return doNext();
-    }
-
-    @Override
-    public boolean skipTo(int target) throws IOException {
-      if (!spans.skipTo(target))
-        return false;
-
-      return doNext();
-    }
-    
-    protected boolean doNext() throws IOException {
-      for (;;) {
-        switch(acceptPosition(this)) {
-          case YES: return true;
-          case NO: 
-            if (!spans.next()) 
-              return false;
-            break;
-          case NO_AND_ADVANCE: 
-            if (!spans.skipTo(spans.doc()+1)) 
-              return false;
-            break;
-        }
-      }
-    }
-
-    @Override
-    public int doc() { return spans.doc(); }
-
-    @Override
-    public int start() { return spans.start(); }
-
-    @Override
-    public int end() { return spans.end(); }
-    // TODO: Remove warning after API has been finalized
-
-    @Override
-    public Collection<byte[]> getPayload() throws IOException {
-      ArrayList<byte[]> result = null;
-      if (spans.isPayloadAvailable()) {
-        result = new ArrayList<>(spans.getPayload());
-      }
-      return result;//TODO: any way to avoid the new construction?
-    }
-    // TODO: Remove warning after API has been finalized
-
-    @Override
-    public boolean isPayloadAvailable() throws IOException {
-      return spans.isPayloadAvailable();
-    }
-
-    @Override
-    public long cost() {
-      return spans.cost();
-    }
-
-    @Override
-    public String toString() {
-        return "spans(" + SpanPositionCheckQuery.this.toString() + ")";
-      }
-
+  @Override
+  public int hashCode() {
+    return match.hashCode() ^ getClass().hashCode();
   }
 }

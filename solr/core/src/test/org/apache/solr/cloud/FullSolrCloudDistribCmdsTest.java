@@ -141,9 +141,10 @@ public class FullSolrCloudDistribCmdsTest extends AbstractFullDistribZkTestBase 
     
     testDeleteByQueryDistrib();
 
-    testDeleteByIdImplicitRouter();
-
-    testDeleteByIdCompositeRouterWithRouterField();
+    // See SOLR-7384
+//    testDeleteByIdImplicitRouter();
+//
+//    testDeleteByIdCompositeRouterWithRouterField();
 
     docId = testThatCantForwardToLeaderFails(docId);
 
@@ -174,6 +175,8 @@ public class FullSolrCloudDistribCmdsTest extends AbstractFullDistribZkTestBase 
       assertEquals(0, (int) status.get("status"));
       assertTrue(status.get("QTime") > 0);
     }
+
+    waitForRecoveriesToFinish("implicit_collection_without_routerfield", true);
 
     SolrClient shard1 = createNewSolrClient("implicit_collection_without_routerfield_shard1_replica1",
         getBaseUrl((HttpSolrClient) clients.get(0)));
@@ -301,6 +304,8 @@ public class FullSolrCloudDistribCmdsTest extends AbstractFullDistribZkTestBase 
       assertEquals(0, (int) status.get("status"));
       assertTrue(status.get("QTime") > 0);
     }
+
+    waitForRecoveriesToFinish("compositeid_collection_with_routerfield", true);
 
     SolrClient shard1 = createNewSolrClient("compositeid_collection_with_routerfield_shard1_replica1",
         getBaseUrl((HttpSolrClient) clients.get(0)));

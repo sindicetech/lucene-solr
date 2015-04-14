@@ -67,6 +67,24 @@ solrAdminApp.config([
         templateUrl: 'partials/analysis.html',
         controller: 'AnalysisController'
       }).
+      when('/:core/documents', {
+        templateUrl: 'partials/documents.html',
+        controller: 'DocumentsController'
+      }).
+      when('/:core/files', {
+        templateUrl: 'partials/files.html',
+        controller: 'FilesController'
+      }).
+      when('/:core/plugins', {
+        templateUrl: 'partials/plugins.html',
+        controller: 'PluginsController',
+        reloadOnSearch: false
+      }).
+      when('/:core/plugins/:legacytype', {
+        templateUrl: 'partials/plugins.html',
+        controller: 'PluginsController',
+        reloadOnSearch: false
+      }).
       when('/:core/query', {
         templateUrl: 'partials/query.html',
         controller: 'QueryController'
@@ -77,7 +95,7 @@ solrAdminApp.config([
 }])
 .filter('highlight', function($sce) {
   return function(input, lang) {
-    if (lang && input) return hljs.highlight(lang, input).value;
+    if (lang && input && lang!="text") return hljs.highlight(lang, input).value;
     return input;
   }
 })
@@ -125,10 +143,14 @@ solrAdminApp.config([
                         "animation" : 0
                       }
                   };
-                  var tree = $(element).jstree(treeConfig).jstree('open_node','li:first');
+
+                  var tree = $(element).jstree(treeConfig);
+                  tree.jstree('open_node','li:first');
                   if (tree) {
-                      tree.bind("select_node.jstree", function (event, data) {
-                          scope.onSelect({url: data.args[0].href});
+                      element.bind("select_node.jstree", function (event, data) {
+                          scope.$apply(function() {
+                              scope.onSelect({url: data.args[0].href, data: data});
+                          });
                       });
                   }
                 }
@@ -197,9 +219,23 @@ solrAdminApp.config([
 
   return {request: started, response: ended, responseError: failed};
 })
-
 .config(function($httpProvider) {
   $httpProvider.interceptors.push("httpInterceptor");
+})
+.directive('fileModel', function ($parse) {
+    return {
+        restrict: 'A',
+        link: function(scope, element, attrs) {
+            var model = $parse(attrs.fileModel);
+            var modelSetter = model.assign;
+
+            element.bind('change', function(){
+                scope.$apply(function(){
+                    modelSetter(scope, element[0].files[0]);
+                });
+            });
+        }
+    };
 });
 
 var solrAdminControllers = angular.module('solrAdminControllers', []);

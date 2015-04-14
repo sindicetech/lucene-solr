@@ -113,23 +113,10 @@ public class AssertingLeafReader extends FilterLeafReader {
     }
 
     @Override
-    public TermsEnum iterator(TermsEnum reuse) throws IOException {
-      // reuse, if the codec reused
-      final TermsEnum actualReuse;
-      if (reuse instanceof AssertingTermsEnum) {
-        actualReuse = ((AssertingTermsEnum) reuse).in;
-      } else {
-        actualReuse = null;
-      }
-      TermsEnum termsEnum = super.iterator(actualReuse);
+    public TermsEnum iterator() throws IOException {
+      TermsEnum termsEnum = super.iterator();
       assert termsEnum != null;
-      if (termsEnum == actualReuse) {
-        // codec reused, reset asserting state
-        ((AssertingTermsEnum)reuse).reset();
-        return reuse;
-      } else {
-        return new AssertingTermsEnum(termsEnum);
-      }
+      return new AssertingTermsEnum(termsEnum);
     }
   }
   
@@ -160,8 +147,10 @@ public class AssertingLeafReader extends FilterLeafReader {
       }
       PostingsEnum docs = super.postings(liveDocs, actualReuse, flags);
       if (docs == null) {
+        assert PostingsEnum.featureRequested(flags, DocsAndPositionsEnum.OLD_NULL_SEMANTICS);
         return null;
-      } else if (docs == actualReuse) {
+      }
+      if (docs == actualReuse) {
         // codec reused, reset asserting state
         ((AssertingPostingsEnum)reuse).reset();
         return reuse;
@@ -258,14 +247,14 @@ public class AssertingLeafReader extends FilterLeafReader {
     public TermState termState() throws IOException {
       assertThread("Terms enums", creationThread);
       assert state == State.POSITIONED : "termState() called on unpositioned TermsEnum";
-      return super.termState();
+      return in.termState();
     }
 
     @Override
     public void seekExact(BytesRef term, TermState state) throws IOException {
       assertThread("Terms enums", creationThread);
       assert term.isValid();
-      super.seekExact(term, state);
+      in.seekExact(term, state);
       this.state = State.POSITIONED;
     }
 
@@ -282,7 +271,7 @@ public class AssertingLeafReader extends FilterLeafReader {
   static enum DocsEnumState { START, ITERATING, FINISHED };
 
   /** Wraps a docsenum with additional checks */
-  public static class AssertingPostingsEnum extends FilterDocsEnum {
+  public static class AssertingPostingsEnum extends FilterPostingsEnum {
     private final Thread creationThread = Thread.currentThread();
     private DocsEnumState state = DocsEnumState.START;
     int positionCount = 0;

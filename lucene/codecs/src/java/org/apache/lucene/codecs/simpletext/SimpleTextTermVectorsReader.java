@@ -26,6 +26,8 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 
 import org.apache.lucene.codecs.TermVectorsReader;
+import org.apache.lucene.index.DocsAndPositionsEnum;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexFileNames;
@@ -279,7 +281,7 @@ public class SimpleTextTermVectorsReader extends TermVectorsReader {
     }
 
     @Override
-    public TermsEnum iterator(TermsEnum reuse) throws IOException {
+    public TermsEnum iterator() throws IOException {
       // TODO: reuse
       return new SimpleTVTermsEnum(terms);
     }
@@ -390,16 +392,17 @@ public class SimpleTextTermVectorsReader extends TermVectorsReader {
 
     @Override
     public PostingsEnum postings(Bits liveDocs, PostingsEnum reuse, int flags) throws IOException {
-
+      
       if (PostingsEnum.featureRequested(flags, PostingsEnum.POSITIONS)) {
         SimpleTVPostings postings = current.getValue();
-        if (postings.positions == null && postings.startOffsets == null) {
+        if (postings.positions != null || postings.startOffsets != null) {
+          // TODO: reuse
+          SimpleTVPostingsEnum e = new SimpleTVPostingsEnum();
+          e.reset(liveDocs, postings.positions, postings.startOffsets, postings.endOffsets, postings.payloads);
+          return e;
+        } else if (PostingsEnum.featureRequested(flags, DocsAndPositionsEnum.OLD_NULL_SEMANTICS)) {
           return null;
         }
-        // TODO: reuse
-        SimpleTVPostingsEnum e = new SimpleTVPostingsEnum();
-        e.reset(liveDocs, postings.positions, postings.startOffsets, postings.endOffsets, postings.payloads);
-        return e;
       }
 
       // TODO: reuse

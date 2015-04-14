@@ -17,17 +17,25 @@
 
 package org.apache.solr.handler.component;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
+
 import org.apache.lucene.index.ExitableDirectoryReader;
 import org.apache.lucene.util.Version;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrException;
-import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.ShardParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
+import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
@@ -43,11 +51,7 @@ import org.apache.solr.util.plugin.SolrCoreAware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-import java.util.ArrayList;
-import java.util.LinkedList;
-import java.util.List;
+import static org.apache.solr.common.params.CommonParams.PATH;
 
 
 /**
@@ -70,6 +74,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
   protected List<SearchComponent> components = null;
   private ShardHandlerFactory shardHandlerFactory ;
   private PluginInfo shfInfo;
+  private SolrCore core;
 
   protected List<String> getDefaultComponents()
   {
@@ -105,6 +110,38 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
   @SuppressWarnings("unchecked")
   public void inform(SolrCore core)
   {
+    this.core = core;
+    Set<String> missing = new HashSet<>();
+    List<String> c = (List<String>) initArgs.get(INIT_COMPONENTS);
+    missing.addAll(core.getSearchComponents().checkContains(c));
+    List<String> first = (List<String>) initArgs.get(INIT_FIRST_COMPONENTS);
+    missing.addAll(core.getSearchComponents().checkContains(first));
+    List<String> last = (List<String>) initArgs.get(INIT_LAST_COMPONENTS);
+    missing.addAll(core.getSearchComponents().checkContains(last));
+    if (!missing.isEmpty()) throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+        "Missing SearchComponents named : " + missing);
+    if (c != null && (first != null || last != null)) throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
+        "First/Last components only valid if you do not declare 'components'");
+
+    if (shfInfo == null) {
+      shardHandlerFactory = core.getCoreDescriptor().getCoreContainer().getShardHandlerFactory();
+    } else {
+      shardHandlerFactory = core.createInitInstance(shfInfo, ShardHandlerFactory.class, null, null);
+      core.addCloseHook(new CloseHook() {
+        @Override
+        public void preClose(SolrCore core) {
+          shardHandlerFactory.close();
+        }
+
+        @Override
+        public void postClose(SolrCore core) {
+        }
+      });
+    }
+
+  }
+
+  private void initComponents() {
     Object declaredComponents = initArgs.get(INIT_COMPONENTS);
     List<String> first = (List<String>) initArgs.get(INIT_FIRST_COMPONENTS);
     List<String> last  = (List<String>) initArgs.get(INIT_LAST_COMPONENTS);
@@ -135,7 +172,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
     }
 
     // Build the component list
-    components = new ArrayList<>( list.size() );
+    List<SearchComponent> components = new ArrayList<>(list.size());
     DebugComponent dbgCmp = null;
     for(String c : list){
       SearchComponent comp = core.getSearchComponent( c );
@@ -150,36 +187,24 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
       components.add(dbgCmp);
       log.debug("Adding  debug component:" + dbgCmp);
     }
-    if(shfInfo ==null) {
-      shardHandlerFactory = core.getCoreDescriptor().getCoreContainer().getShardHandlerFactory();
-    } else {
-      shardHandlerFactory = core.createInitInstance(shfInfo, ShardHandlerFactory.class, null, null);
-      core.addCloseHook(new CloseHook() {
-        @Override
-        public void preClose(SolrCore core) {
-          shardHandlerFactory.close();
-        }
-        @Override
-        public void postClose(SolrCore core) {
-        }
-      });
-    }
-
+    this.components = components;
   }
 
   public List<SearchComponent> getComponents() {
+    if (components == null) {
+      synchronized (this) {
+        if (components == null) {
+          initComponents();
+        }
+      }
+    }
     return components;
   }
 
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception
   {
-    // int sleep = req.getParams().getInt("sleep",0);
-    // if (sleep > 0) {log.error("SLEEPING for " + sleep);  Thread.sleep(sleep);}
-    if (req.getContentStreams() != null && req.getContentStreams().iterator().hasNext()) {
-      throw new SolrException(ErrorCode.BAD_REQUEST, "Search requests cannot accept content streams");
-    }
-    
+    if (components == null) getComponents();
     ResponseBuilder rb = new ResponseBuilder(req, rsp, components);
     if (rb.requestInfo != null) {
       rb.requestInfo.setResponseBuilder(rb);
@@ -313,7 +338,7 @@ public class SearchHandler extends RequestHandlerBase implements SolrCoreAware ,
                 // as the default but operators need to update their luceneMatchVersion to enable
                 // this behavior since it did not work this way prior to 5.1
                 if (req.getCore().getSolrConfig().luceneMatchVersion.onOrAfter(Version.LUCENE_5_1_0)) {
-                  String reqPath = (String)req.getContext().get("path");
+                  String reqPath = (String) req.getContext().get(PATH);
                   if (!"/select".equals(reqPath)) {
                     params.set(CommonParams.QT, reqPath);
                   } // else if path is /select, then the qt gets passed thru if set

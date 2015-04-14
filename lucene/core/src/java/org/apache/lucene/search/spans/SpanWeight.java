@@ -26,10 +26,10 @@ import org.apache.lucene.index.IndexReaderContext;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermContext;
+import org.apache.lucene.index.Terms;
 import org.apache.lucene.search.ComplexExplanation;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.TermStatistics;
 import org.apache.lucene.search.Weight;
@@ -46,12 +46,11 @@ public class SpanWeight extends Weight {
   protected final SpanQuery query;
   protected Similarity.SimWeight stats;
 
-  public SpanWeight(SpanQuery query, IndexSearcher searcher)
-    throws IOException {
+  public SpanWeight(SpanQuery query, IndexSearcher searcher) throws IOException {
     super(query);
     this.similarity = searcher.getSimilarity();
     this.query = query;
-    
+
     termContexts = new HashMap<>();
     TreeSet<Term> terms = new TreeSet<>();
     query.extractTerms(terms);
@@ -66,8 +65,8 @@ public class SpanWeight extends Weight {
     }
     final String field = query.getField();
     if (field != null) {
-      stats = similarity.computeWeight(query.getBoost(), 
-                                       searcher.collectionStatistics(query.getField()), 
+      stats = similarity.computeWeight(query.getBoost(),
+                                       searcher.collectionStatistics(query.getField()),
                                        termStats);
     }
   }
@@ -88,9 +87,13 @@ public class SpanWeight extends Weight {
   public Scorer scorer(LeafReaderContext context, Bits acceptDocs) throws IOException {
     if (stats == null) {
       return null;
-    } else {
-      return new SpanScorer(query.getSpans(context, acceptDocs, termContexts), this, similarity.simScorer(stats, context));
     }
+    Terms terms = context.reader().terms(query.getField());
+    if (terms != null && terms.hasPositions() == false) {
+      throw new IllegalStateException("field \"" + query.getField() + "\" was indexed without position data; cannot run SpanQuery (query=" + query + ")");
+    }
+    Spans spans = query.getSpans(context, acceptDocs, termContexts);
+    return (spans == null) ? null : new SpanScorer(spans, this, similarity.simScorer(stats, context));
   }
 
   @Override
@@ -106,11 +109,11 @@ public class SpanWeight extends Weight {
         Explanation scoreExplanation = docScorer.explain(doc, new Explanation(freq, "phraseFreq=" + freq));
         result.addDetail(scoreExplanation);
         result.setValue(scoreExplanation.getValue());
-        result.setMatch(true);          
+        result.setMatch(true);
         return result;
       }
     }
-    
+
     return new ComplexExplanation(false, 0.0f, "no matching term");
   }
 }

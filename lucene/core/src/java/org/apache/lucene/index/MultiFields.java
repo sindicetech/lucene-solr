@@ -138,7 +138,7 @@ public final class MultiFields extends Fields {
     assert term != null;
     final Terms terms = getTerms(r, field);
     if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator(null);
+      final TermsEnum termsEnum = terms.iterator();
       if (termsEnum.seekExact(term)) {
         return termsEnum.postings(liveDocs, null, flags);
       }
@@ -159,14 +159,13 @@ public final class MultiFields extends Fields {
    *  required.  Some codecs may be able to optimize
    *  their implementation when offsets and/or payloads are not
    *  required. This will return null if the field or term does not
-   *  exist or positions were not indexed. See {@link
-   *  TermsEnum#postings(Bits, PostingsEnum,int)}. */
+   *  exist. See {@link TermsEnum#postings(Bits, PostingsEnum,int)}. */
   public static PostingsEnum getTermPositionsEnum(IndexReader r, Bits liveDocs, String field, BytesRef term, int flags) throws IOException {
     assert field != null;
     assert term != null;
     final Terms terms = getTerms(r, field);
     if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator(null);
+      final TermsEnum termsEnum = terms.iterator();
       if (termsEnum.seekExact(term)) {
         return termsEnum.postings(liveDocs, null, flags);
       }

@@ -161,6 +161,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     memory.addField("term", termField.toString(), analyzer);
     
     LeafReader reader = (LeafReader) memory.createSearcher().getIndexReader();
+    TestUtil.checkReader(reader);
     DirectoryReader competitor = DirectoryReader.open(ramdir);
     duellReaders(competitor, reader);
     IOUtils.close(reader, competitor);
@@ -190,8 +191,8 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
         assertEquals(iwTerms.getDocCount(), memTerms.getDocCount());
         assertEquals(iwTerms.getSumDocFreq(), memTerms.getSumDocFreq());
         assertEquals(iwTerms.getSumTotalTermFreq(), memTerms.getSumTotalTermFreq());
-        TermsEnum iwTermsIter = iwTerms.iterator(null);
-        TermsEnum memTermsIter = memTerms.iterator(null);
+        TermsEnum iwTermsIter = iwTerms.iterator();
+        TermsEnum memTermsIter = memTerms.iterator();
         if (iwTerms.hasPositions()) {
           final boolean offsets = iwTerms.hasOffsets() && memTerms.hasOffsets();
          
@@ -318,13 +319,14 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     MemoryIndex memory = new MemoryIndex(random().nextBoolean(), false, random().nextInt(50) * 1024 * 1024);
     memory.addField("foo", "bar", analyzer);
     LeafReader reader = (LeafReader) memory.createSearcher().getIndexReader();
+    TestUtil.checkReader(reader);
     PostingsEnum disi = TestUtil.docs(random(), reader, "foo", new BytesRef("bar"), null, null, PostingsEnum.NONE);
     int docid = disi.docID();
     assertEquals(-1, docid);
     assertTrue(disi.nextDoc() != DocIdSetIterator.NO_MORE_DOCS);
     
     // now reuse and check again
-    TermsEnum te = reader.terms("foo").iterator(null);
+    TermsEnum te = reader.terms("foo").iterator();
     assertTrue(te.seekExact(new BytesRef("bar")));
     disi = te.postings(null, disi, PostingsEnum.NONE);
     docid = disi.docID();
@@ -352,6 +354,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     for (int i = 0; i < numIters; i++) { // check reuse
       memory.addField("foo", "bar", analyzer);
       LeafReader reader = (LeafReader) memory.createSearcher().getIndexReader();
+      TestUtil.checkReader(reader);
       assertEquals(1, reader.terms("foo").getSumTotalTermFreq());
       PostingsEnum disi = reader.postings(new Term("foo", "bar"), PostingsEnum.ALL);
       int docid = disi.docID();
@@ -362,7 +365,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
       assertEquals(3, disi.endOffset());
       
       // now reuse and check again
-      TermsEnum te = reader.terms("foo").iterator(null);
+      TermsEnum te = reader.terms("foo").iterator();
       assertTrue(te.seekExact(new BytesRef("bar")));
       disi = te.postings(null, disi);
       docid = disi.docID();
@@ -383,6 +386,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
 
     // This throws an NPE
     assertEquals(0, mindex.search(wrappedquery), 0.00001f);
+    TestUtil.checkReader(mindex.createSearcher().getIndexReader());
   }
     
   // LUCENE-3831
@@ -395,6 +399,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
 
     // This passes though
     assertEquals(0, mindex.search(wrappedquery), 0.00001f);
+    TestUtil.checkReader(mindex.createSearcher().getIndexReader());
   }
   
   public void testSameFieldAddedMultipleTimes() throws IOException {
@@ -403,6 +408,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     mindex.addField("field", "the quick brown fox", mockAnalyzer);
     mindex.addField("field", "jumps over the", mockAnalyzer);
     LeafReader reader = (LeafReader) mindex.createSearcher().getIndexReader();
+    TestUtil.checkReader(reader);
     assertEquals(7, reader.terms("field").getSumTotalTermFreq());
     PhraseQuery query = new PhraseQuery();
     query.add(new Term("field", "fox"));
@@ -415,6 +421,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     assertEquals(0, mindex.search(query), 0.00001f);
     query.setSlop(10);
     assertTrue("posGap" + mockAnalyzer.getPositionIncrementGap("field") , mindex.search(query) > 0.0001);
+    TestUtil.checkReader(mindex.createSearcher().getIndexReader());
   }
   
   public void testNonExistentField() throws IOException {
@@ -422,6 +429,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     MockAnalyzer mockAnalyzer = new MockAnalyzer(random());
     mindex.addField("field", "the quick brown fox", mockAnalyzer);
     LeafReader reader = (LeafReader) mindex.createSearcher().getIndexReader();
+    TestUtil.checkReader(reader);
     assertNull(reader.getNumericDocValues("not-in-index"));
     assertNull(reader.getNormValues("not-in-index"));
     assertNull(reader.postings(new Term("not-in-index", "foo")));
@@ -456,6 +464,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
       }
       DirectoryReader competitor = DirectoryReader.open(dir);
       LeafReader memIndexReader= (LeafReader) memory.createSearcher().getIndexReader();
+      TestUtil.checkReader(memIndexReader);
       duellReaders(competitor, memIndexReader);
       IOUtils.close(competitor, memIndexReader);
       memory.reset();
@@ -471,6 +480,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     IndexSearcher searcher = memory.createSearcher();
     TopDocs docs = searcher.search(new TermQuery(new Term("foo", "")), 10);
     assertEquals(1, docs.totalHits);
+    TestUtil.checkReader(searcher.getIndexReader());
   }
 
   public void testDuelMemoryIndexCoreDirectoryWithArrayField() throws Exception {
@@ -507,6 +517,7 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
     //compare term vectors
     Terms ramTv = reader.getTermVector(0, field_name);
     IndexReader memIndexReader = memIndex.createSearcher().getIndexReader();
+    TestUtil.checkReader(memIndexReader);
     Terms memTv = memIndexReader.getTermVector(0, field_name);
 
     compareTermVectors(ramTv, memTv, field_name);
@@ -518,8 +529,8 @@ public class TestMemoryIndexAgainstRAMDir extends BaseTokenStreamTestCase {
 
   protected void compareTermVectors(Terms terms, Terms memTerms, String field_name) throws IOException {
 
-    TermsEnum termEnum = terms.iterator(null);
-    TermsEnum memTermEnum = memTerms.iterator(null);
+    TermsEnum termEnum = terms.iterator();
+    TermsEnum memTermEnum = memTerms.iterator();
 
     while (termEnum.next() != null) {
       assertNotNull(memTermEnum.next());

@@ -146,7 +146,7 @@ public abstract class LeafReader extends IndexReader {
     if (terms == null) {
       return 0;
     }
-    final TermsEnum termsEnum = terms.iterator(null);
+    final TermsEnum termsEnum = terms.iterator();
     if (termsEnum.seekExact(term.bytes())) {
       return termsEnum.docFreq();
     } else {
@@ -165,7 +165,7 @@ public abstract class LeafReader extends IndexReader {
     if (terms == null) {
       return 0;
     }
-    final TermsEnum termsEnum = terms.iterator(null);
+    final TermsEnum termsEnum = terms.iterator();
     if (termsEnum.seekExact(term.bytes())) {
       return termsEnum.totalTermFreq();
     } else {
@@ -214,7 +214,7 @@ public abstract class LeafReader extends IndexReader {
     assert term.bytes() != null;
     final Terms terms = terms(term.field());
     if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator(null);
+      final TermsEnum termsEnum = terms.iterator();
       if (termsEnum.seekExact(term.bytes())) {
         return termsEnum.postings(getLiveDocs(), null, flags);
       }
@@ -223,7 +223,14 @@ public abstract class LeafReader extends IndexReader {
   }
 
   /** Returns {@link PostingsEnum} for the specified term
-   *  with {@link PostingsEnum#FREQS}. */
+   *  with {@link PostingsEnum#FREQS}.
+   *  <p>
+   *  Use this method if you only require documents and frequencies,
+   *  and do not need any proximity data.
+   *  This method is equivalent to 
+   *  {@link #postings(Term, int) postings(term, PostingsEnum.FREQS)}
+   *  @see #postings(Term, int)
+   */
   public final PostingsEnum postings(Term term) throws IOException {
     return postings(term, PostingsEnum.FREQS);
   }
@@ -308,7 +315,7 @@ public abstract class LeafReader extends IndexReader {
     assert term.bytes() != null;
     final Terms terms = terms(term.field());
     if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator(null);
+      final TermsEnum termsEnum = terms.iterator();
       if (termsEnum.seekExact(term.bytes())) {
         return termsEnum.docs(getLiveDocs(), null);
       }
@@ -326,7 +333,7 @@ public abstract class LeafReader extends IndexReader {
     assert term.bytes() != null;
     final Terms terms = terms(term.field());
     if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator(null);
+      final TermsEnum termsEnum = terms.iterator();
       if (termsEnum.seekExact(term.bytes())) {
         return termsEnum.docsAndPositions(getLiveDocs(), null);
       }

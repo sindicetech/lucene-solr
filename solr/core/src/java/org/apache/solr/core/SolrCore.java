@@ -89,6 +89,7 @@ import org.apache.solr.handler.RequestHandlerBase;
 import org.apache.solr.handler.admin.ShowFileRequestHandler;
 import org.apache.solr.handler.component.HighlightComponent;
 import org.apache.solr.handler.component.SearchComponent;
+import org.apache.solr.logging.MDCUtils;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestHandler;
 import org.apache.solr.response.BinaryResponseWriter;
@@ -132,7 +133,6 @@ import org.apache.solr.update.processor.RunUpdateProcessorFactory;
 import org.apache.solr.update.processor.UpdateRequestProcessorChain;
 import org.apache.solr.update.processor.UpdateRequestProcessorChain.ProcessorInfo;
 import org.apache.solr.update.processor.UpdateRequestProcessorFactory;
-import org.apache.solr.util.ConcurrentLRUCache;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.PropertiesInputStream;
 import org.apache.solr.util.RefCounted;
@@ -144,6 +144,8 @@ import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
+
+import static org.apache.solr.common.params.CommonParams.PATH;
 
 /**
  *
@@ -691,6 +693,8 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
   public SolrCore(String name, String dataDir, SolrConfig config, IndexSchema schema, CoreDescriptor cd, UpdateHandler updateHandler, IndexDeletionPolicyWrapper delPolicy, SolrCore prev) {
     coreDescriptor = cd;
     this.setName( name );
+    MDCUtils.setCore(name); // show the core name in the error logs
+    
     resourceLoader = config.getResourceLoader();
     this.solrConfig = config;
 
@@ -910,9 +914,9 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
 
       // ZK pre-Register would have already happened so we read slice properties now
       ClusterState clusterState = cc.getZkController().getClusterState();
-      Slice slice = clusterState.getSlice(cd.getCloudDescriptor().getCollectionName(),
+      Slice slice = clusterState.getSlice(cd.getCloudDescriptor().getCollectionName(), 
           cd.getCloudDescriptor().getShardId());
-      if (Slice.CONSTRUCTION.equals(slice.getState())) {
+      if (slice.getState() == Slice.State.CONSTRUCTION) {
         // set update log to buffer before publishing the core
         getUpdateHandler().getUpdateLog().bufferUpdates();
       }
@@ -1353,7 +1357,7 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
   private final LinkedList<RefCounted<SolrIndexSearcher>> _searchers = new LinkedList<>();
   private final LinkedList<RefCounted<SolrIndexSearcher>> _realtimeSearchers = new LinkedList<>();
 
-  final ExecutorService searcherExecutor = Executors.newSingleThreadExecutor(
+  final ExecutorService searcherExecutor = ExecutorUtil.newMDCAwareSingleThreadExecutor(
       new DefaultSolrThreadFactory("searcherExecutor"));
   private int onDeckSearchers;  // number of searchers preparing
   // Lock ordering: one can acquire the openSearcherLock and then the searcherLock, but not vice-versa.
@@ -2009,7 +2013,7 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
     // for back compat, we set these now just in case other code
     // are expecting them during handleRequest
     toLog.add("webapp", req.getContext().get("webapp"));
-    toLog.add("path", req.getContext().get("path"));
+    toLog.add(PATH, req.getContext().get(PATH));
 
     final SolrParams params = req.getParams();
     final String lpList = params.get(CommonParams.LOG_PARAMS_LIST);
@@ -2077,13 +2081,13 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
     HashMap<String, QueryResponseWriter> m= new HashMap<>();
     m.put("xml", new XMLResponseWriter());
     m.put("standard", m.get("xml"));
-    m.put("json", new JSONResponseWriter());
+    m.put(CommonParams.JSON, new JSONResponseWriter());
     m.put("python", new PythonResponseWriter());
     m.put("php", new PHPResponseWriter());
     m.put("phps", new PHPSerializedResponseWriter());
     m.put("ruby", new RubyResponseWriter());
     m.put("raw", new RawResponseWriter());
-    m.put("javabin", new BinaryResponseWriter());
+    m.put(CommonParams.JAVABIN, new BinaryResponseWriter());
     m.put("csv", new CSVResponseWriter());
     m.put("xsort", new SortingResponseWriter());
     m.put("schema.xml", new SchemaXmlResponseWriter());
@@ -2463,12 +2467,12 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
       zkSolrResourceLoader.getZkController().registerConfListenerForCore(
           zkSolrResourceLoader.getConfigSetZkPath(),
           this,
-          getListener(this, zkSolrResourceLoader));
+          getConfListener(this, zkSolrResourceLoader));
 
   }
 
 
-  private static Runnable getListener(SolrCore core, ZkSolrResourceLoader zkSolrResourceLoader) {
+  public static Runnable getConfListener(SolrCore core, ZkSolrResourceLoader zkSolrResourceLoader) {
     final String coreName = core.getName();
     final CoreContainer cc = core.getCoreDescriptor().getCoreContainer();
     final String overlayPath = zkSolrResourceLoader.getConfigSetZkPath() + "/" + ConfigOverlay.RESOURCE_NAME;
@@ -2506,9 +2510,7 @@ public final class SolrCore implements SolrInfoMBean, Closeable {
           cc.reload(coreName);
           return;
         }
-        //some files in conf directoy has changed other than schema.xml,
-        // solrconfig.xml. so fire event listeners
-
+        //some files in conf directory may have  other than managedschema, overlay, params
         try (SolrCore core = cc.solrCores.getCoreFromAnyList(coreName, true)) {
           if (core == null || core.isClosed()) return;
           for (Runnable listener : core.confListeners) {
