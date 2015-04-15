@@ -358,7 +358,9 @@ public class IndexFetcher {
         return false;
       }
       LOG.info("Number of files in latest index in master: " + filesToDownload.size());
-      LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
+      if (tlogFilesToDownload != null) {
+        LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
+      }
 
       // Create the sync service
       fsyncService = ExecutorUtil.newMDCAwareSingleThreadExecutor(new DefaultSolrThreadFactory("fsyncService"));
@@ -435,7 +437,9 @@ public class IndexFetcher {
           successfulInstall = false;
 
           downloadIndexFiles(isFullCopyNeeded, indexDir, oldestVersion, tmpIndexDir, latestGeneration);
-          downloadTlogFiles(timestamp, latestGeneration);
+          if (tlogFilesToDownload != null) {
+            downloadTlogFiles(timestamp, latestGeneration);
+          }
           LOG.info("Total time taken for download : "
               + ((System.currentTimeMillis() - replicationStartTime) / 1000)
               + " secs");
