@@ -32,11 +32,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * An extension of the {@link org.apache.solr.update.UpdateLog} for the CDCR scenario.<br/>
+ * An extension of the {@link org.apache.solr.update.UpdateLog} for the CDCR scenario.<br>
  * Compared to the original update log implementation, transaction logs are removed based on
  * pointers instead of a fixed size limit. Pointers are created by the CDC replicators and
  * correspond to replication checkpoints. If all pointers are ahead of a transaction log,
- * this transaction log is removed.<br/>
+ * this transaction log is removed.<br>
  * Given that the number of transaction logs can become considerable if some pointers are
  * lagging behind, the {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader} provides
  * a {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader#seek(long)} method to

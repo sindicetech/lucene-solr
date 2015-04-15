@@ -146,9 +146,9 @@ public class TransactionLog {
         log.debug("New TransactionLog file=" + tlogFile + ", exists=" + tlogFile.exists() + ", size=" + tlogFile.length() + ", openExisting=" + openExisting);
       }
 
-      // Parse tlog id and start version from the filename
+      // Parse tlog id from the filename
       String filename = tlogFile.getName();
-      id = Long.parseLong(filename.substring(filename.indexOf('.') + 1, filename.lastIndexOf('.')));
+      id = Long.parseLong(filename.substring(filename.indexOf('.') + 1, filename.indexOf('.') + 20));
 
       this.tlogFile = tlogFile;
       raf = new RandomAccessFile(this.tlogFile, "rw");

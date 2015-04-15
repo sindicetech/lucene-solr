@@ -46,25 +46,23 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.update.processor.DistributedUpdateProcessor.DistribPhase;
 
-import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
-
 public class TestRecovery extends SolrTestCaseJ4 {
 
   // means that we've seen the leader and have version info (i.e. we are a non-leader replica)
-  private static String FROM_LEADER = DistribPhase.FROMLEADER.toString();
+  private static String FROM_LEADER = DistribPhase.FROMLEADER.toString(); 
 
   private static int timeout=60;  // acquire timeout in seconds.  change this to a huge number when debugging to prevent threads from advancing.
 
   // TODO: fix this test to not require FSDirectory
   static String savedFactory;
-
+  
   @BeforeClass
   public static void beforeClass() throws Exception {
     savedFactory = System.getProperty("solr.DirectoryFactory");
     System.setProperty("solr.directoryFactory", "org.apache.solr.core.MockFSDirectoryFactory");
     initCore("solrconfig-tlog.xml","schema15.xml");
   }
-
+  
   @AfterClass
   public static void afterClass() {
     if (savedFactory == null) {
@@ -710,8 +708,8 @@ public class TestRecovery extends SolrTestCaseJ4 {
       req().close();
     }
   }
-
-
+  
+  
   private void addDocs(int nDocs, int start, LinkedList<Long> versions) throws Exception {
     for (int i=0; i<nDocs; i++) {
       versions.addFirst( addAndGetVersion( sdoc("id",Integer.toString(start + nDocs)) , null) );
@@ -1032,7 +1030,7 @@ public class TestRecovery extends SolrTestCaseJ4 {
       raf.seek(raf.length());  // seek to end
       raf.writeLong(0xffffffffffffffffL);
       raf.writeChars("This should be appended to a good log file, representing a bad partially written record.");
-
+      
       byte[] content = new byte[(int)raf.length()];
       raf.seek(0);
       raf.readFully(content);
@@ -1045,16 +1043,15 @@ public class TestRecovery extends SolrTestCaseJ4 {
       findReplace("CCCCCC".getBytes(StandardCharsets.UTF_8), "cccccc".getBytes(StandardCharsets.UTF_8), content);
 
       // WARNING... assumes format of .00000n where n is less than 9
-      long logNumber = Long.parseLong(fname.substring(fname.indexOf(".") + 1, fname.lastIndexOf('.')));
-      long startVersion = Long.parseLong(fname.substring(fname.lastIndexOf(".") + 1));
+      long logNumber = Long.parseLong(fname.substring(fname.lastIndexOf(".") + 1));
       String fname2 = String.format(Locale.ROOT,
           UpdateLog.LOG_FILENAME_PATTERN,
           UpdateLog.TLOG_NAME,
-          logNumber + 1, startVersion);
+          logNumber + 1);
       raf = new RandomAccessFile(new File(logDir, fname2), "rw");
       raf.write(content);
       raf.close();
-
+      
 
       logReplay.release(1000);
       logReplayFinish.drainPermits();
@@ -1083,7 +1080,7 @@ public class TestRecovery extends SolrTestCaseJ4 {
       }
     }
   }
-
+  
   private static int indexOf(byte[] target, byte[] data, int start) {
     outer: for (int i=start; i<data.length - target.length; i++) {
       for (int j=0; j<target.length; j++) {

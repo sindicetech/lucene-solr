@@ -41,7 +41,6 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.cloud.hdfs.HdfsBasicDistributedZk2Test;
 import org.apache.solr.cloud.hdfs.HdfsTestUtil;
 import org.apache.solr.common.util.IOUtils;
 import org.apache.solr.request.SolrQueryRequest;
@@ -66,22 +65,22 @@ import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 public class TestRecoveryHdfs extends SolrTestCaseJ4 {
 
   // means that we've seen the leader and have version info (i.e. we are a non-leader replica)
-  private static String FROM_LEADER = DistribPhase.FROMLEADER.toString();
+  private static String FROM_LEADER = DistribPhase.FROMLEADER.toString(); 
 
   private static int timeout=60;  // acquire timeout in seconds.  change this to a huge number when debugging to prevent threads from advancing.
-
+  
   private static MiniDFSCluster dfsCluster;
 
   private static String hdfsUri;
-
+  
   private static FileSystem fs;
-
+  
   @BeforeClass
   public static void beforeClass() throws Exception {
     dfsCluster = HdfsTestUtil.setupClass(createTempDir().toFile().getAbsolutePath());
     System.setProperty("solr.hdfs.home", dfsCluster.getURI().toString() + "/solr");
     hdfsUri = dfsCluster.getFileSystem().getUri().toString();
-
+    
     try {
       URI uri = new URI(hdfsUri);
       Configuration conf = new Configuration();
@@ -92,10 +91,10 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
     }
 
     System.setProperty("solr.ulog.dir", hdfsUri + "/solr/shard1");
-
+    
     initCore("solrconfig-tlog.xml","schema15.xml");
   }
-
+  
   @AfterClass
   public static void afterClass() throws Exception {
     System.clearProperty("solr.ulog.dir");
@@ -105,7 +104,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
     IOUtils.closeQuietly(fs);
     fs = null;
     HdfsTestUtil.teardownClass(dfsCluster);
-
+    
     hdfsDataDir = null;
     dfsCluster = null;
   }
@@ -713,8 +712,8 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       req().close();
     }
   }
-
-
+  
+  
   private void addDocs(int nDocs, int start, LinkedList<Long> versions) throws Exception {
     for (int i=0; i<nDocs; i++) {
       versions.addFirst( addAndGetVersion( sdoc("id",Integer.toString(start + nDocs)) , null) );
@@ -751,7 +750,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       assertU(commit());
 
       String logDir = h.getCore().getUpdateHandler().getUpdateLog().getLogDir();
-
+      
       h.close();
 
       String[] files = HdfsUpdateLog.getLogList(fs, new Path(logDir));
@@ -870,16 +869,16 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       assertU(adoc("id","F1"));
       assertU(adoc("id","F2"));
       assertU(adoc("id","F3"));
-
+      
       h.close();
+      
 
-
-
+      
       String[] files = HdfsUpdateLog.getLogList(fs, new Path(logDir));
       Arrays.sort(files);
 
       FSDataOutputStream dos = fs.append(new Path(logDir, files[files.length-1]));
-
+    
       dos.writeLong(0xffffffffffffffffL);
       dos.writeChars("This should be appended to a good log file, representing a bad partially written record.");
       dos.close();
@@ -921,7 +920,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       DirectUpdateHandler2.commitOnClose = false;
 
       String logDir = h.getCore().getUpdateHandler().getUpdateLog().getLogDir();
-
+ 
       clearIndex();
       assertU(commit());
 
@@ -1019,7 +1018,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       dos.writeLong(0xffffffffffffffffL);
       dos.writeChars("This should be appended to a good log file, representing a bad partially written record.");
       dos.close();
-
+      
       FSDataInputStream dis = fs.open(new Path(logDir, files[files.length-1]));
       byte[] content = new byte[(int)dis.available()];
 
@@ -1038,10 +1037,11 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
           UpdateLog.LOG_FILENAME_PATTERN,
           UpdateLog.TLOG_NAME,
           logNumber + 1);
+      
       dos = fs.create(new Path(logDir, fname2), (short)1);
       dos.write(content);
       dos.close();
-
+      
 
       logReplay.release(1000);
       logReplayFinish.drainPermits();
@@ -1070,7 +1070,7 @@ public class TestRecoveryHdfs extends SolrTestCaseJ4 {
       }
     }
   }
-
+  
   private static int indexOf(byte[] target, byte[] data, int start) {
     outer: for (int i=start; i<data.length - target.length; i++) {
       for (int j=0; j<target.length; j++) {
