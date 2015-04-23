@@ -29,7 +29,6 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
-import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,7 +45,6 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.Adler32;
@@ -84,7 +82,6 @@ import org.apache.solr.handler.ReplicationHandler.*;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.SolrIndexSearcher;
-import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.CommitUpdateCommand;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.DefaultSolrThreadFactory;
@@ -795,9 +792,8 @@ public class IndexFetcher {
 
   private void downloadTlogFiles(String timestamp, long latestGeneration) throws Exception {
     UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
-    List<Map<String, Object>> filteredTlogFiles = this.getFilteredTlogFiles();
 
-    LOG.info("Starting download of tlog files from master: " + filteredTlogFiles);
+    LOG.info("Starting download of tlog files from master: " + tlogFilesToDownload);
     tlogFilesDownloaded = Collections.synchronizedList(new ArrayList<Map<String, Object>>());
     File tmpTlogDir = new File(ulog.getLogDir(), "tlog." + getDateAsStr(new Date()));
     try {
@@ -806,7 +802,7 @@ public class IndexFetcher {
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
             "Failed to create temporary tlog folder: " + tmpTlogDir.getName());
       }
-      for (Map<String, Object> file : filteredTlogFiles) {
+      for (Map<String, Object> file : tlogFilesToDownload) {
         String saveAs = (String) (file.get(ALIAS) == null ? file.get(NAME) : file.get(ALIAS));
         localFileFetcher = new LocalFsFileFetcher(tmpTlogDir, file, saveAs, TLOG_FILE, latestGeneration);
         currentFile = file;
@@ -820,48 +816,6 @@ public class IndexFetcher {
     } finally {
       delTree(tmpTlogDir);
     }
-  }
-
-  /**
-   * Filters the tlog files based on their version number, as the tlog ids between the leader and the slaves can be
-   * desynchronised due to recovery strategy commits. Files are filtered out if a file with the same version and the
-   * same size exists locally. The filtered tlog files will be assigned a new alias name
-   * that will follow the local sequence of tlog ids.
-   */
-  private List<Map<String, Object>> getFilteredTlogFiles() {
-    UpdateLog ulog = solrCore.getUpdateHandler().getUpdateLog();
-    String[] logList = ulog.getLogList(new File(ulog.getLogDir()));
-    long lastId = ulog.getLastLogId();
-
-    Map<Long, Map<String, Object>> localFilesMeta = new HashMap<>();
-    for (String logFile : logList) {
-      long version = Math.abs(Long.parseLong(logFile.substring(logFile.lastIndexOf('.') + 1)));
-
-      Map<String, Object> fileMeta = new HashMap<>();
-      fileMeta.put(SIZE, new File(ulog.getLogDir(), logFile).length());
-      fileMeta.put(NAME, logFile);
-      localFilesMeta.put(version, fileMeta);
-    }
-
-    List<Map<String, Object>> filteredTlogFiles = new ArrayList<>();
-    for (Map<String, Object> file : tlogFilesToDownload) {
-      String filename = (String) file.get(NAME);
-      long size = (Long) file.get(SIZE);
-      long version = Math.abs(Long.parseLong(filename.substring(filename.lastIndexOf('.') + 1)));
-
-      // if the file exists but does not have the right size, we should not change its name/id
-      if (localFilesMeta.containsKey(version) && !localFilesMeta.get(version).get(SIZE).equals(size)) {
-        file.put(ALIAS, localFilesMeta.get(version).get(NAME));
-        filteredTlogFiles.add(file);
-      }
-      // If the file does not exist, we should rename it based on the latest tlog id
-      else if (!localFilesMeta.containsKey(version)) {
-        file.put(ALIAS, String.format(Locale.ROOT, CdcrUpdateLog.LOG_FILENAME_PATTERN, UpdateLog.TLOG_NAME, ++lastId, version));
-        filteredTlogFiles.add(file);
-      }
-    }
-
-    return filteredTlogFiles;
   }
 
   /**
@@ -1129,42 +1083,27 @@ public class IndexFetcher {
   }
 
   /**
-   * The tlog files are copied to the tmp dir to the tlog dir. A backup of the old file is maintained
+   * The tlog files are copied from the tmp dir to the tlog dir by renaming the directory if possible.
+   * A backup of the old file is maintained.
    */
   private void copyTmpTlogFiles2Tlog(File tmpTlogDir, String timestamp) {
-    boolean status = false;
     File tlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir());
     File backupTlogDir = new File(tlogDir.getParent(), UpdateLog.TLOG_NAME + "." + timestamp);
 
-    for (File file : makeTmpConfDirFileList(tmpTlogDir, new ArrayList<File>())) {
-      File oldFile = new File(tlogDir, file.getPath().substring(tmpTlogDir.getPath().length(), file.getPath().length()));
-      if (!oldFile.getParentFile().exists()) {
-        status = oldFile.getParentFile().mkdirs();
-        if (!status) {
-          throw new SolrException(ErrorCode.SERVER_ERROR,
-              "Unable to mkdirs: " + oldFile.getParentFile());
-        }
-      }
-      if (oldFile.exists()) {
-        File backupFile = new File(backupTlogDir, oldFile.getName());
-        if (!backupFile.getParentFile().exists()) {
-          status = backupFile.getParentFile().mkdirs();
-          if (!status) {
-            throw new SolrException(ErrorCode.SERVER_ERROR,
-                "Unable to mkdirs: " + backupFile.getParentFile());
-          }
-        }
-        status = oldFile.renameTo(backupFile);
-        if (!status) {
-          throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
-              "Unable to rename: " + oldFile + " to: " + backupFile);
-        }
-      }
-      status = file.renameTo(oldFile);
-      if (!status) {
-        throw new SolrException(ErrorCode.SERVER_ERROR,
-            "Unable to rename: " + file + " to: " + oldFile);
-      }
+    try {
+      org.apache.commons.io.FileUtils.moveDirectory(tlogDir, backupTlogDir);
+    } catch (IOException e) {
+      throw new SolrException(ErrorCode.SERVER_ERROR,
+        "Unable to rename: " + tlogDir + " to: " + backupTlogDir, e);
+    }
+
+    try {
+      tmpTlogDir = new File(backupTlogDir, tmpTlogDir.getName());
+      org.apache.commons.io.FileUtils.moveDirectory(tmpTlogDir, tlogDir);
+    }
+    catch (IOException e) {
+      throw new SolrException(ErrorCode.SERVER_ERROR,
+        "Unable to rename: " + tmpTlogDir + " to: " + tlogDir, e);
     }
   }
 
