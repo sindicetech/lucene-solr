@@ -369,7 +369,9 @@ public class SnapPuller {
       // this can happen if the commit point is deleted before we fetch the file list.
       if(filesToDownload.isEmpty()) return false;
       LOG.info("Number of files in latest index in master: " + filesToDownload.size());
-      LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
+      if (tlogFilesToDownload != null) {
+        LOG.info("Number of tlog files in master: " + tlogFilesToDownload.size());
+      }
 
       // Create the sync service
       fsyncService = Executors.newSingleThreadExecutor(new DefaultSolrThreadFactory("fsyncService"));
@@ -414,7 +416,9 @@ public class SnapPuller {
 
           downloadIndexFiles(isFullCopyNeeded, indexDir, tmpIndexDir,
               latestGeneration);
-          downloadTlogFiles(timestamp, latestGeneration);
+          if (tlogFilesToDownload != null) {
+            downloadTlogFiles(timestamp, latestGeneration);
+          }
           LOG.info("Total time taken for download : "
               + ((System.currentTimeMillis() - replicationStartTime) / 1000)
               + " secs");
