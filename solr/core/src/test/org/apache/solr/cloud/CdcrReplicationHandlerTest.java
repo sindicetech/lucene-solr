@@ -35,7 +35,7 @@ public class CdcrReplicationHandlerTest extends AbstractCdcrDistributedZkTest {
   public void distribSetUp() throws Exception {
     schemaString = "schema15.xml";      // we need a string id
     createTargetCollection = false;     // we do not need the target cluster
-    sliceCount = 1; // we need only one shard
+    shardCount = 1; // we need only one shard
     // we need a persistent directory, otherwise the UpdateHandler will erase existing tlog files after restarting a node
     System.setProperty("solr.directoryFactory", "solr.StandardDirectoryFactory");
     super.distribSetUp();

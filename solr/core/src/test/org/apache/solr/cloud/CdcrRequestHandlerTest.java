@@ -81,7 +81,7 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
     // a second document indexed in shard 1, the checkpoint must come from shard 2
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.COLLECTIONCHECKPOINT);
     long checkpoint1 = (Long) rsp.get(CdcrParams.CHECKPOINT);
-    long expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    long expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.SHARDCHECKPOINT).get(CdcrParams.CHECKPOINT);
     assertEquals(expected, checkpoint1);
 
     index(SOURCE_COLLECTION, getDoc(id, "c")); // shard 1
@@ -95,7 +95,7 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
     // a fourth document indexed in shard 2, the checkpoint must come from shard 1
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.COLLECTIONCHECKPOINT);
     long checkpoint2 = (Long) rsp.get(CdcrParams.CHECKPOINT);
-    expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    expected = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SHARDCHECKPOINT).get(CdcrParams.CHECKPOINT);
     assertEquals(expected, checkpoint2);
 
     // send a delete by query
@@ -105,9 +105,9 @@ public class CdcrRequestHandlerTest extends AbstractCdcrDistributedZkTest {
     rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.COLLECTIONCHECKPOINT);
     long checkpoint3 = (Long) rsp.get(CdcrParams.CHECKPOINT);
     assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
-    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.SHARDCHECKPOINT).get(CdcrParams.CHECKPOINT);
     assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
-    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.SLICECHECKPOINT).get(CdcrParams.CHECKPOINT);
+    checkpoint3 = (Long) invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD2), CdcrParams.CdcrAction.SHARDCHECKPOINT).get(CdcrParams.CHECKPOINT);
     assertTrue(checkpoint3 > 0); // ensure that checkpoints from deletes are in absolute form
 
     // replication never started, lastProcessedVersion should be -1 for both shards

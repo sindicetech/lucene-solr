@@ -74,7 +74,7 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  * </p>
  * <p>
  *   This class will automatically create two collections, the source and the target. Each collection will have
- *   {@link #sliceCount} slices, and {@link #replicationFactor} replicas per slice. One jetty instance will
+ *   {@link #shardCount} slices, and {@link #replicationFactor} replicas per slice. One jetty instance will
  *   be created per core.
  * </p>
  * <p>
@@ -97,7 +97,7 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  */
 public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTestBase {
 
-  protected int sliceCount = 2;
+  protected int shardCount = 2;
   protected int replicationFactor = 2;
   protected boolean createTargetCollection = true;
 
@@ -118,8 +118,8 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
   public void distribSetUp() throws Exception {
     super.distribSetUp();
 
-    if (sliceCount > 0) {
-      System.setProperty("numShards", Integer.toString(sliceCount));
+    if (shardCount > 0) {
+      System.setProperty("numShards", Integer.toString(shardCount));
     } else {
       System.clearProperty("numShards");
     }
@@ -291,7 +291,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * and finally creates the source collection.
    */
   private void createSourceCollection() throws Exception {
-    List<String> nodeNames = this.startServers(sliceCount * replicationFactor);
+    List<String> nodeNames = this.startServers(shardCount * replicationFactor);
     this.collectionToNodeNames.put(SOURCE_COLLECTION, nodeNames);
     this.createCollection(SOURCE_COLLECTION);
     this.waitForRecoveriesToFinish(SOURCE_COLLECTION, true);
@@ -314,7 +314,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
    * and finally creates the target collection.
    */
   private void createTargetCollection() throws Exception {
-    List<String> nodeNames = this.startServers(sliceCount * replicationFactor);
+    List<String> nodeNames = this.startServers(shardCount * replicationFactor);
     this.collectionToNodeNames.put(TARGET_COLLECTION, nodeNames);
     this.createCollection(TARGET_COLLECTION);
     this.waitForRecoveriesToFinish(TARGET_COLLECTION, true);
@@ -351,7 +351,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       }
       sb.deleteCharAt(sb.length() - 1);
 
-      createCollection(collectionInfos, name, sliceCount, replicationFactor, maxShardsPerNode, client, sb.toString());
+      createCollection(collectionInfos, name, shardCount, replicationFactor, maxShardsPerNode, client, sb.toString());
     }
     finally {
       client.shutdown();
@@ -459,15 +459,15 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
       ClusterState clusterState = client.getZkStateReader().getClusterState();
 
       assertTrue("Could not find new collection " + collectionName, clusterState.hasCollection(collectionName));
-      Map<String, Slice> slices = clusterState.getCollection(collectionName).getSlicesMap();
-      // did we find expectedSlices slices/shards?
-      assertEquals("Found new collection " + collectionName + ", but mismatch on number of slices.", sliceCount, slices.size());
+      Map<String, Slice> shards = clusterState.getCollection(collectionName).getSlicesMap();
+      // did we find expectedSlices shards/shards?
+      assertEquals("Found new collection " + collectionName + ", but mismatch on number of shards.", shardCount, shards.size());
       int totalShards = 0;
-      for (String sliceName : slices.keySet()) {
-        totalShards += slices.get(sliceName).getReplicas().size();
+      for (String shardName : shards.keySet()) {
+        totalShards += shards.get(shardName).getReplicas().size();
       }
-      int expectedTotalShards = sliceCount * replicationFactor;
-      assertEquals("Found new collection " + collectionName + " with correct number of slices, but mismatch on number " +
+      int expectedTotalShards = shardCount * replicationFactor;
+      assertEquals("Found new collection " + collectionName + " with correct number of shards, but mismatch on number " +
           "of shards.", expectedTotalShards, totalShards);
     }
     finally {
@@ -520,15 +520,15 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
         .getZkStateReader();
 
     // now wait till we see the leader for each shard
-    for (int i = 1; i <= sliceCount; i++) {
+    for (int i = 1; i <= shardCount; i++) {
       this.printLayout();
       zkStateReader.getLeaderRetry(temporaryCollection, "shard" + i, 15000);
     }
 
     // store the node names
     List<String> nodeNames = new ArrayList<>();
-    for (Slice slice : zkStateReader.getClusterState().getCollection(temporaryCollection).getSlices()) {
-      for (Replica replica : slice.getReplicas()) {
+    for (Slice shard : zkStateReader.getClusterState().getCollection(temporaryCollection).getSlices()) {
+      for (Replica replica : shard.getReplicas()) {
         nodeNames.add(replica.getNodeName());
       }
     }
@@ -591,19 +591,19 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
         }
 
         nextJetty:
-        for (Slice slice : coll.getSlices()) {
-          Set<Map.Entry<String, Replica>> entries = slice.getReplicasMap().entrySet();
+        for (Slice shard : coll.getSlices()) {
+          Set<Map.Entry<String, Replica>> entries = shard.getReplicasMap().entrySet();
           for (Map.Entry<String, Replica> entry : entries) {
             Replica replica = entry.getValue();
             if (replica.getStr(ZkStateReader.BASE_URL_PROP).contains(":" + port)) {
-              if (!shardToJetty.containsKey(slice.getName())) {
-                shardToJetty.put(slice.getName(), new ArrayList<CloudJettyRunner>());
+              if (!shardToJetty.containsKey(shard.getName())) {
+                shardToJetty.put(shard.getName(), new ArrayList<CloudJettyRunner>());
               }
-              boolean isLeader = slice.getLeader() == replica;
-              CloudJettyRunner cjr = new CloudJettyRunner(jetty, replica, collection, slice.getName(), entry.getKey());
-              shardToJetty.get(slice.getName()).add(cjr);
+              boolean isLeader = shard.getLeader() == replica;
+              CloudJettyRunner cjr = new CloudJettyRunner(jetty, replica, collection, shard.getName(), entry.getKey());
+              shardToJetty.get(shard.getName()).add(cjr);
               if (isLeader) {
-                shardToLeaderJetty.put(slice.getName(), cjr);
+                shardToLeaderJetty.put(shard.getName(), cjr);
               }
               cloudJettys.add(cjr);
               break nextJetty;
@@ -623,7 +623,7 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
 
   /**
    * Wrapper around a {@link org.apache.solr.client.solrj.embedded.JettySolrRunner} to map the jetty
-   * instance to various information of the cloud cluster, such as the collection and slice
+   * instance to various information of the cloud cluster, such as the collection and shard
    * that is served by the jetty instance, the node name, core node name, url, etc.
    */
   public static class CloudJettyRunner {
@@ -634,18 +634,18 @@ public abstract class AbstractCdcrDistributedZkTest extends AbstractDistribZkTes
     public String url;
     public SolrClient client;
     public Replica info;
-    public String slice;
+    public String shard;
     public String collection;
 
     public CloudJettyRunner(JettySolrRunner jetty, Replica replica,
-                            String collection, String slice, String coreNodeName) {
+                            String collection, String shard, String coreNodeName) {
       this.jetty = jetty;
       this.info = replica;
       this.collection = collection;
 
       // we need to update the jetty's shard so that it registers itself to the right shard when restarted
-      this.slice = slice;
-      this.jetty.setShards(this.slice);
+      this.shard = shard;
+      this.jetty.setShards(this.shard);
 
       // we need to update the jetty's shard so that it registers itself under the right core name when restarted
       this.coreNodeName = coreNodeName;
