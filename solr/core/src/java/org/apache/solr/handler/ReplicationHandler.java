@@ -70,6 +70,7 @@ import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.BinaryQueryResponseWriter;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.update.CdcrUpdateLog;
 import org.apache.solr.update.SolrIndexWriter;
 import org.apache.solr.update.UpdateLog;
 import org.apache.solr.util.NumberUtils;
@@ -433,10 +434,12 @@ public class ReplicationHandler extends RequestHandlerBase implements SolrCoreAw
     }
     rsp.add(CMD_GET_FILE_LIST, result);
 
-    // fetch list of tlog files
-    List<Map<String, Object>> tlogfiles = getTlogFileList();
-    LOG.info("Adding tlog files to list: " + tlogfiles);
-    rsp.add(TLOG_FILES, tlogfiles);
+    // fetch list of tlog files only if cdcr is activated
+    if (core.getUpdateHandler().getUpdateLog() != null && core.getUpdateHandler().getUpdateLog() instanceof CdcrUpdateLog) {
+      List<Map<String, Object>> tlogfiles = getTlogFileList();
+      LOG.debug("Adding tlog files to list: " + tlogfiles);
+      rsp.add(TLOG_FILES, tlogfiles);
+    }
 
     if (confFileNameAlias.size() < 1 || core.getCoreDescriptor().getCoreContainer().isZooKeeperAware())
       return;
