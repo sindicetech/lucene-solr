@@ -171,8 +171,8 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleCollectionCheckpointAction(req, rsp);
         break;
       }
-      case SLICECHECKPOINT: {
-        this.handleSliceCheckpointAction(req, rsp);
+      case SHARDCHECKPOINT: {
+        this.handleShardCheckpointAction(req, rsp);
         break;
       }
       case ENABLEBUFFER: {
@@ -348,11 +348,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   /**
    * This action is generally executed on the target cluster in order to retrieve the latest update checkpoint.
    * This checkpoint is used on the source cluster to setup the
-   * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader} of a slice leader. <br/>
+   * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader} of a shard leader. <br/>
    * This method will execute in parallel one
-   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SLICECHECKPOINT} request per slice leader. It will
-   * then pick the lowest version number as checkpoint. Picking the lowest amongst all slices will ensure that we do not
-   * pick a checkpoint that is ahead of the source cluster. This can occur when other slice leaders are sending new
+   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SHARDCHECKPOINT} request per shard leader. It will
+   * then pick the lowest version number as checkpoint. Picking the lowest amongst all shards will ensure that we do not
+   * pick a checkpoint that is ahead of the source cluster. This can occur when other shard leaders are sending new
    * updates to the target cluster while we are currently instantiating the
    * {@link org.apache.solr.update.CdcrUpdateLog.CdcrLogReader}.
    * This solution only works in scenarios where the topology of the source and target clusters are identical.
@@ -366,22 +366,22 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
       log.warn("Error when updating cluster state", e);
     }
     ClusterState cstate = zkController.getClusterState();
-    Collection<Slice> slices = cstate.getActiveSlices(collection);
+    Collection<Slice> shards = cstate.getActiveSlices(collection);
 
     ExecutorService parallelExecutor = Executors.newCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
 
     long checkpoint = Long.MAX_VALUE;
     try {
       List<Callable<Long>> callables = new ArrayList<>();
-      for (Slice slice : slices) {
-        ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, slice.getName());
+      for (Slice shard : shards) {
+        ZkNodeProps leaderProps = zkController.getZkStateReader().getLeaderRetry(collection, shard.getName());
         ZkCoreNodeProps nodeProps = new ZkCoreNodeProps(leaderProps);
         callables.add(new SliceCheckpointCallable(nodeProps.getCoreUrl(), path));
       }
 
       for (final Future<Long> future : parallelExecutor.invokeAll(callables)) {
         long version = future.get();
-        if (version < checkpoint) { // we must take the lowest checkpoint from all the slices
+        if (version < checkpoint) { // we must take the lowest checkpoint from all the shards
           checkpoint = version;
         }
       }
@@ -389,11 +389,11 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
-          "Error while requesting slice's checkpoints", e);
+          "Error while requesting shard's checkpoints", e);
     }
     catch (ExecutionException e) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
-          "Error while requesting slice's checkpoints", e);
+          "Error while requesting shard's checkpoints", e);
     }
     finally {
       parallelExecutor.shutdown();
@@ -405,9 +405,9 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   /**
    * Retrieve the version number of the latest entry of the {@link org.apache.solr.update.UpdateLog}.
    */
-  private void handleSliceCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp) {
+  private void handleShardCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp) {
     if (!leaderStateManager.amILeader()) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrParams.CdcrAction.SLICECHECKPOINT +
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action '" + CdcrParams.CdcrAction.SHARDCHECKPOINT +
           "' sent to non-leader replica");
     }
 
@@ -588,7 +588,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   /**
    * A thread subclass for executing a single
-   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SLICECHECKPOINT} action.
+   * {@link org.apache.solr.handler.CdcrParams.CdcrAction#SHARDCHECKPOINT} action.
    */
   private static final class SliceCheckpointCallable implements Callable<Long> {
 
@@ -608,7 +608,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         server.setSoTimeout(60000);
 
         ModifiableSolrParams params = new ModifiableSolrParams();
-        params.set(CommonParams.ACTION, CdcrParams.CdcrAction.SLICECHECKPOINT.toString());
+        params.set(CommonParams.ACTION, CdcrParams.CdcrAction.SHARDCHECKPOINT.toString());
 
         SolrRequest request = new QueryRequest(params);
         request.setPath(cdcrPath);
