@@ -74,7 +74,7 @@ import static org.apache.solr.common.cloud.ZkStateReader.REPLICATION_FACTOR;
  * </p>
  * <p>
  *   This class will automatically create two collections, the source and the target. Each collection will have
- *   {@link #shardCount} slices, and {@link #replicationFactor} replicas per slice. One jetty instance will
+ *   {@link #shardCount} shards, and {@link #replicationFactor} replicas per shard. One jetty instance will
  *   be created per core.
  * </p>
  * <p>
