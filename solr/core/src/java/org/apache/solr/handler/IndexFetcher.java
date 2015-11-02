@@ -382,11 +382,8 @@ public class IndexFetcher {
       tmpIndex = solrCore.getDataDir() + tmpIdxDirName;
 
       tmpIndexDir = solrCore.getDirectoryFactory().get(tmpIndex, DirContext.DEFAULT, solrCore.getSolrConfig().indexConfig.lockType);
-//      System.out.println("EOE solrcore is  " + ((null == solrCore) ? "null" : "not null"));
-//      System.out.println("EOE solrcore.getUpdateHandler() is  " + ((null == solrCore.getUpdateHandler()) ? "null" : "not null"));
-//      System.out.println("EOE solrcore.getUpdateHandler().getUpdateLog() is  " + ((null == solrCore.getUpdateHandler().getUpdateLog()) ? "null" : "not null"));
-//      System.out.println("EOE solrcore.getUpdateHandler().getUpdateLog().getLogDir() is  " + ((null == solrCore.getUpdateHandler().getUpdateLog().getLogDir()) ? "null" : "not null"));
 
+      // tmp dir for tlog files
       if (tlogFilesToDownload != null) {
         tmpTlogDir = new File(solrCore.getUpdateHandler().getUpdateLog().getLogDir(), "tlog." + timestamp);
       }
