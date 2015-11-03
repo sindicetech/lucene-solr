@@ -51,7 +51,6 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
   @Test
   @ShardsFixed(num = 2)
   public void testFullReplication() throws Exception {
-    this.clearSourceCollection();
     List<CloudJettyRunner> slaves = this.getShardToSlaveJetty(SOURCE_COLLECTION, SHARD1);
     ChaosMonkey.stop(slaves.get(0).jetty);
 
@@ -63,7 +62,7 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
       index(SOURCE_COLLECTION, docs);
     }
 
-    assertEquals(100, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(100, SOURCE_COLLECTION);
 
     // Restart the slave node to trigger Replication strategy
     this.restartServer(slaves.get(0));
@@ -78,7 +77,6 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
   @Test
   @ShardsFixed(num = 2)
   public void testPartialReplication() throws Exception {
-    this.clearSourceCollection();
     for (int i = 0; i < 5; i++) {
       List<SolrInputDocument> docs = new ArrayList<>();
       for (int j = i * 20; j < (i * 20) + 20; j++) {
@@ -98,7 +96,7 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
       index(SOURCE_COLLECTION, docs);
     }
 
-    assertEquals(200, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(200, SOURCE_COLLECTION);
 
     // Restart the slave node to trigger Replication strategy
     this.restartServer(slaves.get(0));
@@ -115,7 +113,6 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
   @Test
   @ShardsFixed(num = 2)
   public void testPartialReplicationWithTruncatedTlog() throws Exception {
-    this.clearSourceCollection();
     CloudSolrClient client = createCloudClient(SOURCE_COLLECTION);
     List<CloudJettyRunner> slaves = this.getShardToSlaveJetty(SOURCE_COLLECTION, SHARD1);
 
@@ -136,7 +133,7 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
       client.close();
     }
 
-    assertEquals(200, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(200, SOURCE_COLLECTION);
 
     // Restart the slave node to trigger Replication recovery
     this.restartServer(slaves.get(0));
@@ -154,7 +151,6 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
   @Test
   @ShardsFixed(num = 2)
   public void testPartialReplicationAfterPeerSync() throws Exception {
-    this.clearSourceCollection();
     for (int i = 0; i < 5; i++) {
       List<SolrInputDocument> docs = new ArrayList<>();
       for (int j = i * 10; j < (i * 10) + 10; j++) {
@@ -174,7 +170,7 @@ public class CdcrReplicationHandlerTest extends BaseCdcrDistributedZkTest {
       index(SOURCE_COLLECTION, docs);
     }
 
-    assertEquals(100, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(100, SOURCE_COLLECTION);
 
     // Restart the slave node to trigger PeerSync recovery
     // (the update windows between leader and slave is small enough)

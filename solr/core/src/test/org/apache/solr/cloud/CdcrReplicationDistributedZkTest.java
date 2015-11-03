@@ -45,8 +45,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testDeleteCreateSourceCollection() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
     log.info("Indexing documents");
 
     List<SolrInputDocument> docs = new ArrayList<>();
@@ -56,36 +54,36 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     index(SOURCE_COLLECTION, docs);
     index(TARGET_COLLECTION, docs);
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Restarting leader @ source_collection:shard1");
 
     this.restartServer(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1));
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Clearing source_collection");
 
     this.clearSourceCollection();
 
-    assertEquals(0, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(0, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Restarting leader @ target_collection:shard1");
 
     this.restartServer(shardToLeaderJetty.get(TARGET_COLLECTION).get(SHARD1));
 
-    assertEquals(0, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(0, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Clearing target_collection");
 
     this.clearTargetCollection();
 
-    assertEquals(0, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(0, SOURCE_COLLECTION);
+    assertNumDocs(0, TARGET_COLLECTION);
 
     assertCollectionExpectations(SOURCE_COLLECTION);
     assertCollectionExpectations(TARGET_COLLECTION);
@@ -94,9 +92,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testTargetCollectionNotAvailable() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     // send start action to first shard
     NamedList rsp = invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
     NamedList status = (NamedList) rsp.get(CdcrParams.CdcrAction.STATUS.toLower());
@@ -116,7 +111,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     index(SOURCE_COLLECTION, getDoc(id, "e"));
     index(SOURCE_COLLECTION, getDoc(id, "f"));
 
-    assertEquals(6, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(6, SOURCE_COLLECTION);
 
     // we need to wait until the replicator thread is triggered
     int cnt = 15; // timeout after 15 seconds
@@ -145,9 +140,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testReplicationStartStop() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection(); // this might log a warning to indicate he was not able to delete the collection (collection was deleted in the previous test)
-
     int start = 0;
     List<SolrInputDocument> docs = new ArrayList<>();
     for (; start < 10; start++) {
@@ -155,8 +147,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     }
     index(SOURCE_COLLECTION, docs);
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
+    assertNumDocs(0, TARGET_COLLECTION);
 
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
     this.waitForCdcrStateReplication(SOURCE_COLLECTION);
@@ -166,8 +158,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     commit(TARGET_COLLECTION);
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
     this.waitForCdcrStateReplication(SOURCE_COLLECTION);
@@ -178,8 +170,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     }
     index(SOURCE_COLLECTION, docs);
 
-    assertEquals(110, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(110, SOURCE_COLLECTION);
+    assertNumDocs(10, TARGET_COLLECTION);
 
     // Start again CDCR, the source cluster should reinitialise its log readers
     // with the latest checkpoints
@@ -192,8 +184,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     commit(TARGET_COLLECTION);
 
-    assertEquals(110, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(110, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(110, SOURCE_COLLECTION);
+    assertNumDocs(110, TARGET_COLLECTION);
   }
 
   /**
@@ -202,9 +194,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testReplicationAfterRestart() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     log.info("Starting CDCR");
 
     // send start action to first shard
@@ -222,7 +211,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     log.info("Querying source collection");
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
 
     log.info("Waiting for replication");
 
@@ -232,7 +221,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     log.info("Querying target collection");
 
     commit(TARGET_COLLECTION);
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Restarting shard1");
 
@@ -248,7 +237,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     log.info("Querying source collection");
 
-    assertEquals(110, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(110, SOURCE_COLLECTION);
 
     log.info("Waiting for replication");
 
@@ -258,7 +247,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     log.info("Querying target collection");
 
     commit(TARGET_COLLECTION);
-    assertEquals(110, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(110, TARGET_COLLECTION);
   }
 
   /**
@@ -269,9 +258,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testReplicationAfterLeaderChange() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     log.info("Starting CDCR");
 
     // send start action to first shard
@@ -289,7 +275,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     log.info("Querying source collection");
 
-    assertEquals(10, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(10, SOURCE_COLLECTION);
 
     log.info("Waiting for replication");
 
@@ -299,7 +285,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     log.info("Querying target collection");
 
     commit(TARGET_COLLECTION);
-    assertEquals(10, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(10, TARGET_COLLECTION);
 
     log.info("Restarting target leaders");
 
@@ -332,7 +318,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     log.info("Querying source collection");
 
-    assertEquals(110, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(110, SOURCE_COLLECTION);
 
     log.info("Waiting for replication");
 
@@ -342,7 +328,7 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     log.info("Querying target collection");
 
     commit(TARGET_COLLECTION);
-    assertEquals(110, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(110, TARGET_COLLECTION);
   }
 
   /**
@@ -352,9 +338,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testUpdateLogSynchronisation() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.START);
     this.waitForCdcrStateReplication(SOURCE_COLLECTION);
 
@@ -370,8 +353,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     commit(TARGET_COLLECTION);
 
     // Check that the replication was done properly
-    assertEquals(100, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(100, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(100, SOURCE_COLLECTION);
+    assertNumDocs(100, TARGET_COLLECTION);
 
     // Get the number of tlog files on the replicas (should be equal to the number of documents indexed)
     int nTlogs = getNumberOfTlogFilesOnReplicas(SOURCE_COLLECTION);
@@ -402,9 +385,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testBufferOnNonLeader() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     // buffering is enabled by default, so disable it
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.DISABLEBUFFER);
     this.waitForCdcrStateReplication(SOURCE_COLLECTION);
@@ -432,8 +412,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     commit(TARGET_COLLECTION);
 
     // If the non-leader node were buffering updates, then the replication must be complete
-    assertEquals(200, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(200, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(200, SOURCE_COLLECTION);
+    assertNumDocs(200, TARGET_COLLECTION);
   }
 
   /**
@@ -442,9 +422,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testOps() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     // Index documents
     List<SolrInputDocument> docs = new ArrayList<>();
     for (int i = 0; i < 200; i++) {
@@ -478,9 +455,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testBatchAddsWithDelete() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     // Index 50 documents
     int start = 0;
     List<SolrInputDocument> docs = new ArrayList<>();
@@ -526,8 +500,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     commit(TARGET_COLLECTION);
 
     // If the non-leader node were buffering updates, then the replication must be complete
-    assertEquals(59, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(59, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(59, SOURCE_COLLECTION);
+    assertNumDocs(59, TARGET_COLLECTION);
   }
 
   /**
@@ -547,15 +521,15 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     }
     index(SOURCE_COLLECTION, docs);
 
-    assertEquals(128, getNumDocs(SOURCE_COLLECTION));
+    assertNumDocs(128, SOURCE_COLLECTION);
 
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD1);
     this.waitForReplicationToComplete(SOURCE_COLLECTION, SHARD2);
 
     commit(TARGET_COLLECTION);
 
-    assertEquals(128, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(128, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(128, SOURCE_COLLECTION);
+    assertNumDocs(128, TARGET_COLLECTION);
   }
 
   /**
@@ -564,9 +538,6 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
   @Test
   @ShardsFixed(num = 4)
   public void testResilienceWithDeleteByQueryOnTarget() throws Exception {
-    this.clearSourceCollection();
-    this.clearTargetCollection();
-
     // Index 50 documents
     int start = 0;
     List<SolrInputDocument> docs = new ArrayList<>();
@@ -586,14 +557,14 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
     commit(TARGET_COLLECTION);
 
     // If the non-leader node were buffering updates, then the replication must be complete
-    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(50, SOURCE_COLLECTION);
+    assertNumDocs(50, TARGET_COLLECTION);
 
     deleteByQuery(SOURCE_COLLECTION, "*:*");
     deleteByQuery(TARGET_COLLECTION, "*:*");
 
-    assertEquals(0, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(0, SOURCE_COLLECTION);
+    assertNumDocs(0, TARGET_COLLECTION);
 
     docs.clear();
     for (; start < 100; start++) {
@@ -607,13 +578,13 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     commit(TARGET_COLLECTION);
 
-    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(50, SOURCE_COLLECTION);
+    assertNumDocs(50, TARGET_COLLECTION);
 
     deleteByQuery(TARGET_COLLECTION, "*:*");
 
-    assertEquals(50, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(0, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(50, SOURCE_COLLECTION);
+    assertNumDocs(0, TARGET_COLLECTION);
 
     // Restart CDCR
     this.invokeCdcrAction(shardToLeaderJetty.get(SOURCE_COLLECTION).get(SHARD1), CdcrParams.CdcrAction.STOP);
@@ -633,8 +604,8 @@ public class CdcrReplicationDistributedZkTest extends BaseCdcrDistributedZkTest 
 
     commit(TARGET_COLLECTION);
 
-    assertEquals(100, getNumDocs(SOURCE_COLLECTION));
-    assertEquals(50, getNumDocs(TARGET_COLLECTION));
+    assertNumDocs(100, SOURCE_COLLECTION);
+    assertNumDocs(50, TARGET_COLLECTION);
   }
 
   private int numberOfFiles(String dir) {
